@@ -525,75 +525,163 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
 
 // ── Inventory / volume calculator ───────────────────────────────────────────
 function InventoryModal({ data, enquiry, onClose }) {
-  // qty map keyed by furniture id, seeded from saved inventory
-  const [qty, setQty] = useState(() => {
-    const m = {};
-    (enquiry.inventory || []).forEach(it => { m[it.id] = it.qty; });
-    return m;
+  // Unified line store keyed by slot:
+  //   catalog slot  = `${roomLabel}::${catalogId}`
+  //   custom slot   = `c_<uid>`   (catalogId null)
+  // Each value: { catalogId, room (label), name, cuFt, m3, kg, qty }
+  const [lines, setLines] = useState(() => {
+    const out = {};
+    (enquiry.inventory || []).forEach(it => {
+      if (it.slot) {                       // new format
+        out[it.slot] = { catalogId: it.catalogId ?? null, room: it.room, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg, qty: it.qty };
+      } else {                             // old format → migrate
+        const label = it.room === "Bedroom" ? "Bedroom 1" : it.room;
+        const slot = `${label}::${it.id}`;
+        out[slot] = { catalogId: it.id, room: label, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg, qty: it.qty };
+      }
+    });
+    return out;
   });
+  // initialise bedrooms from existing lines
+  const initialBedrooms = (() => {
+    const set = new Set();
+    (enquiry.inventory || []).forEach(it => {
+      const lbl = it.room || (it.slot ? "" : "");
+      if (lbl && /^Bedroom/.test(lbl)) set.add(lbl);
+      if (!it.slot && it.room === "Bedroom") set.add("Bedroom 1");
+    });
+    const arr = [...set].sort((a, b) => (parseInt(a.replace(/\D/g, "")) || 0) - (parseInt(b.replace(/\D/g, "")) || 0));
+    return arr.length ? arr : ["Bedroom 1"];
+  })();
+  const [beds, setBeds] = useState(initialBedrooms);
   const [search, setSearch] = useState("");
-  const [openRoom, setOpenRoom] = useState(ROOMS[0]);
+  const [openSection, setOpenSection] = useState(ROOMS[0]);
 
-  const inc = (id, d) => setQty(p => {
-    const n = Math.max(0, (p[id] || 0) + d);
-    const next = { ...p }; if (n === 0) delete next[id]; else next[id] = n;
-    return next;
-  });
+  const matches = txt => !search || (txt || "").toLowerCase().includes(search.toLowerCase());
 
-  const inv = useMemo(() => FURNITURE.filter(it => qty[it.id]).map(it => ({ ...it, qty: qty[it.id] })), [qty]);
-  const totals = inventoryTotals(inv);
+  function bump(slot, meta, d) {
+    setLines(p => {
+      const cur = p[slot]?.qty || 0;
+      const n = Math.max(0, cur + d);
+      const next = { ...p };
+      if (n === 0) delete next[slot];
+      else next[slot] = { ...(p[slot] || meta), qty: n };
+      return next;
+    });
+  }
+  function addCustom(label) {
+    const name = (prompt("Item name?") || "").trim();
+    if (!name) return;
+    const cuFt = parseFloat(prompt("Approx volume in cubic feet? (e.g. 20)") || "");
+    if (!cuFt || cuFt <= 0) { alert("Please enter a number for cubic feet."); return; }
+    const kg = parseFloat(prompt("Approx weight in kg? (optional, e.g. 30)") || "") || 0;
+    const slot = "c_" + uid();
+    setLines(p => ({ ...p, [slot]: { catalogId: null, room: label, name, cuFt: Math.round(cuFt * 100) / 100, m3: Math.round(cuFt * 0.0283168 * 1000) / 1000, kg: Math.round(kg), qty: 1 } }));
+    setOpenSection(label);
+  }
+  function addBedroom() {
+    const nums = beds.map(b => parseInt(b.replace(/\D/g, "")) || 0);
+    const next = `Bedroom ${Math.max(0, ...nums) + 1}`;
+    setBeds([...beds, next]);
+    setOpenSection(next);
+  }
+  function removeBedroom(label) {
+    if (!confirm(`Remove ${label} and its items?`)) return;
+    setBeds(b => b.filter(x => x !== label));
+    setLines(p => { const n = { ...p }; Object.keys(n).forEach(s => { if (n[s].room === label) delete n[s]; }); return n; });
+  }
+
+  const totals = inventoryTotals(Object.values(lines).map(v => ({ cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty })));
   const rec = recommendVehicle(totals.cuFt);
 
-  const matches = it => !search || it.name.toLowerCase().includes(search.toLowerCase());
-
   async function save() {
+    const inventory = Object.entries(lines).filter(([, v]) => v.qty > 0)
+      .map(([slot, v]) => ({ slot, catalogId: v.catalogId ?? null, room: v.room, name: v.name, cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty }));
     const rec2 = {
-      ...enquiry,
-      inventory: inv,
+      ...enquiry, inventory,
       volumeCuFt: totals.cuFt, volumeM3: totals.m3, weightKg: totals.kg,
       status: enquiry.status === "New" ? "Surveyed" : enquiry.status,
     };
     await saveAndReload(upsertLocal(data, "enquiries", rec2));
   }
 
+  // Build ordered section list, expanding Bedroom into Bedroom 1..N
+  const sections = [];
+  ROOMS.forEach(room => {
+    if (room === "Bedroom") {
+      beds.forEach(lbl => sections.push({ label: lbl, catalogRoom: "Bedroom", isBedroom: true }));
+      sections.push({ addBedroom: true });
+    } else {
+      sections.push({ label: room, catalogRoom: room });
+    }
+  });
+
+  function Section({ label, catalogRoom, isBedroom }) {
+    const catItems = FURNITURE.filter(it => it.room === catalogRoom && matches(it.name));
+    const customSlots = Object.entries(lines).filter(([, v]) => v.catalogId == null && v.room === label && matches(v.name));
+    if (search && catItems.length === 0 && customSlots.length === 0) return null;
+    const sectionQty = Object.values(lines).filter(v => v.room === label).reduce((s, v) => s + v.qty, 0);
+    const isOpen = search ? true : openSection === label;
+    const Stepper = ({ slot, meta }) => {
+      const q = lines[slot]?.qty || 0;
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => bump(slot, meta, -1)} style={stepBtn(q > 0)}>−</button>
+          <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700, color: q ? "#111827" : "#D1D5DB" }}>{q}</span>
+          <button onClick={() => bump(slot, meta, 1)} style={stepBtn(true)}>+</button>
+        </div>
+      );
+    };
+    return (
+      <div style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
+        <button onClick={() => setOpenSection(isOpen ? null : label)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#111827" }}>
+          <span>{label}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {isBedroom && beds.length > 1 && <span onClick={e => { e.stopPropagation(); removeBedroom(label); }} style={{ color: "#DC2626", fontSize: 13, fontWeight: 600 }}>Remove</span>}
+            {sectionQty > 0 && <span style={{ background: TEAL, color: "#fff", borderRadius: 99, fontSize: 12, padding: "1px 8px", fontWeight: 700 }}>{sectionQty}</span>}
+            <span style={{ color: "#9CA3AF" }}>{isOpen ? "▾" : "▸"}</span>
+          </span>
+        </button>
+        {isOpen && (
+          <div style={{ padding: "4px 0" }}>
+            {catItems.map(it => {
+              const slot = `${label}::${it.id}`;
+              return (
+                <div key={slot} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{it.name}</div>
+                    <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg</div>
+                  </div>
+                  <Stepper slot={slot} meta={{ catalogId: it.id, room: label, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg }} />
+                </div>
+              );
+            })}
+            {customSlots.map(([slot, v]) => (
+              <div key={slot} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{v.name} <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}>· custom</span></div>
+                  <div style={{ fontSize: 11, color: "#9CA3AF" }}>{v.cuFt} cu ft · {v.kg} kg</div>
+                </div>
+                <Stepper slot={slot} meta={v} />
+              </div>
+            ))}
+            <div style={{ padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+              <button onClick={() => addCustom(label)} style={{ background: "transparent", border: "none", color: TEAL, fontWeight: 600, fontSize: 13, cursor: "pointer", padding: 0 }}>+ Add custom item</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Modal title="Survey / Inventory" onClose={onClose}>
       <div style={{ marginBottom: 12 }}><Input value={search} onChange={setSearch} placeholder="🔍 Search items…" /></div>
 
-      {ROOMS.map(room => {
-        const items = FURNITURE.filter(it => it.room === room && matches(it));
-        if (items.length === 0) return null;
-        const roomQty = items.reduce((s, it) => s + (qty[it.id] || 0), 0);
-        const isOpen = search ? true : openRoom === room;
-        return (
-          <div key={room} style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
-            <button onClick={() => setOpenRoom(isOpen ? null : room)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#111827" }}>
-              <span>{room}</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {roomQty > 0 && <span style={{ background: TEAL, color: "#fff", borderRadius: 99, fontSize: 12, padding: "1px 8px", fontWeight: 700 }}>{roomQty}</span>}
-                <span style={{ color: "#9CA3AF" }}>{isOpen ? "▾" : "▸"}</span>
-              </span>
-            </button>
-            {isOpen && (
-              <div style={{ padding: "4px 0" }}>
-                {items.map(it => (
-                  <div key={it.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{it.name}</div>
-                      <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg</div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <button onClick={() => inc(it.id, -1)} style={stepBtn(qty[it.id] > 0)}>−</button>
-                      <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700, color: qty[it.id] ? "#111827" : "#D1D5DB" }}>{qty[it.id] || 0}</span>
-                      <button onClick={() => inc(it.id, 1)} style={stepBtn(true)}>+</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {sections.map((s, i) => s.addBedroom
+        ? (!search && <button key="addbed" onClick={addBedroom} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another bedroom</button>)
+        : <Section key={s.label} {...s} />
+      )}
 
       {/* sticky totals */}
       <div style={{ position: "sticky", bottom: 0, background: "#fff", paddingTop: 12, marginTop: 8, borderTop: "2px solid #F3F4F6" }}>
