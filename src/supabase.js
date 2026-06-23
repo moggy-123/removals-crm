@@ -2,8 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 
 // ⚠️ PASTE YOUR OWN NEW SUPABASE PROJECT VALUES HERE (see README, step 1).
 // Use a NEW project — do NOT reuse the Windscreen one, or the data will mix.
-const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
-const SUPABASE_KEY = "YOUR-PUBLISHABLE-ANON-KEY";
+NEXT_PUBLIC_SUPABASE_URL=https://vpcygvdjfgiwlsdyxhzs.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_I1QRmMpcFyorPOp7fG_RmQ_sLcPyu1P
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
