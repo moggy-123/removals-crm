@@ -1272,6 +1272,9 @@ function JobDetail({ data, id, setView }) {
     SAVING_IN_PROGRESS = false; setView({ screen: "jobs" }); window.location.reload();
   }
   const balance = (Number(f.price) || 0) - (Number(f.deposit) || 0);
+  const sameDayJobs = (data.jobs || []).filter(x => x.id !== j.id && f.moveDate && x.moveDate === f.moveDate);
+  const bookedVehicleIds = new Set(sameDayJobs.map(x => x.vehicleId).filter(Boolean));
+  const bookedCrew = new Set(sameDayJobs.flatMap(x => x.crew || []));
   return (
     <div>
       <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "jobs" })}><Icon name="back" size={14} /> Back</Btn>
@@ -1300,23 +1303,28 @@ function JobDetail({ data, id, setView }) {
         <div style={{ flex: 1 }}><Field label="Move date"><Input type="date" value={f.moveDate} onChange={v => set("moveDate", v)} /></Field></div>
         <div style={{ width: 130 }}><Field label="Start time"><Input type="time" value={f.startTime} onChange={v => set("startTime", v)} /></Field></div>
       </div>
-      <Field label="Vehicle">
+      <Field label="Vehicle" hint={f.moveDate ? "Vehicles already out on this date are greyed out" : undefined}>
         {(data.vehicles || []).length === 0
           ? <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>No vehicles yet — add them under <b>Company</b>.</div>
           : <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={f.vehicleId} onChange={e => pickVehicle(e.target.value)}>
               <option value="">— Select vehicle —</option>
-              {(data.vehicles || []).map(v => <option key={v.id} value={v.id}>{v.name}{v.reg ? ` (${v.reg})` : ""}</option>)}
+              {(data.vehicles || []).map(v => {
+                const taken = bookedVehicleIds.has(v.id);
+                return <option key={v.id} value={v.id} disabled={taken}>{v.name}{v.reg ? ` (${v.reg})` : ""}{taken ? " — booked that day" : ""}</option>;
+              })}
             </select>}
       </Field>
-      <Field label="Crew">
+      <Field label="Crew" hint={f.moveDate ? "Crew already booked on this date can't be picked" : undefined}>
         {(data.staff || []).filter(s => s.active !== false).length === 0
           ? <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>No staff yet — add them under <b>Company</b>.</div>
           : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {(data.staff || []).filter(s => s.active !== false).map(s => {
                 const on = f.crew.includes(s.name);
+                const taken = !on && bookedCrew.has(s.name);
                 return (
-                  <button key={s.id} onClick={() => toggleCrew(s.name)} style={{ border: on ? `1.5px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : "#fff", color: on ? TEAL_D : "#43534F", borderRadius: 99, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    {on && <Icon name="check" size={13} color={TEAL} />}{s.name}
+                  <button key={s.id} onClick={() => !taken && toggleCrew(s.name)} disabled={taken} title={taken ? "Already booked on another move that day" : ""}
+                    style={{ border: on ? `1.5px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : taken ? "#F2F5F4" : "#fff", color: on ? TEAL_D : taken ? "#B7C3C0" : "#43534F", borderRadius: 99, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: taken ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, textDecoration: taken ? "line-through" : "none" }}>
+                    {on && <Icon name="check" size={13} color={TEAL} />}{s.name}{taken ? " · booked" : ""}
                   </button>
                 );
               })}
@@ -1374,30 +1382,24 @@ function CalendarView({ data, setView }) {
   else if (mode==="week") { const s=startOfWeek(anchor), e=addDays(s,6); rangeLabel = `${s.getDate()} ${CAL_MON[s.getMonth()].slice(0,3)} – ${e.getDate()} ${CAL_MON[e.getMonth()].slice(0,3)}`; }
   else rangeLabel = `${CAL_DOW[(anchor.getDay()+6)%7]} ${anchor.getDate()} ${CAL_MON[anchor.getMonth()]}`;
 
-  const HOURS = []; for (let h=7; h<19; h++) HOURS.push(h);
-  const HPX = 50;
-
-  function TimeBlock({ j, showRoute }) {
-    const s = parseTime(j.startTime); const start = s==null ? 9 : s; const dur = 3;
-    const top = Math.max(0,(start-7))*HPX; const height = Math.max(dur*HPX-4, 34);
-    return (
-      <div onClick={() => setView({ screen:"jobDetail", id:j.id })}
-        style={{ position:"absolute", left:4, right:4, top, height, background:colorOf(j), borderRadius:9, padding:"5px 8px", color:"#fff", overflow:"hidden", cursor:"pointer", boxShadow:"0 3px 8px rgba(0,0,0,.14)" }}>
-        <div style={{ fontSize:10.5, fontWeight:700, opacity:.9 }}>{j.startTime || "—"}</div>
-        <div style={{ fontSize:12, fontWeight:800, letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</div>
-        {showRoute && <div style={{ fontSize:10.5, opacity:.92, marginTop:1 }}>{j.fromTown||"—"} → {j.toTown||"—"}{j.vehicle?` · ${j.vehicle}`:""}</div>}
+  const MoveCard = ({ j, big }) => (
+    <div onClick={() => setView({ screen:"jobDetail", id:j.id })}
+      style={{ background:"#fff", border:"1px solid #E9EEED", borderLeft:`4px solid ${colorOf(j)}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
+        <span style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</span>
+        {j.startTime && <span style={{ fontSize: big?12:10.5, fontWeight:700, color:"#6A7B77", flexShrink:0 }}>{j.startTime}</span>}
       </div>
-    );
-  }
-  const Gutter = () => (
-    <div style={{ borderRight:"1px solid #EEF2F1" }}>
-      {HOURS.map(h => <div key={h} style={{ height:HPX, fontSize:10.5, color:"#94A4A0", fontWeight:700, textAlign:"right", padding:"2px 7px 0 0" }}>{fmtHour(h)}</div>)}
-    </div>
-  );
-  const DayCol = ({ d, last }) => (
-    <div style={{ position:"relative", borderRight: last?"none":"1px solid #EEF2F1" }}>
-      {HOURS.map(h => <div key={h} style={{ height:HPX, borderBottom:"1px solid #F4F7F6" }} />)}
-      {jobsOn(d).map(j => <TimeBlock key={j.id} j={j} showRoute={mode==="day"} />)}
+      <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:2, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+        {j.fromTown || "—"} → {j.toTown || "—"}
+      </div>
+      {big && (
+        <div style={{ fontSize:12, color:"#41514E", marginTop:6, display:"flex", flexWrap:"wrap", gap:"2px 10px" }}>
+          <span><b style={{ color:colorOf(j) }}>●</b> {j.vehicle || "No vehicle"}</span>
+          {(j.crew||[]).length>0 && <span>· {j.crew.join(", ")}</span>}
+          <StatusBadge status={j.status} />
+        </div>
+      )}
+      {!big && j.vehicle && <div style={{ fontSize:10.5, color:"#94A4A0", marginTop:1, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{j.vehicle}</div>}
     </div>
   );
 
@@ -1461,39 +1463,41 @@ function CalendarView({ data, setView }) {
         const start = startOfWeek(anchor);
         const days = []; for (let i=0;i<7;i++) days.push(addDays(start,i));
         return (
-          <div style={{ overflowX:"auto" }}>
-            <div style={{ minWidth:680, border:"1px solid #E9EEED", borderRadius:14, overflow:"hidden", background:"#fff" }}>
-              <div style={{ display:"grid", gridTemplateColumns:"52px repeat(7,1fr)" }}>
-                <div style={{ background:"#F4F7F6", borderBottom:"1px solid #E9EEED", borderRight:"1px solid #EEF2F1" }} />
-                {days.map((d,i) => (
-                  <div key={i} style={{ background: sameDay(d,today)?"#FFF7E8":"#F4F7F6", borderBottom:"1px solid #E9EEED", borderRight: i===6?"none":"1px solid #EEF2F1", padding:"7px 4px", textAlign:"center", fontSize:11, fontWeight:800, color:"#94A4A0" }}>
-                    {CAL_DOW[i]}<span style={{ display:"block", fontSize:15, fontWeight:800, color: sameDay(d,today)?AMBER:"#2c3c38" }}>{d.getDate()}</span>
+          <div style={{ overflowX:"auto", paddingBottom:6 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7, minmax(120px,1fr))", gap:8, minWidth:860 }}>
+              {days.map((d,i) => {
+                const evs = jobsOn(d); const isToday = sameDay(d,today);
+                return (
+                  <div key={i} style={{ background:"#fff", border:`1px solid ${isToday?"#FBD9A0":"#E9EEED"}`, borderRadius:12, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+                    <div style={{ background: isToday?"#FFF7E8":"#F4F7F6", borderBottom:"1px solid #E9EEED", padding:"7px 6px", textAlign:"center" }}>
+                      <div style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textTransform:"uppercase" }}>{CAL_DOW[i]}</div>
+                      <div style={{ fontSize:16, fontWeight:800, color: isToday?AMBER:"#2c3c38" }}>{d.getDate()}</div>
+                    </div>
+                    <div style={{ padding:7, display:"flex", flexDirection:"column", gap:6, minHeight:90 }}>
+                      {evs.map(j => <MoveCard key={j.id} j={j} />)}
+                    </div>
                   </div>
-                ))}
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"52px repeat(7,1fr)" }}>
-                <Gutter />
-                {days.map((d,i) => <DayCol key={i} d={d} last={i===6} />)}
-              </div>
+                );
+              })}
             </div>
           </div>
         );
       })()}
 
-      {mode==="day" && (
-        <div style={{ border:"1px solid #E9EEED", borderRadius:14, overflow:"hidden", background:"#fff" }}>
-          <div style={{ display:"grid", gridTemplateColumns:"60px 1fr" }}>
-            <div style={{ background:"#F4F7F6", borderBottom:"1px solid #E9EEED", borderRight:"1px solid #EEF2F1" }} />
-            <div style={{ background: sameDay(anchor,today)?"#FFF7E8":"#F4F7F6", borderBottom:"1px solid #E9EEED", padding:"8px 12px", fontSize:13, fontWeight:800, color:"#2c3c38" }}>
-              {jobsOn(anchor).length} move{jobsOn(anchor).length!==1?"s":""}
+      {mode==="day" && (() => {
+        const evs = jobsOn(anchor); const isToday = sameDay(anchor,today);
+        return (
+          <div>
+            <div style={{ background: isToday?"#FFF7E8":"#F4F7F6", border:"1px solid #E9EEED", borderRadius:12, padding:"10px 14px", marginBottom:12, fontSize:13, fontWeight:800, color:"#2c3c38" }}>
+              {evs.length} move{evs.length!==1?"s":""} · {CAL_DOW[(anchor.getDay()+6)%7]} {anchor.getDate()} {CAL_MON[anchor.getMonth()]}
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {evs.map(j => <MoveCard key={j.id} j={j} big />)}
+              {evs.length===0 && <Empty icon="truck" text="No moves this day" />}
             </div>
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"60px 1fr" }}>
-            <Gutter />
-            <DayCol d={anchor} last />
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {jobs.length===0 && <div style={{ marginTop:16 }}><Empty icon="truck" text="No moves booked yet" /></div>}
     </div>
