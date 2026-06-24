@@ -1267,23 +1267,22 @@ function JobDetail({ data, id, setView }) {
   const customer = (data.customers || []).find(c => c.id === j?.customerId);
   if (!j) return <div style={{ padding: 20 }}>Move not found.</div>;
   const [f, setF] = useState({
-    moveDate: j.moveDate || "", startTime: j.startTime || "", vehicle: j.vehicle || "", vehicleId: j.vehicleId || "",
+    moveDate: j.moveDate || "", startTime: j.startTime || "",
+    vehicleIds: Array.isArray(j.vehicleIds) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []),
     crew: Array.isArray(j.crew) ? j.crew : [], price: j.price || 0, deposit: j.deposit || 0,
     depositPaid: j.depositPaid || false, balancePaid: j.balancePaid || false,
     status: j.status || "Booked", notes: j.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const toggleCrew = name => setF(p => ({ ...p, crew: p.crew.includes(name) ? p.crew.filter(n => n !== name) : [...p.crew, name] }));
-  function pickVehicle(vid) {
-    const veh = (data.vehicles || []).find(v => v.id === vid);
-    setF(p => ({ ...p, vehicleId: vid, vehicle: veh ? veh.name : "" }));
-  }
+  const toggleVehicle = vid => setF(p => ({ ...p, vehicleIds: p.vehicleIds.includes(vid) ? p.vehicleIds.filter(x => x !== vid) : [...p.vehicleIds, vid] }));
+  const vehLabel = vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; };
   async function save() {
-    const rec = { ...j, ...f, crew: f.crew, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0 };
+    const rec = { ...j, ...f, crew: f.crew, vehicle: f.vehicleIds.map(vehLabel).filter(Boolean).join(", "), price: Number(f.price) || 0, deposit: Number(f.deposit) || 0 };
     await saveAndReload(upsertLocal(data, "jobs", rec));
   }
   async function completeMove() {
-    const rec = { ...j, ...f, crew: f.crew, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, status: "Completed", balancePaid: true };
+    const rec = { ...j, ...f, crew: f.crew, vehicle: f.vehicleIds.map(vehLabel).filter(Boolean).join(", "), price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, status: "Completed", balancePaid: true };
     await saveAndReload(upsertLocal(data, "jobs", rec));
   }
   async function del() {
@@ -1297,7 +1296,7 @@ function JobDetail({ data, id, setView }) {
   }
   const balance = (Number(f.price) || 0) - (Number(f.deposit) || 0);
   const sameDayJobs = (data.jobs || []).filter(x => x.id !== j.id && f.moveDate && x.moveDate === f.moveDate);
-  const bookedVehicleIds = new Set(sameDayJobs.map(x => x.vehicleId).filter(Boolean));
+  const bookedVehicleIds = new Set(sameDayJobs.flatMap(x => (x.vehicleIds && x.vehicleIds.length) ? x.vehicleIds : (x.vehicleId ? [x.vehicleId] : [])));
   const bookedCrew = new Set(sameDayJobs.flatMap(x => x.crew || []));
   return (
     <div>
@@ -1327,16 +1326,21 @@ function JobDetail({ data, id, setView }) {
         <div style={{ flex: 1 }}><Field label="Move date"><Input type="date" value={f.moveDate} onChange={v => set("moveDate", v)} /></Field></div>
         <div style={{ width: 130 }}><Field label="Start time"><Input type="time" value={f.startTime} onChange={v => set("startTime", v)} /></Field></div>
       </div>
-      <Field label="Vehicle" hint={f.moveDate ? "Vehicles already out on this date are greyed out" : undefined}>
+      <Field label="Vehicles" hint={f.moveDate ? "Tap to select one or more. Vehicles already out that day are greyed." : "Tap to select one or more"}>
         {(data.vehicles || []).length === 0
           ? <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>No vehicles yet — add them under <b>Company</b>.</div>
-          : <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={f.vehicleId} onChange={e => pickVehicle(e.target.value)}>
-              <option value="">— Select vehicle —</option>
+          : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {(data.vehicles || []).map(v => {
-                const taken = bookedVehicleIds.has(v.id);
-                return <option key={v.id} value={v.id} disabled={taken}>{v.name}{v.reg ? ` (${v.reg})` : ""}{taken ? " — booked that day" : ""}</option>;
+                const on = f.vehicleIds.includes(v.id);
+                const taken = !on && bookedVehicleIds.has(v.id);
+                return (
+                  <button key={v.id} onClick={() => !taken && toggleVehicle(v.id)} disabled={taken} title={taken ? "Already out on another move that day" : ""}
+                    style={{ border: on ? `1.5px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : taken ? "#F2F5F4" : "#fff", color: on ? TEAL_D : taken ? "#B7C3C0" : "#43534F", borderRadius: 99, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: taken ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, textDecoration: taken ? "line-through" : "none" }}>
+                    {on && <Icon name="check" size={13} color={TEAL} />}{v.name}{taken ? " · booked" : ""}
+                  </button>
+                );
               })}
-            </select>}
+            </div>}
       </Field>
       <Field label="Crew" hint={f.moveDate ? "Crew already booked on this date can't be picked" : undefined}>
         {(data.staff || []).filter(s => s.active !== false).length === 0
@@ -1405,7 +1409,10 @@ function CalendarView({ data, setView }) {
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
   const jobsOn = d => jobs.filter(j => j.moveDate === isoOf(d)).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||""));
-  const colorOf = j => vehicleColor(data, j.vehicleId);
+  const colorOf = j => (STATUS_META[j.status]?.color) || TEAL;
+  const vehIdsOf = j => (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []);
+  const bookedVehiclesOn = d => new Set(jobsOn(d).flatMap(vehIdsOf));
+  const bookedStaffOn = d => new Set(jobsOn(d).flatMap(x => x.crew || []));
 
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
@@ -1435,6 +1442,33 @@ function CalendarView({ data, setView }) {
     </div>
   );
 
+  const availChip = (label, booked) => (
+    <span style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:99, fontSize:12.5, fontWeight:700,
+      background: booked ? "#F2F5F4" : "#E7F2F0", color: booked ? "#B7C3C0" : TEAL_D,
+      textDecoration: booked ? "line-through" : "none", border: booked ? "1px solid #EAEFEE" : "1px solid #CDE7E2" }}>
+      <span style={{ width:8, height:8, borderRadius:99, background: booked ? "#C4D0CD" : "#22C55E" }} />{label}{booked ? " · booked" : ""}
+    </span>
+  );
+  const AvailPanel = ({ d }) => {
+    const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
+    const vehicles = data.vehicles || [];
+    const staffActive = (data.staff || []).filter(s => s.active !== false);
+    if (!vehicles.length && !staffActive.length) return null;
+    return (
+      <div style={{ background:"#fff", border:"1px solid #E9EEED", borderRadius:14, padding:"14px 16px", marginBottom:14, boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
+        <div style={{ fontSize:11.5, fontWeight:800, textTransform:"uppercase", letterSpacing:".06em", color:"#94A4A0", marginBottom:10 }}>Availability</div>
+        {vehicles.length>0 && <>
+          <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Vehicles</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom: staffActive.length?12:0 }}>{vehicles.map(v => <span key={v.id}>{availChip(v.name, bv.has(v.id))}</span>)}</div>
+        </>}
+        {staffActive.length>0 && <>
+          <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Staff</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>{staffActive.map(s => <span key={s.id}>{availChip(s.name, bs.has(s.name))}</span>)}</div>
+        </>}
+      </div>
+    );
+  };
+
   return (
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:14 }}>
@@ -1453,18 +1487,8 @@ function CalendarView({ data, setView }) {
         </div>
       </div>
 
-      {(data.vehicles || []).length > 0 && (
-        <div style={{ display:"flex", flexWrap:"wrap", gap:14, alignItems:"center", marginBottom:14 }}>
-          {(data.vehicles || []).map((v,i) => (
-            <div key={v.id} style={{ display:"flex", alignItems:"center", gap:6, fontSize:11.5, color:"#6A7B77", fontWeight:700 }}>
-              <span style={{ width:11, height:11, borderRadius:4, background:VEHICLE_COLORS[i % VEHICLE_COLORS.length] }} />{v.name}
-            </div>
-          ))}
-          <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11.5, color:"#94A4A0", fontWeight:700 }}>
-            <span style={{ width:11, height:11, borderRadius:4, background:"#94A4A0" }} />Unassigned
-          </div>
-        </div>
-      )}
+      {/* Availability chips component (used in Day + Week) */}
+
 
       {mode==="month" && (() => {
         const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
@@ -1508,6 +1532,12 @@ function CalendarView({ data, setView }) {
                     <div style={{ padding:7, display:"flex", flexDirection:"column", gap:6, minHeight:90 }}>
                       {evs.map(j => <MoveCard key={j.id} j={j} />)}
                     </div>
+                    {((data.vehicles||[]).length>0 || (data.staff||[]).filter(s=>s.active!==false).length>0) && (() => {
+                      const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
+                      const freeV = (data.vehicles||[]).filter(v=>!bv.has(v.id)).length;
+                      const freeS = (data.staff||[]).filter(s=>s.active!==false && !bs.has(s.name)).length;
+                      return <div style={{ borderTop:"1px solid #F2F5F4", padding:"6px 7px", fontSize:10.5, fontWeight:700, color: (freeV||freeS)?"#3f817a":"#C4D0CD", textAlign:"center" }}>{freeV} van{freeV!==1?"s":""} · {freeS} crew free</div>;
+                    })()}
                   </div>
                 );
               })}
@@ -1523,6 +1553,7 @@ function CalendarView({ data, setView }) {
             <div style={{ background: isToday?"#FFF7E8":"#F4F7F6", border:"1px solid #E9EEED", borderRadius:12, padding:"10px 14px", marginBottom:12, fontSize:13, fontWeight:800, color:"#2c3c38" }}>
               {evs.length} move{evs.length!==1?"s":""} · {CAL_DOW[(anchor.getDay()+6)%7]} {anchor.getDate()} {CAL_MON[anchor.getMonth()]}
             </div>
+            <AvailPanel d={anchor} />
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {evs.map(j => <MoveCard key={j.id} j={j} big />)}
               {evs.length===0 && <Empty icon="truck" text="No moves this day" />}
