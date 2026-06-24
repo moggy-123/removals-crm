@@ -5,8 +5,8 @@ import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
 const DB_KEY = "removals_data";
 const SIG_KEY = "removals_sigs";
 const TOMB_KEY = "removals_deleted";
-const TABLES = ["customers", "enquiries", "jobs"];
-const EMPTY = { customers: [], enquiries: [], jobs: [] };
+const TABLES = ["customers", "enquiries", "jobs", "vehicles", "staff"];
+const EMPTY = { customers: [], enquiries: [], jobs: [], vehicles: [], staff: [] };
 
 // Brand
 const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
@@ -84,6 +84,8 @@ function stampData(data) {
     customers: stamp(data.customers, prev.customers),
     enquiries: stamp(data.enquiries, prev.enquiries),
     jobs: stamp(data.jobs, prev.jobs),
+    vehicles: stamp(data.vehicles, prev.vehicles),
+    staff: stamp(data.staff, prev.staff),
   };
 }
 
@@ -196,6 +198,7 @@ const Icon = ({ name, size = 18, color = "currentColor" }) => {
     trash: "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16",
     edit: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
     quote: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+    company: "M3 21h18M5 21V7l8-4v18M19 21V11l-6-4M9 9v.01M9 12v.01M9 15v.01M9 18v.01",
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -1109,19 +1112,154 @@ function JobsList({ data, setView }) {
   );
 }
 
+// ── Vehicles & Staff (Company) ──────────────────────────────────────────────
+const VEHICLE_COLORS = ["#0E7C73", "#4F46E5", "#D97706", "#DB2777", "#2563EB", "#16A34A", "#7C3AED", "#EA580C"];
+function vehicleColor(data, vehicleId) {
+  const list = data.vehicles || [];
+  const idx = list.findIndex(v => v.id === vehicleId);
+  return idx >= 0 ? VEHICLE_COLORS[idx % VEHICLE_COLORS.length] : "#94A4A0";
+}
+const VEHICLE_TYPES = ["Small Van (SWB)", "Medium Van (LWB)", "Luton Van", "7.5 Tonne Lorry", "18 Tonne Lorry", "Other"];
+const STAFF_ROLES = ["Driver", "Porter", "Packer", "Driver / Porter", "Owner", "Office"];
+
+function CompanyView({ data, setView }) {
+  const [vForm, setVForm] = useState(null);   // null | {} | record
+  const [sForm, setSForm] = useState(null);
+  const vehicles = [...(data.vehicles || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const staff = [...(data.staff || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const truckIcon = <Icon name="truck" size={20} color="#fff" />;
+
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
+        <Card style={{ marginBottom: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <h4 style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Vehicles</h4>
+            <Btn size="sm" onClick={() => setVForm({})}><Icon name="plus" size={14} /> Add</Btn>
+          </div>
+          {vehicles.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0", padding: "10px 0" }}>No vehicles yet.</div>}
+          {vehicles.map((v, i) => (
+            <div key={v.id} onClick={() => setVForm(v)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid #F2F5F4", cursor: "pointer" }}>
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: VEHICLE_COLORS[i % VEHICLE_COLORS.length], display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{truckIcon}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E" }}>{v.name}</div>
+                <div style={{ fontSize: 12, color: "#6A7B77" }}>{[v.reg, v.vtype, v.capacityCuFt ? `${v.capacityCuFt} cu ft` : ""].filter(Boolean).join(" · ") || "—"}</div>
+              </div>
+            </div>
+          ))}
+        </Card>
+
+        <Card style={{ marginBottom: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <h4 style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Staff</h4>
+            <Btn size="sm" onClick={() => setSForm({})}><Icon name="plus" size={14} /> Add</Btn>
+          </div>
+          {staff.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0", padding: "10px 0" }}>No staff yet.</div>}
+          {staff.map(s => (
+            <div key={s.id} onClick={() => setSForm(s)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid #F2F5F4", cursor: "pointer", opacity: s.active === false ? .5 : 1 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: "#7C8B87", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="customers" size={19} color="#fff" /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E" }}>{s.name}{s.active === false ? " · inactive" : ""}</div>
+                <div style={{ fontSize: 12, color: "#6A7B77" }}>{[s.role, s.phone].filter(Boolean).join(" · ") || "—"}</div>
+              </div>
+            </div>
+          ))}
+        </Card>
+      </div>
+
+      {vForm && <VehicleForm data={data} editVehicle={vForm.id ? vForm : null} onClose={() => setVForm(null)} />}
+      {sForm && <StaffForm data={data} editStaff={sForm.id ? sForm : null} onClose={() => setSForm(null)} />}
+    </div>
+  );
+}
+
+function VehicleForm({ data, onClose, editVehicle }) {
+  const v = editVehicle || {};
+  const [f, setF] = useState({ name: v.name || "", reg: v.reg || "", vtype: v.vtype || "", capacityCuFt: v.capacityCuFt || "" });
+  const set = (k, val) => setF(p => ({ ...p, [k]: val }));
+  async function save() {
+    if (!f.name.trim()) { alert("Give the vehicle a name."); return; }
+    const rec = { id: v.id || uid(), name: f.name.trim(), reg: f.reg, vtype: f.vtype, capacityCuFt: Number(f.capacityCuFt) || 0, createdAt: v.createdAt || new Date().toISOString() };
+    await saveAndReload(upsertLocal(data, "vehicles", rec));
+  }
+  async function del() {
+    if (!confirm("Delete this vehicle?")) return;
+    addTombstone(v.id); SAVING_IN_PROGRESS = true; showSavingOverlay();
+    try { await deleteRecord("vehicles", v.id); } catch {}
+    const d2 = { ...data, vehicles: (data.vehicles || []).filter(x => x.id !== v.id) };
+    localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
+  }
+  return (
+    <Modal title={v.id ? "Edit Vehicle" : "Add Vehicle"} onClose={onClose}>
+      <Field label="Name" required><Input value={f.name} onChange={x => set("name", x)} placeholder="e.g. Luton Van" /></Field>
+      <Field label="Reg / plate"><Input value={f.reg} onChange={x => set("reg", x)} placeholder="e.g. WX19 ABC" /></Field>
+      <Field label="Type"><Select value={f.vtype} onChange={x => set("vtype", x)} options={VEHICLE_TYPES} placeholder="Select…" /></Field>
+      <Field label="Capacity (cu ft)" hint="Roughly how much it holds"><Input type="number" value={f.capacityCuFt} onChange={x => set("capacityCuFt", x)} placeholder="e.g. 600" /></Field>
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        {v.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
+        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
+        <Btn style={{ flex: 2 }} onClick={save}>{v.id ? "Save" : "Add vehicle"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function StaffForm({ data, onClose, editStaff }) {
+  const s = editStaff || {};
+  const [f, setF] = useState({ name: s.name || "", role: s.role || "", phone: s.phone || "", active: s.active !== false });
+  const set = (k, val) => setF(p => ({ ...p, [k]: val }));
+  async function save() {
+    if (!f.name.trim()) { alert("Enter a name."); return; }
+    const rec = { id: s.id || uid(), name: f.name.trim(), role: f.role, phone: f.phone, active: f.active, createdAt: s.createdAt || new Date().toISOString() };
+    await saveAndReload(upsertLocal(data, "staff", rec));
+  }
+  async function del() {
+    if (!confirm("Delete this staff member?")) return;
+    addTombstone(s.id); SAVING_IN_PROGRESS = true; showSavingOverlay();
+    try { await deleteRecord("staff", s.id); } catch {}
+    const d2 = { ...data, staff: (data.staff || []).filter(x => x.id !== s.id) };
+    localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
+  }
+  return (
+    <Modal title={s.id ? "Edit Staff" : "Add Staff"} onClose={onClose}>
+      <Field label="Name" required><Input value={f.name} onChange={x => set("name", x)} /></Field>
+      <Field label="Role"><Select value={f.role} onChange={x => set("role", x)} options={STAFF_ROLES} placeholder="Select…" /></Field>
+      <Field label="Phone"><Input value={f.phone} onChange={x => set("phone", x)} /></Field>
+      <Field label="Active">
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
+          <input type="checkbox" checked={f.active} onChange={e => set("active", e.target.checked)} style={{ width: 18, height: 18 }} /> Currently working (show when assigning crew)
+        </label>
+      </Field>
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        {s.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
+        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
+        <Btn style={{ flex: 2 }} onClick={save}>{s.id ? "Save" : "Add staff"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function JobDetail({ data, id, setView }) {
   const j = (data.jobs || []).find(x => x.id === id);
   const customer = (data.customers || []).find(c => c.id === j?.customerId);
   if (!j) return <div style={{ padding: 20 }}>Move not found.</div>;
   const [f, setF] = useState({
-    moveDate: j.moveDate || "", startTime: j.startTime || "", vehicle: j.vehicle || "",
-    crew: (j.crew || []).join(", "), price: j.price || 0, deposit: j.deposit || 0,
+    moveDate: j.moveDate || "", startTime: j.startTime || "", vehicle: j.vehicle || "", vehicleId: j.vehicleId || "",
+    crew: Array.isArray(j.crew) ? j.crew : [], price: j.price || 0, deposit: j.deposit || 0,
     depositPaid: j.depositPaid || false, balancePaid: j.balancePaid || false,
     status: j.status || "Booked", notes: j.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const toggleCrew = name => setF(p => ({ ...p, crew: p.crew.includes(name) ? p.crew.filter(n => n !== name) : [...p.crew, name] }));
+  function pickVehicle(vid) {
+    const veh = (data.vehicles || []).find(v => v.id === vid);
+    setF(p => ({ ...p, vehicleId: vid, vehicle: veh ? veh.name : "" }));
+  }
   async function save() {
-    const rec = { ...j, ...f, crew: f.crew.split(",").map(s => s.trim()).filter(Boolean), price: Number(f.price) || 0, deposit: Number(f.deposit) || 0 };
+    const rec = { ...j, ...f, crew: f.crew, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0 };
     await saveAndReload(upsertLocal(data, "jobs", rec));
   }
   async function del() {
@@ -1162,8 +1300,28 @@ function JobDetail({ data, id, setView }) {
         <div style={{ flex: 1 }}><Field label="Move date"><Input type="date" value={f.moveDate} onChange={v => set("moveDate", v)} /></Field></div>
         <div style={{ width: 130 }}><Field label="Start time"><Input type="time" value={f.startTime} onChange={v => set("startTime", v)} /></Field></div>
       </div>
-      <Field label="Vehicle"><Input value={f.vehicle} onChange={v => set("vehicle", v)} /></Field>
-      <Field label="Crew" hint="Comma-separated names"><Input value={f.crew} onChange={v => set("crew", v)} placeholder="e.g. Dave, Sam" /></Field>
+      <Field label="Vehicle">
+        {(data.vehicles || []).length === 0
+          ? <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>No vehicles yet — add them under <b>Company</b>.</div>
+          : <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={f.vehicleId} onChange={e => pickVehicle(e.target.value)}>
+              <option value="">— Select vehicle —</option>
+              {(data.vehicles || []).map(v => <option key={v.id} value={v.id}>{v.name}{v.reg ? ` (${v.reg})` : ""}</option>)}
+            </select>}
+      </Field>
+      <Field label="Crew">
+        {(data.staff || []).filter(s => s.active !== false).length === 0
+          ? <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>No staff yet — add them under <b>Company</b>.</div>
+          : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {(data.staff || []).filter(s => s.active !== false).map(s => {
+                const on = f.crew.includes(s.name);
+                return (
+                  <button key={s.id} onClick={() => toggleCrew(s.name)} style={{ border: on ? `1.5px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : "#fff", color: on ? TEAL_D : "#43534F", borderRadius: 99, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    {on && <Icon name="check" size={13} color={TEAL} />}{s.name}
+                  </button>
+                );
+              })}
+            </div>}
+      </Field>
       <Field label="Status"><Select value={f.status} onChange={v => set("status", v)} options={JOB_STATUSES} /></Field>
 
       <SectionTitle>Payment</SectionTitle>
@@ -1207,7 +1365,7 @@ function CalendarView({ data, setView }) {
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
   const jobsOn = d => jobs.filter(j => j.moveDate === isoOf(d)).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||""));
-  const colorOf = j => (STATUS_META[j.status]?.color) || TEAL;
+  const colorOf = j => vehicleColor(data, j.vehicleId);
 
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
@@ -1260,6 +1418,19 @@ function CalendarView({ data, setView }) {
           ))}
         </div>
       </div>
+
+      {(data.vehicles || []).length > 0 && (
+        <div style={{ display:"flex", flexWrap:"wrap", gap:14, alignItems:"center", marginBottom:14 }}>
+          {(data.vehicles || []).map((v,i) => (
+            <div key={v.id} style={{ display:"flex", alignItems:"center", gap:6, fontSize:11.5, color:"#6A7B77", fontWeight:700 }}>
+              <span style={{ width:11, height:11, borderRadius:4, background:VEHICLE_COLORS[i % VEHICLE_COLORS.length] }} />{v.name}
+            </div>
+          ))}
+          <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11.5, color:"#94A4A0", fontWeight:700 }}>
+            <span style={{ width:11, height:11, borderRadius:4, background:"#94A4A0" }} />Unassigned
+          </div>
+        </div>
+      )}
 
       {mode==="month" && (() => {
         const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
@@ -1362,6 +1533,7 @@ function ResponsiveStyles({ device }) {
   const wideCss = `
     .rm-modal-overlay{align-items:center!important}
     .rm-modal{max-width:560px!important;border-radius:20px!important;margin:0 16px;max-height:88vh!important}
+    .rm-company-grid{grid-template-columns:1fr 1fr!important;align-items:start}
     input,select,textarea{font-size:15px!important}
   `;
   return <style>{common + (wide ? wideCss : phone)}</style>;
@@ -1384,6 +1556,8 @@ function mergeAll(cloud, local) {
     customers: mergeArrays(cloud.customers, local.customers || [], deleted),
     enquiries: mergeArrays(cloud.enquiries, local.enquiries || [], deleted),
     jobs: mergeArrays(cloud.jobs, local.jobs || [], deleted),
+    vehicles: mergeArrays(cloud.vehicles, local.vehicles || [], deleted),
+    staff: mergeArrays(cloud.staff, local.staff || [], deleted),
   };
 }
 
@@ -1470,9 +1644,10 @@ export default function App() {
     { id: "calendar",  icon: "calendar",  label: "Calendar",  phone: "Calendar" },
     { id: "jobs",      icon: "jobs",      label: "Moves",     phone: "Moves" },
     { id: "customers", icon: "customers", label: "Customers", phone: "Customers" },
+    { id: "company",   icon: "company",   label: "Company",   phone: "Company" },
   ];
   const sectionKey = sectionFor(view.screen);
-  const activeTab = view.screen === "dashboard" ? "dashboard" : view.screen === "calendar" ? "calendar" : (sectionKey || "dashboard");
+  const activeTab = ["dashboard", "calendar", "company"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
 
   const SyncDot = () => (
     <span title={syncStatus} style={{ width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
@@ -1483,6 +1658,7 @@ export default function App() {
   function fullScreen() {
     if (view.screen === "dashboard") return <Dashboard data={data} setView={setView} />;
     if (view.screen === "calendar") return <CalendarView data={data} setView={setView} />;
+    if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
     return null;
   }
 
