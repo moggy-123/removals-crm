@@ -300,10 +300,25 @@ function Dashboard({ data, setView }) {
   const wonThisMonth = thisMonthEnq.filter(e => e.status === "Won").length;
   const convRate = thisMonthEnq.length ? Math.round((wonThisMonth / thisMonthEnq.length) * 100) : 0;
   const upcoming = jobs
-    .filter(j => j.status !== "Completed" && j.moveDate)
+    .filter(j => j.status !== "Completed" && j.moveDate && j.moveDate >= todayISO())
     .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""))
-    .slice(0, 5);
-  const dueFollowUps = enquiries.filter(e => e.followUpDate && e.followUpDate <= todayISO() && !["Won", "Lost"].includes(e.status));
+    .slice(0, 6);
+  const followUps = enquiries
+    .filter(e => e.followUpDate && !["Won", "Lost"].includes(e.status))
+    .sort((a, b) => (a.followUpDate || "").localeCompare(b.followUpDate || ""))
+    .slice(0, 6);
+  // Availability today
+  const vehIdsOf = j => (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []);
+  const todayJobs = jobs.filter(j => j.moveDate === todayISO());
+  const bookedVehToday = new Set(todayJobs.flatMap(vehIdsOf));
+  const bookedStaffToday = new Set(todayJobs.flatMap(j => j.crew || []));
+  const vehicles = data.vehicles || [];
+  const staffActive = (data.staff || []).filter(s => s.active !== false);
+  const availChip = (label, booked) => (
+    <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 11px", borderRadius: 99, fontSize: 12.5, fontWeight: 700, background: booked ? "#F2F5F4" : "#E7F2F0", color: booked ? "#B7C3C0" : TEAL_D, textDecoration: booked ? "line-through" : "none", border: booked ? "1px solid #EAEFEE" : "1px solid #CDE7E2" }}>
+      <span style={{ width: 8, height: 8, borderRadius: 99, background: booked ? "#C4D0CD" : "#22C55E" }} />{label}
+    </span>
+  );
 
   const Stat = ({ label, value, sub, color, onClick }) => (
     <div onClick={onClick} style={{ flex: 1, background: "#fff", borderRadius: 12, padding: "14px 12px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", cursor: onClick ? "pointer" : "default", border: "1px solid #F3F4F6", minWidth: 0 }}>
@@ -328,31 +343,53 @@ function Dashboard({ data, setView }) {
         <Icon name="plus" size={16} /> New Enquiry
       </Btn>
 
-      {dueFollowUps.length > 0 && (
+      {(vehicles.length > 0 || staffActive.length > 0) && (
         <>
-          <SectionTitle>Follow-ups due</SectionTitle>
-          {dueFollowUps.map(e => (
-            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, e.customerId)}</div>
-                  <div style={{ fontSize: 13, color: "#6B7280" }}>{e.followUpNote || "Follow up"}</div>
+          <SectionTitle>Available today</SectionTitle>
+          <Card>
+            {vehicles.length > 0 && <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 7 }}>Vehicles</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: staffActive.length ? 13 : 0 }}>{vehicles.map(v => availChip(v.name, bookedVehToday.has(v.id)))}</div>
+            </>}
+            {staffActive.length > 0 && <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 7 }}>Staff</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>{staffActive.map(s => availChip(s.name, bookedStaffToday.has(s.name)))}</div>
+            </>}
+          </Card>
+        </>
+      )}
+
+      {followUps.length > 0 && (
+        <>
+          <SectionTitle>Follow-ups</SectionTitle>
+          {followUps.map(e => {
+            const overdue = e.followUpDate <= todayISO();
+            return (
+              <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={overdue ? { borderColor: "#FBD9A0", background: "#FFFBF2" } : undefined}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
+                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.followUpNote || "Follow up"}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77" }}>{overdue ? "Due " : ""}{fmtDateShort(e.followUpDate)}</div>
+                    <StatusBadge status={e.status} />
+                  </div>
                 </div>
-                <StatusBadge status={e.status} />
-              </div>
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </>
       )}
 
       <SectionTitle>Upcoming moves</SectionTitle>
-      {upcoming.length === 0 && <Empty icon="truck" text="No moves booked yet" />}
+      {upcoming.length === 0 && <Empty icon="truck" text="No moves coming up" />}
       {upcoming.map(j => (
         <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6B7280" }}>{fmtDate(j.moveDate)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
+              <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
+              <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(j.moveDate)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
             </div>
             <StatusBadge status={j.status} />
           </div>
@@ -444,6 +481,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
   const [newCust, setNewCust] = useState({ name: "", phone: "", email: "" });
   const [f, setF] = useState({
     preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false,
+    surveyDate: e.surveyDate || "",
     fromAddress1: e.fromAddress1 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
     fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
     toAddress1: e.toAddress1 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
@@ -501,6 +539,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
 
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date"><Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} /></Field>
+      <Field label="Survey date" hint="When you'll visit to quote — shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field>
       <Field label="Dates flexible?">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
           <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
@@ -920,6 +959,7 @@ function EnquiryDetail({ data, id, setView }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontWeight: 700, color: "#111827" }}>Survey / Inventory</div>
+            {e.surveyDate && <div style={{ fontSize: 13, color: TEAL_D, fontWeight: 600, marginTop: 2 }}>📅 {fmtDate(e.surveyDate)}</div>}
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
               {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³ · ${e.weightKg} kg` : "Not surveyed yet"}
             </div>
@@ -1409,6 +1449,7 @@ function CalendarView({ data, setView }) {
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
   const jobsOn = d => jobs.filter(j => j.moveDate === isoOf(d)).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||""));
+  const surveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost");
   const colorOf = j => (STATUS_META[j.status]?.color) || TEAL;
   const vehIdsOf = j => (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []);
   const bookedVehiclesOn = d => new Set(jobsOn(d).flatMap(vehIdsOf));
@@ -1442,8 +1483,16 @@ function CalendarView({ data, setView }) {
     </div>
   );
 
-  const availChip = (label, booked) => (
-    <span style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:99, fontSize:12.5, fontWeight:700,
+  const SurveyCard = ({ en, big }) => (
+    <div onClick={() => setView({ screen:"enquiryDetail", id:en.id })}
+      style={{ background:"#FFFBF2", border:"1px solid #FBE3B3", borderLeft:`4px solid ${AMBER}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
+      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:AMBER, textTransform:"uppercase", letterSpacing:".05em" }}>Survey</div>
+      <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, en.customerId)}</div>
+      <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:1, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{en.fromTown || "—"} → {en.toTown || "—"}</div>
+    </div>
+  );
+
+  const availChip = (label, booked) => (    <span style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:99, fontSize:12.5, fontWeight:700,
       background: booked ? "#F2F5F4" : "#E7F2F0", color: booked ? "#B7C3C0" : TEAL_D,
       textDecoration: booked ? "line-through" : "none", border: booked ? "1px solid #EAEFEE" : "1px solid #CDE7E2" }}>
       <span style={{ width:8, height:8, borderRadius:99, background: booked ? "#C4D0CD" : "#22C55E" }} />{label}{booked ? " · booked" : ""}
@@ -1496,12 +1545,14 @@ function CalendarView({ data, setView }) {
         const cells = [];
         for (let i=0;i<42;i++) {
           const d = addDays(start,i); const out = d.getMonth()!==anchor.getMonth();
-          const evs = jobsOn(d);
+          const evs = jobsOn(d); const svs = surveysOn(d);
+          const total = evs.length + svs.length;
           cells.push(
             <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:92, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
               <div style={{ alignSelf:"flex-start", fontSize:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
+              {svs.slice(0,2).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color:"#92591A", background:"#FFF6E6", borderLeft:`3px solid ${AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>📋 {custName(data,en.customerId)}</div>)}
               {evs.slice(0,3).map(j => <div key={j.id} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(j)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data,j.customerId)}</div>)}
-              {evs.length>3 && <div style={{ fontSize:10, color:"#94A4A0", fontWeight:700 }}>+{evs.length-3} more</div>}
+              {total>5 && <div style={{ fontSize:10, color:"#94A4A0", fontWeight:700 }}>+{total-5} more</div>}
             </div>
           );
         }
@@ -1530,6 +1581,7 @@ function CalendarView({ data, setView }) {
                       <div style={{ fontSize:16, fontWeight:800, color: isToday?AMBER:"#2c3c38" }}>{d.getDate()}</div>
                     </div>
                     <div style={{ padding:7, display:"flex", flexDirection:"column", gap:6, minHeight:90 }}>
+                      {surveysOn(d).map(en => <SurveyCard key={en.id} en={en} />)}
                       {evs.map(j => <MoveCard key={j.id} j={j} />)}
                     </div>
                     {((data.vehicles||[]).length>0 || (data.staff||[]).filter(s=>s.active!==false).length>0) && (() => {
@@ -1547,22 +1599,23 @@ function CalendarView({ data, setView }) {
       })()}
 
       {mode==="day" && (() => {
-        const evs = jobsOn(anchor); const isToday = sameDay(anchor,today);
+        const evs = jobsOn(anchor); const svs = surveysOn(anchor); const isToday = sameDay(anchor,today);
         return (
           <div>
             <div style={{ background: isToday?"#FFF7E8":"#F4F7F6", border:"1px solid #E9EEED", borderRadius:12, padding:"10px 14px", marginBottom:12, fontSize:13, fontWeight:800, color:"#2c3c38" }}>
-              {evs.length} move{evs.length!==1?"s":""} · {CAL_DOW[(anchor.getDay()+6)%7]} {anchor.getDate()} {CAL_MON[anchor.getMonth()]}
+              {evs.length} move{evs.length!==1?"s":""}{svs.length?` · ${svs.length} survey${svs.length!==1?"s":""}`:""} · {CAL_DOW[(anchor.getDay()+6)%7]} {anchor.getDate()} {CAL_MON[anchor.getMonth()]}
             </div>
             <AvailPanel d={anchor} />
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {svs.map(en => <SurveyCard key={en.id} en={en} big />)}
               {evs.map(j => <MoveCard key={j.id} j={j} big />)}
-              {evs.length===0 && <Empty icon="truck" text="No moves this day" />}
+              {evs.length===0 && svs.length===0 && <Empty icon="truck" text="Nothing booked this day" />}
             </div>
           </div>
         );
       })()}
 
-      {jobs.length===0 && <div style={{ marginTop:16 }}><Empty icon="truck" text="No moves booked yet" /></div>}
+      {jobs.length===0 && !(data.enquiries||[]).some(e=>e.surveyDate) && <div style={{ marginTop:16 }}><Empty icon="truck" text="No moves or surveys booked yet" /></div>}
     </div>
   );
 }
