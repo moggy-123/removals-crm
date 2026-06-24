@@ -1198,11 +1198,12 @@ function CompanyView({ data, setView }) {
 
 function VehicleForm({ data, onClose, editVehicle }) {
   const v = editVehicle || {};
-  const [f, setF] = useState({ name: v.name || "", reg: v.reg || "", vtype: v.vtype || "", capacityCuFt: v.capacityCuFt || "" });
+  const [f, setF] = useState({ reg: v.reg || "", vtype: v.vtype || "", capacityCuFt: v.capacityCuFt || "" });
   const set = (k, val) => setF(p => ({ ...p, [k]: val }));
   async function save() {
-    if (!f.name.trim()) { alert("Give the vehicle a name."); return; }
-    const rec = { id: v.id || uid(), name: f.name.trim(), reg: f.reg, vtype: f.vtype, capacityCuFt: Number(f.capacityCuFt) || 0, createdAt: v.createdAt || new Date().toISOString() };
+    if (!f.reg.trim() && !f.vtype) { alert("Add a registration or a type so you can tell vehicles apart."); return; }
+    const label = [f.vtype, f.reg.trim()].filter(Boolean).join(" · ") || "Vehicle";
+    const rec = { id: v.id || uid(), name: label, reg: f.reg.trim(), vtype: f.vtype, capacityCuFt: Number(f.capacityCuFt) || 0, createdAt: v.createdAt || new Date().toISOString() };
     await saveAndReload(upsertLocal(data, "vehicles", rec));
   }
   async function del() {
@@ -1214,9 +1215,8 @@ function VehicleForm({ data, onClose, editVehicle }) {
   }
   return (
     <Modal title={v.id ? "Edit Vehicle" : "Add Vehicle"} onClose={onClose}>
-      <Field label="Name" required><Input value={f.name} onChange={x => set("name", x)} placeholder="e.g. Luton Van" /></Field>
-      <Field label="Reg / plate"><Input value={f.reg} onChange={x => set("reg", x)} placeholder="e.g. WX19 ABC" /></Field>
       <Field label="Type"><Select value={f.vtype} onChange={x => set("vtype", x)} options={VEHICLE_TYPES} placeholder="Select…" /></Field>
+      <Field label="Reg / plate"><Input value={f.reg} onChange={x => set("reg", x)} placeholder="e.g. WX19 ABC" /></Field>
       <Field label="Capacity (cu ft)" hint="Roughly how much it holds"><Input type="number" value={f.capacityCuFt} onChange={x => set("capacityCuFt", x)} placeholder="e.g. 600" /></Field>
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
         {v.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
@@ -1280,6 +1280,10 @@ function JobDetail({ data, id, setView }) {
   }
   async function save() {
     const rec = { ...j, ...f, crew: f.crew, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0 };
+    await saveAndReload(upsertLocal(data, "jobs", rec));
+  }
+  async function completeMove() {
+    const rec = { ...j, ...f, crew: f.crew, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, status: "Completed", balancePaid: true };
     await saveAndReload(upsertLocal(data, "jobs", rec));
   }
   async function del() {
@@ -1373,6 +1377,14 @@ function JobDetail({ data, id, setView }) {
         <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>
         <Btn style={{ flex: 1 }} onClick={save}><Icon name="check" size={16} /> Save move</Btn>
       </div>
+      {f.status !== "Completed" && (
+        <Btn variant="primary" style={{ width: "100%", marginTop: 10 }} onClick={completeMove}>
+          <Icon name="check" size={16} /> Mark move complete
+        </Btn>
+      )}
+      {f.status === "Completed" && (
+        <div style={{ textAlign: "center", marginTop: 12, fontSize: 13, fontWeight: 700, color: "#059669" }}>✓ Move completed</div>
+      )}
     </div>
   );
 }
