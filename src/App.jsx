@@ -452,6 +452,21 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
 
+  // When an existing customer is picked, prefill "moving from":
+  // their last move's TO address if they've moved before, else their stored address.
+  function selectCustomer(cid) {
+    setCustomerId(cid);
+    if (!cid) return;
+    const cust = (data.customers || []).find(c => c.id === cid);
+    const pastMoves = (data.jobs || [])
+      .filter(jb => jb.customerId === cid && (jb.toAddress1 || jb.toTown || jb.toPostcode))
+      .sort((a, b) => (b.moveDate || b.createdAt || "").localeCompare(a.moveDate || a.createdAt || ""));
+    let a1 = "", town = "", pc = "";
+    if (pastMoves[0]) { a1 = pastMoves[0].toAddress1 || ""; town = pastMoves[0].toTown || ""; pc = pastMoves[0].toPostcode || ""; }
+    else if (cust) { a1 = cust.address1 || ""; town = cust.town || ""; pc = cust.postcode || ""; }
+    setF(p => ({ ...p, fromAddress1: a1, fromTown: town, fromPostcode: pc }));
+  }
+
   async function save() {
     let data2 = data;
     let cid = customerId;
@@ -480,7 +495,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
     <Modal title={e.id ? "Edit Enquiry" : "New Enquiry"} onClose={onClose}>
       {!e.id && (
         <Field label="Customer" required>
-          <CustomerPicker data={data} customerId={customerId} onPick={setCustomerId} newCust={newCust} setNewCust={setNewCust} />
+          <CustomerPicker data={data} customerId={customerId} onPick={selectCustomer} newCust={newCust} setNewCust={setNewCust} />
         </Field>
       )}
 
@@ -494,6 +509,11 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
       <Field label="Distance (miles)" hint="Used to help price the quote"><Input type="number" value={f.distanceMiles} onChange={v => set("distanceMiles", v)} placeholder="e.g. 12" /></Field>
 
       <SectionTitle>Moving from</SectionTitle>
+      {customerId && (f.fromAddress1 || f.fromTown || f.fromPostcode) && (
+        <div style={{ fontSize: 12, color: TEAL_D, background: "#EAF4F2", borderRadius: 9, padding: "8px 11px", marginBottom: 10 }}>
+          Prefilled from {(data.jobs || []).some(jb => jb.customerId === customerId && (jb.toAddress1 || jb.toTown)) ? "their last move" : "their saved address"} — edit if needed.
+        </div>
+      )}
       <Field label="Address"><Input value={f.fromAddress1} onChange={v => set("fromAddress1", v)} placeholder="House/flat & street" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Town"><Input value={f.fromTown} onChange={v => set("fromTown", v)} /></Field></div>
