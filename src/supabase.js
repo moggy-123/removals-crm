@@ -70,7 +70,7 @@ const jobToDb = j => ({
   move_date: j.moveDate, start_time: j.startTime,
   from_address1: j.fromAddress1, from_town: j.fromTown, from_postcode: j.fromPostcode, from_access: j.fromAccess,
   to_address1: j.toAddress1, to_town: j.toTown, to_postcode: j.toPostcode, to_access: j.toAccess,
-  crew: j.crew || [], vehicle: j.vehicle || "",
+  crew: j.crew || [], vehicle: j.vehicle || "", vehicle_id: j.vehicleId || null,
   volume_cuft: j.volumeCuFt || 0, volume_m3: j.volumeM3 || 0, weight_kg: j.weightKg || 0,
   price: j.price || 0, deposit: j.deposit || 0, deposit_paid: !!j.depositPaid,
   balance_paid: !!j.balancePaid,
@@ -83,7 +83,7 @@ const jobFromDb = r => ({
   moveDate: r.move_date, startTime: r.start_time,
   fromAddress1: r.from_address1, fromTown: r.from_town, fromPostcode: r.from_postcode, fromAccess: r.from_access,
   toAddress1: r.to_address1, toTown: r.to_town, toPostcode: r.to_postcode, toAccess: r.to_access,
-  crew: r.crew || [], vehicle: r.vehicle || "",
+  crew: r.crew || [], vehicle: r.vehicle || "", vehicleId: r.vehicle_id || "",
   volumeCuFt: r.volume_cuft || 0, volumeM3: r.volume_m3 || 0, weightKg: r.weight_kg || 0,
   price: r.price || 0, deposit: r.deposit || 0, depositPaid: r.deposit_paid,
   balancePaid: r.balance_paid,
@@ -91,20 +91,42 @@ const jobFromDb = r => ({
   updatedAt: r.updated_at, createdAt: r.created_at,
 });
 
-const MAP_TO_DB = { customers: customerToDb, enquiries: enquiryToDb, jobs: jobToDb };
+const vehicleToDb = v => ({
+  id: v.id, name: v.name, reg: v.reg || "", vtype: v.vtype || "",
+  capacity_cuft: v.capacityCuFt || 0,
+  updated_at: v.updatedAt || Date.now(), created_at: v.createdAt || new Date().toISOString(),
+});
+const vehicleFromDb = r => ({
+  id: r.id, name: r.name, reg: r.reg || "", vtype: r.vtype || "",
+  capacityCuFt: r.capacity_cuft || 0, updatedAt: r.updated_at, createdAt: r.created_at,
+});
+const staffToDb = s => ({
+  id: s.id, name: s.name, role: s.role || "", phone: s.phone || "", active: s.active !== false,
+  updated_at: s.updatedAt || Date.now(), created_at: s.createdAt || new Date().toISOString(),
+});
+const staffFromDb = r => ({
+  id: r.id, name: r.name, role: r.role || "", phone: r.phone || "", active: r.active !== false,
+  updatedAt: r.updated_at, createdAt: r.created_at,
+});
+
+const MAP_TO_DB = { customers: customerToDb, enquiries: enquiryToDb, jobs: jobToDb, vehicles: vehicleToDb, staff: staffToDb };
 
 // ── Pull all data from Supabase ─────────────────────────────────────────────
 export async function pullFromCloud() {
-  const [c, e, j] = await Promise.all([
+  const [c, e, j, v, s] = await Promise.all([
     supabase.from("customers").select("*"),
     supabase.from("enquiries").select("*"),
     supabase.from("jobs").select("*"),
+    supabase.from("vehicles").select("*"),
+    supabase.from("staff").select("*"),
   ]);
-  if (c.error || e.error || j.error) throw new Error("Pull failed");
+  if (c.error || e.error || j.error || v.error || s.error) throw new Error("Pull failed");
   return {
     customers: (c.data || []).map(customerFromDb),
     enquiries: (e.data || []).map(enquiryFromDb),
     jobs:      (j.data || []).map(jobFromDb),
+    vehicles:  (v.data || []).map(vehicleFromDb),
+    staff:     (s.data || []).map(staffFromDb),
   };
 }
 
@@ -114,6 +136,8 @@ export async function pushToCloud(data) {
     { name: "customers", rows: (data.customers || []).map(customerToDb) },
     { name: "enquiries", rows: (data.enquiries || []).map(enquiryToDb) },
     { name: "jobs",      rows: (data.jobs      || []).map(jobToDb)      },
+    { name: "vehicles",  rows: (data.vehicles  || []).map(vehicleToDb)  },
+    { name: "staff",     rows: (data.staff     || []).map(staffToDb)    },
   ];
   for (const t of tables) {
     for (const row of t.rows) {
