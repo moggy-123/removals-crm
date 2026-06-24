@@ -26,6 +26,7 @@ const customerFromDb = r => ({
 const enquiryToDb = e => ({
   id: e.id, customer_id: e.customerId, status: e.status || "New",
   enquiry_date: e.enquiryDate, preferred_date: e.preferredDate || null,
+  survey_date: e.surveyDate || null,
   date_flexible: !!e.dateFlexible,
   from_address1: e.fromAddress1, from_town: e.fromTown, from_postcode: e.fromPostcode,
   from_property_type: e.fromPropertyType, from_bedrooms: e.fromBedrooms,
@@ -47,6 +48,7 @@ const enquiryToDb = e => ({
 const enquiryFromDb = r => ({
   id: r.id, customerId: r.customer_id, status: r.status || "New",
   enquiryDate: r.enquiry_date, preferredDate: r.preferred_date || "",
+  surveyDate: r.survey_date || "",
   dateFlexible: r.date_flexible,
   fromAddress1: r.from_address1, fromTown: r.from_town, fromPostcode: r.from_postcode,
   fromPropertyType: r.from_property_type, fromBedrooms: r.from_bedrooms,
