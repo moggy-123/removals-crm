@@ -307,6 +307,9 @@ function Dashboard({ data, setView }) {
     .filter(e => e.followUpDate && !["Won", "Lost"].includes(e.status))
     .sort((a, b) => (a.followUpDate || "").localeCompare(b.followUpDate || ""))
     .slice(0, 6);
+  const todaysSurveys = enquiries
+    .filter(e => e.surveyDate === todayISO() && e.status !== "Lost")
+    .sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
   // Availability today
   const vehIdsOf = j => (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []);
   const todayJobs = jobs.filter(j => j.moveDate === todayISO());
@@ -342,6 +345,24 @@ function Dashboard({ data, setView }) {
       <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
         <Icon name="plus" size={16} /> New Enquiry
       </Btn>
+
+      {todaysSurveys.length > 0 && (
+        <>
+          <SectionTitle>Today's surveys</SectionTitle>
+          {todaysSurveys.map(e => (
+            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: AMBER, textTransform: "uppercase", letterSpacing: ".05em" }}>Survey</div>
+                  <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
+                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
+                </div>
+                <StatusBadge status={e.status} />
+              </div>
+            </Card>
+          ))}
+        </>
+      )}
 
       {(vehicles.length > 0 || staffActive.length > 0) && (
         <>
@@ -482,9 +503,9 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
   const [f, setF] = useState({
     preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false,
     surveyDate: e.surveyDate || "",
-    fromAddress1: e.fromAddress1 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
+    fromAddress1: e.fromAddress1 || "", fromAddress2: e.fromAddress2 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
     fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
-    toAddress1: e.toAddress1 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
+    toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
     toPropertyType: e.toPropertyType || "", toFloor: e.toFloor || "", toAccess: e.toAccess || "",
     distanceMiles: e.distanceMiles || "", notes: e.notes || "",
   });
@@ -499,10 +520,10 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
     const pastMoves = (data.jobs || [])
       .filter(jb => jb.customerId === cid && (jb.toAddress1 || jb.toTown || jb.toPostcode))
       .sort((a, b) => (b.moveDate || b.createdAt || "").localeCompare(a.moveDate || a.createdAt || ""));
-    let a1 = "", town = "", pc = "";
-    if (pastMoves[0]) { a1 = pastMoves[0].toAddress1 || ""; town = pastMoves[0].toTown || ""; pc = pastMoves[0].toPostcode || ""; }
-    else if (cust) { a1 = cust.address1 || ""; town = cust.town || ""; pc = cust.postcode || ""; }
-    setF(p => ({ ...p, fromAddress1: a1, fromTown: town, fromPostcode: pc }));
+    let a1 = "", a2 = "", town = "", pc = "";
+    if (pastMoves[0]) { a1 = pastMoves[0].toAddress1 || ""; a2 = pastMoves[0].toAddress2 || ""; town = pastMoves[0].toTown || ""; pc = pastMoves[0].toPostcode || ""; }
+    else if (cust) { a1 = cust.address1 || ""; a2 = cust.address2 || ""; town = cust.town || ""; pc = cust.postcode || ""; }
+    setF(p => ({ ...p, fromAddress1: a1, fromAddress2: a2, fromTown: town, fromPostcode: pc }));
   }
 
   async function save() {
@@ -554,6 +575,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
         </div>
       )}
       <Field label="Address"><Input value={f.fromAddress1} onChange={v => set("fromAddress1", v)} placeholder="House/flat & street" /></Field>
+      <Field label="Address line 2"><Input value={f.fromAddress2} onChange={v => set("fromAddress2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Town"><Input value={f.fromTown} onChange={v => set("fromTown", v)} /></Field></div>
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.fromPostcode} onChange={v => set("fromPostcode", v)} /></Field></div>
@@ -567,6 +589,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
 
       <SectionTitle>Moving to</SectionTitle>
       <Field label="Address"><Input value={f.toAddress1} onChange={v => set("toAddress1", v)} placeholder="House/flat & street" /></Field>
+      <Field label="Address line 2"><Input value={f.toAddress2} onChange={v => set("toAddress2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Town"><Input value={f.toTown} onChange={v => set("toTown", v)} /></Field></div>
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.toPostcode} onChange={v => set("toPostcode", v)} /></Field></div>
@@ -809,8 +832,8 @@ function QuoteModal({ data, enquiry, onClose }) {
       rec.quoteLines.map(l => `• ${l.desc}: ${gbp(l.amount)}`).join("\n") +
       `\n\n${vat ? "Total (inc. VAT): " : "Total: "}${gbp(total)}\n\n` +
       `Move date: ${enquiry.preferredDate ? fmtDate(enquiry.preferredDate) : "to be confirmed"}\n` +
-      `From: ${[enquiry.fromAddress1, enquiry.fromTown, enquiry.fromPostcode].filter(Boolean).join(", ")}\n` +
-      `To: ${[enquiry.toAddress1, enquiry.toTown, enquiry.toPostcode].filter(Boolean).join(", ")}\n\n` +
+      `From: ${[enquiry.fromAddress1, enquiry.fromAddress2, enquiry.fromTown, enquiry.fromPostcode].filter(Boolean).join(", ")}\n` +
+      `To: ${[enquiry.toAddress1, enquiry.toAddress2, enquiry.toTown, enquiry.toPostcode].filter(Boolean).join(", ")}\n\n` +
       `This quote is valid for 30 days. To book, just reply to this email.\n\nKind regards`
     );
     const subject = encodeURIComponent("Your removal quote");
@@ -888,8 +911,8 @@ function EnquiryDetail({ data, id, setView }) {
     const job = {
       id: jid, customerId: e.customerId, enquiryId: e.id,
       moveDate: e.preferredDate || "", startTime: "",
-      fromAddress1: e.fromAddress1, fromTown: e.fromTown, fromPostcode: e.fromPostcode, fromAccess: e.fromAccess,
-      toAddress1: e.toAddress1, toTown: e.toTown, toPostcode: e.toPostcode, toAccess: e.toAccess,
+      fromAddress1: e.fromAddress1, fromAddress2: e.fromAddress2, fromTown: e.fromTown, fromPostcode: e.fromPostcode, fromAccess: e.fromAccess,
+      toAddress1: e.toAddress1, toAddress2: e.toAddress2, toTown: e.toTown, toPostcode: e.toPostcode, toAccess: e.toAccess,
       crew: [], vehicle: recommendVehicle(e.volumeCuFt).vehicle,
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
@@ -945,10 +968,10 @@ function EnquiryDetail({ data, id, setView }) {
       <Card>
         <Row label="Move date" value={e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : "TBC"} />
         <Row label="Distance" value={e.distanceMiles ? `${e.distanceMiles} miles` : ""} />
-        <Row label="From" value={[e.fromAddress1, e.fromTown, e.fromPostcode].filter(Boolean).join(", ")} />
+        <Row label="From" value={[e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join(", ")} />
         <Row label="From property" value={[e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.fromFloor].filter(Boolean).join(" · ")} />
         {e.fromAccess && <Row label="From access" value={e.fromAccess} />}
-        <Row label="To" value={[e.toAddress1, e.toTown, e.toPostcode].filter(Boolean).join(", ")} />
+        <Row label="To" value={[e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join(", ")} />
         <Row label="To property" value={[e.toPropertyType, e.toFloor].filter(Boolean).join(" · ")} />
         {e.toAccess && <Row label="To access" value={e.toAccess} />}
         {e.notes && <Row label="Notes" value={e.notes} />}
@@ -1046,7 +1069,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
   const c = editCustomer || {};
   const [f, setF] = useState({
     name: c.name || "", company: c.company || "", phone: c.phone || "", email: c.email || "",
-    address1: c.address1 || "", town: c.town || "", county: c.county || "", postcode: c.postcode || "",
+    address1: c.address1 || "", address2: c.address2 || "", town: c.town || "", county: c.county || "", postcode: c.postcode || "",
     custType: c.custType || "Private", notes: c.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -1065,6 +1088,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
         <div style={{ flex: 1 }}><Field label="Email"><Input type="email" value={f.email} onChange={v => set("email", v)} /></Field></div>
       </div>
       <Field label="Address"><Input value={f.address1} onChange={v => set("address1", v)} /></Field>
+      <Field label="Address line 2"><Input value={f.address2} onChange={v => set("address2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Town"><Input value={f.town} onChange={v => set("town", v)} /></Field></div>
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.postcode} onChange={v => set("postcode", v)} /></Field></div>
@@ -1104,7 +1128,7 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Phone" value={c.phone} />
         <Row label="Email" value={c.email} />
         {c.company && <Row label="Company" value={c.company} />}
-        <Row label="Address" value={[c.address1, c.town, c.postcode].filter(Boolean).join(", ")} />
+        <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
       <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
@@ -1354,9 +1378,9 @@ function JobDetail({ data, id, setView }) {
       )}
 
       <Card>
-        <Row label="From" value={[j.fromAddress1, j.fromTown, j.fromPostcode].filter(Boolean).join(", ")} />
+        <Row label="From" value={[j.fromAddress1, j.fromAddress2, j.fromTown, j.fromPostcode].filter(Boolean).join(", ")} />
         {j.fromAccess && <Row label="From access" value={j.fromAccess} />}
-        <Row label="To" value={[j.toAddress1, j.toTown, j.toPostcode].filter(Boolean).join(", ")} />
+        <Row label="To" value={[j.toAddress1, j.toAddress2, j.toTown, j.toPostcode].filter(Boolean).join(", ")} />
         {j.toAccess && <Row label="To access" value={j.toAccess} />}
         <Row label="Volume" value={j.volumeCuFt ? `${j.volumeCuFt} cu ft · ${j.volumeM3} m³` : ""} />
       </Card>
