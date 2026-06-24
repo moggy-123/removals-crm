@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase } from "./supabase";
 import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
 
@@ -9,7 +9,7 @@ const TABLES = ["customers", "enquiries", "jobs"];
 const EMPTY = { customers: [], enquiries: [], jobs: [] };
 
 // Brand
-const TEAL = "#0F766E", NAVY = "#134E4A", AMBER = "#F59E0B";
+const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
 
 const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost"];
 const JOB_STATUSES = ["Booked", "In Progress", "Completed"];
@@ -224,7 +224,7 @@ function Field({ label, children, required, hint }) {
     </div>
   );
 }
-const inputStyle = { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 15, background: "#FAFAFA", boxSizing: "border-box", outline: "none", fontFamily: "inherit", color: "#111827" };
+const inputStyle = { width: "100%", padding: "10px 13px", borderRadius: 11, border: "1.5px solid #E3E9E8", fontSize: 15, background: "#F7FAF9", boxSizing: "border-box", outline: "none", fontFamily: "inherit", color: "#10211E" };
 function Input({ value, onChange, type = "text", placeholder, required }) {
   return <input style={inputStyle} type={type} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} />;
 }
@@ -240,28 +240,28 @@ function Select({ value, onChange, options, placeholder }) {
   );
 }
 function Btn({ children, onClick, variant = "primary", size = "md", disabled, style: extra }) {
-  const base = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 8, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", border: "none", fontFamily: "inherit", transition: "opacity .15s" };
+  const base = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 11, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer", border: "none", fontFamily: "inherit", transition: "transform .15s, opacity .15s" };
   const v = {
-    primary: { background: TEAL, color: "#fff" },
-    amber: { background: AMBER, color: "#fff" },
-    ghost: { background: "transparent", color: TEAL, border: `1.5px solid ${TEAL}` },
+    primary: { background: TEAL, color: "#fff", boxShadow: "0 4px 12px rgba(14,124,115,.26)" },
+    amber: { background: AMBER, color: "#fff", boxShadow: "0 4px 12px rgba(245,158,11,.30)" },
+    ghost: { background: "#EEF3F2", color: TEAL_D },
     danger: { background: "#FEE2E2", color: "#DC2626" },
-    grey: { background: "#F3F4F6", color: "#374151" },
+    grey: { background: "#EEF3F2", color: "#34433F" },
   };
-  const p = size === "sm" ? { padding: "6px 12px", fontSize: 13 } : { padding: "10px 18px", fontSize: 14 };
+  const p = size === "sm" ? { padding: "7px 13px", fontSize: 13 } : { padding: "10px 18px", fontSize: 14 };
   return <button className={size === "sm" ? "rm-btn-sm" : "rm-btn"} style={{ ...base, ...v[variant], ...p, opacity: disabled ? .5 : 1, ...extra }} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 function Card({ children, onClick, style: extra }) {
-  return <div onClick={onClick} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", marginBottom: 10, cursor: onClick ? "pointer" : "default", border: "1px solid #F3F4F6", ...extra }}>{children}</div>;
+  return <div onClick={onClick} style={{ background: "#fff", borderRadius: 16, padding: "15px 17px", boxShadow: "0 1px 2px rgba(16,33,30,.05), 0 6px 18px rgba(16,33,30,.05)", marginBottom: 11, cursor: onClick ? "pointer" : "default", border: "1px solid #E9EEED", ...extra }}>{children}</div>;
 }
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div className="rm-shell" style={{ background: "#fff", borderRadius: "20px 20px 0 0", width: "100%", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+    <div className="rm-modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(15,46,42,.45)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div className="rm-modal" style={{ background: "#fff", borderRadius: "22px 22px 0 0", width: "100%", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "20px 20px 0", flexShrink: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>{title}</h3>
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 99, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#6B7280" }}>×</button>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#10211E", letterSpacing: "-.01em" }}>{title}</h3>
+            <button onClick={onClose} style={{ background: "#EEF3F2", border: "none", borderRadius: 99, width: 34, height: 34, cursor: "pointer", fontSize: 18, color: "#6A7B77" }}>×</button>
           </div>
         </div>
         <div style={{ overflowY: "auto", padding: "0 20px 20px", flex: 1 }}>{children}</div>
@@ -271,8 +271,8 @@ function Modal({ title, onClose, children, wide }) {
 }
 function Empty({ icon, text }) {
   return (
-    <div style={{ textAlign: "center", padding: "48px 20px", color: "#9CA3AF" }}>
-      <div style={{ marginBottom: 10, display: "flex", justifyContent: "center" }}><Icon name={icon} size={40} color="#D1D5DB" /></div>
+    <div style={{ textAlign: "center", padding: "48px 20px", color: "#94A4A0" }}>
+      <div style={{ marginBottom: 10, display: "flex", justifyContent: "center" }}><Icon name={icon} size={40} color="#C4D0CD" /></div>
       <div style={{ fontSize: 14 }}>{text}</div>
     </div>
   );
@@ -1192,43 +1192,150 @@ function JobDetail({ data, id, setView }) {
 }
 
 // ── Calendar (agenda of booked moves) ───────────────────────────────────────
+const CAL_MON = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const CAL_DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+function isoOf(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function sameDay(a,b){ return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function startOfWeek(d){ const x=new Date(d); const wd=(x.getDay()+6)%7; return addDays(x,-wd); }
+function parseTime(t){ if(!t) return null; const m=String(t).match(/(\d{1,2}):(\d{2})/); return m ? (+m[1])+(+m[2])/60 : null; }
+function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"am":"pm"; let H=hh%12; if(H===0)H=12; return mm?`${H}:${String(mm).padStart(2,"0")}${ap}`:`${H}${ap}`; }
+
 function CalendarView({ data, setView }) {
-  const jobs = (data.jobs || []).filter(j => j.moveDate).sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""));
-  const today = todayISO();
-  const upcoming = jobs.filter(j => j.moveDate >= today);
-  const past = jobs.filter(j => j.moveDate < today).reverse();
-  const Group = ({ title, list }) => (
-    <>
-      <SectionTitle>{title}</SectionTitle>
-      {list.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>None.</div>}
-      {list.map(j => (
-        <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontWeight: 700, color: "#111827" }}>{fmtDate(j.moveDate)}{j.startTime ? ` · ${j.startTime}` : ""}</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{custName(data, j.customerId)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
-            </div>
-            <StatusBadge status={j.status} />
-          </div>
-        </Card>
-      ))}
-    </>
+  const [mode, setMode] = useState("week");
+  const [anchor, setAnchor] = useState(() => new Date());
+  const jobs = (data.jobs || []).filter(j => j.moveDate);
+  const today = new Date();
+  const jobsOn = d => jobs.filter(j => j.moveDate === isoOf(d)).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||""));
+  const colorOf = j => (STATUS_META[j.status]?.color) || TEAL;
+
+  function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
+
+  let rangeLabel = "";
+  if (mode==="month") rangeLabel = `${CAL_MON[anchor.getMonth()]} ${anchor.getFullYear()}`;
+  else if (mode==="week") { const s=startOfWeek(anchor), e=addDays(s,6); rangeLabel = `${s.getDate()} ${CAL_MON[s.getMonth()].slice(0,3)} – ${e.getDate()} ${CAL_MON[e.getMonth()].slice(0,3)}`; }
+  else rangeLabel = `${CAL_DOW[(anchor.getDay()+6)%7]} ${anchor.getDate()} ${CAL_MON[anchor.getMonth()]}`;
+
+  const HOURS = []; for (let h=7; h<19; h++) HOURS.push(h);
+  const HPX = 50;
+
+  function TimeBlock({ j, showRoute }) {
+    const s = parseTime(j.startTime); const start = s==null ? 9 : s; const dur = 3;
+    const top = Math.max(0,(start-7))*HPX; const height = Math.max(dur*HPX-4, 34);
+    return (
+      <div onClick={() => setView({ screen:"jobDetail", id:j.id })}
+        style={{ position:"absolute", left:4, right:4, top, height, background:colorOf(j), borderRadius:9, padding:"5px 8px", color:"#fff", overflow:"hidden", cursor:"pointer", boxShadow:"0 3px 8px rgba(0,0,0,.14)" }}>
+        <div style={{ fontSize:10.5, fontWeight:700, opacity:.9 }}>{j.startTime || "—"}</div>
+        <div style={{ fontSize:12, fontWeight:800, letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</div>
+        {showRoute && <div style={{ fontSize:10.5, opacity:.92, marginTop:1 }}>{j.fromTown||"—"} → {j.toTown||"—"}{j.vehicle?` · ${j.vehicle}`:""}</div>}
+      </div>
+    );
+  }
+  const Gutter = () => (
+    <div style={{ borderRight:"1px solid #EEF2F1" }}>
+      {HOURS.map(h => <div key={h} style={{ height:HPX, fontSize:10.5, color:"#94A4A0", fontWeight:700, textAlign:"right", padding:"2px 7px 0 0" }}>{fmtHour(h)}</div>)}
+    </div>
   );
+  const DayCol = ({ d, last }) => (
+    <div style={{ position:"relative", borderRight: last?"none":"1px solid #EEF2F1" }}>
+      {HOURS.map(h => <div key={h} style={{ height:HPX, borderBottom:"1px solid #F4F7F6" }} />)}
+      {jobsOn(d).map(j => <TimeBlock key={j.id} j={j} showRoute={mode==="day"} />)}
+    </div>
+  );
+
   return (
     <div>
-      <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#111827" }}>Calendar</h2>
-      <Group title="Upcoming" list={upcoming} />
-      <Group title="Past" list={past} />
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:14 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <div style={{ display:"flex", gap:5 }}>
+            <button onClick={()=>navg(-1)} style={navBtn}>‹</button>
+            <button onClick={()=>navg(1)} style={navBtn}>›</button>
+          </div>
+          <Btn size="sm" variant="grey" onClick={()=>setAnchor(new Date())}>Today</Btn>
+          <span style={{ fontSize:17, fontWeight:800, letterSpacing:"-.01em", color:"#10211E" }}>{rangeLabel}</span>
+        </div>
+        <div style={{ display:"inline-flex", background:"#EEF3F2", borderRadius:11, padding:3, gap:2 }}>
+          {["day","week","month"].map(m => (
+            <button key={m} onClick={()=>setMode(m)} style={{ border:"none", background: mode===m?TEAL:"transparent", color: mode===m?"#fff":"#5b6a66", fontWeight:700, fontSize:13, padding:"7px 15px", borderRadius:9, cursor:"pointer", textTransform:"capitalize" }}>{m}</button>
+          ))}
+        </div>
+      </div>
+
+      {mode==="month" && (() => {
+        const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+        const start = startOfWeek(first);
+        const cells = [];
+        for (let i=0;i<42;i++) {
+          const d = addDays(start,i); const out = d.getMonth()!==anchor.getMonth();
+          const evs = jobsOn(d);
+          cells.push(
+            <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:92, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
+              <div style={{ alignSelf:"flex-start", fontSize:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
+              {evs.slice(0,3).map(j => <div key={j.id} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(j)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data,j.customerId)}</div>)}
+              {evs.length>3 && <div style={{ fontSize:10, color:"#94A4A0", fontWeight:700 }}>+{evs.length-3} more</div>}
+            </div>
+          );
+        }
+        return (
+          <div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:7, marginBottom:7 }}>
+              {CAL_DOW.map(d => <div key={d} style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textTransform:"uppercase", letterSpacing:".05em", textAlign:"center" }}>{d}</div>)}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:7 }}>{cells}</div>
+          </div>
+        );
+      })()}
+
+      {mode==="week" && (() => {
+        const start = startOfWeek(anchor);
+        const days = []; for (let i=0;i<7;i++) days.push(addDays(start,i));
+        return (
+          <div style={{ overflowX:"auto" }}>
+            <div style={{ minWidth:680, border:"1px solid #E9EEED", borderRadius:14, overflow:"hidden", background:"#fff" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"52px repeat(7,1fr)" }}>
+                <div style={{ background:"#F4F7F6", borderBottom:"1px solid #E9EEED", borderRight:"1px solid #EEF2F1" }} />
+                {days.map((d,i) => (
+                  <div key={i} style={{ background: sameDay(d,today)?"#FFF7E8":"#F4F7F6", borderBottom:"1px solid #E9EEED", borderRight: i===6?"none":"1px solid #EEF2F1", padding:"7px 4px", textAlign:"center", fontSize:11, fontWeight:800, color:"#94A4A0" }}>
+                    {CAL_DOW[i]}<span style={{ display:"block", fontSize:15, fontWeight:800, color: sameDay(d,today)?AMBER:"#2c3c38" }}>{d.getDate()}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"52px repeat(7,1fr)" }}>
+                <Gutter />
+                {days.map((d,i) => <DayCol key={i} d={d} last={i===6} />)}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {mode==="day" && (
+        <div style={{ border:"1px solid #E9EEED", borderRadius:14, overflow:"hidden", background:"#fff" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"60px 1fr" }}>
+            <div style={{ background:"#F4F7F6", borderBottom:"1px solid #E9EEED", borderRight:"1px solid #EEF2F1" }} />
+            <div style={{ background: sameDay(anchor,today)?"#FFF7E8":"#F4F7F6", borderBottom:"1px solid #E9EEED", padding:"8px 12px", fontSize:13, fontWeight:800, color:"#2c3c38" }}>
+              {jobsOn(anchor).length} move{jobsOn(anchor).length!==1?"s":""}
+            </div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"60px 1fr" }}>
+            <Gutter />
+            <DayCol d={anchor} last />
+          </div>
+        </div>
+      )}
+
+      {jobs.length===0 && <div style={{ marginTop:16 }}><Empty icon="truck" text="No moves booked yet" /></div>}
     </div>
   );
 }
+const navBtn = { width:36, height:36, borderRadius:11, border:"1px solid #E3E9E8", background:"#fff", color:"#41514E", cursor:"pointer", fontSize:20, lineHeight:1, fontWeight:700 };
 
 // ── Device responsiveness ───────────────────────────────────────────────────
 function useDeviceType() {
   const get = () => {
     const w = typeof window !== "undefined" ? window.innerWidth : 520;
     if (w >= 1024) return "desktop";
-    if (w >= 700) return "tablet";
+    if (w >= 768) return "tablet";
     return "phone";
   };
   const [device, setDevice] = useState(get);
@@ -1240,12 +1347,24 @@ function useDeviceType() {
   return device;
 }
 function ResponsiveStyles({ device }) {
-  const css = {
-    phone: `.rm-shell{max-width:100%}input,select,textarea{font-size:16px!important;padding:14px 14px!important}.rm-btn{padding:14px 20px!important;font-size:16px!important}.rm-btn-sm{padding:10px 14px!important;font-size:14px!important}`,
-    tablet: `.rm-shell{max-width:720px}input,select,textarea{font-size:15px!important;padding:12px 14px!important}`,
-    desktop: `.rm-shell{max-width:880px}input,select,textarea{font-size:15px!important;padding:11px 14px!important}`,
-  };
-  return <style>{css[device] || ""}</style>;
+  const wide = device !== "phone";
+  const common = `
+    *{scrollbar-width:thin;scrollbar-color:#CBD6D3 transparent}
+    ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#CBD6D3;border-radius:9px}
+    .rm-btn:hover,.rm-btn-sm:hover{transform:translateY(-1px)}
+    @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  `;
+  const phone = `
+    input,select,textarea{font-size:16px!important;padding:14px 14px!important}
+    .rm-btn{padding:13px 18px!important;font-size:15px!important}.rm-btn-sm{padding:9px 13px!important;font-size:13.5px!important}
+    .rm-modal{border-radius:22px 22px 0 0!important}
+  `;
+  const wideCss = `
+    .rm-modal-overlay{align-items:center!important}
+    .rm-modal{max-width:560px!important;border-radius:20px!important;margin:0 16px;max-height:88vh!important}
+    input,select,textarea{font-size:15px!important}
+  `;
+  return <style>{common + (wide ? wideCss : phone)}</style>;
 }
 
 // ── Merge helper (newest-wins, tombstone-aware) ─────────────────────────────
@@ -1269,14 +1388,25 @@ function mergeAll(cloud, local) {
 }
 
 // ── App ─────────────────────────────────────────────────────────────────────
+const SECTIONS = {
+  enquiries: { list: "enquiries", detail: "enquiryDetail", List: EnquiriesList, Detail: EnquiryDetail },
+  jobs:      { list: "jobs",      detail: "jobDetail",      List: JobsList,      Detail: JobDetail },
+  customers: { list: "customers", detail: "customerDetail", List: CustomersList, Detail: CustomerDetail },
+};
+function sectionFor(screen) {
+  if (["enquiries", "enquiryDetail", "newEnquiry"].includes(screen)) return "enquiries";
+  if (["jobs", "jobDetail"].includes(screen)) return "jobs";
+  if (["customers", "customerDetail"].includes(screen)) return "customers";
+  return null;
+}
+
 export default function App() {
   const [data, setData] = useState(loadData);
   const [view, setViewState] = useState({ screen: "dashboard" });
-  const [tab, setTab] = useState("dashboard");
   const [syncStatus, setSyncStatus] = useState("syncing");
   const device = useDeviceType();
+  const wide = device !== "phone";
 
-  // Initial load: pull cloud, merge with local, push back
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1288,14 +1418,11 @@ export default function App() {
         setData(merged);
         pushChangedOnly(merged).catch(() => {});
         setSyncStatus("synced");
-      } catch {
-        if (!cancelled) setSyncStatus("offline");
-      }
+      } catch { if (!cancelled) setSyncStatus("offline"); }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // Realtime: refresh on any change from another device
   useEffect(() => {
     const channel = supabase
       .channel("removals-changes")
@@ -1312,14 +1439,12 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Reconnect: push any pending records the moment we're back online
   useEffect(() => {
     const onOnline = () => pushChangedOnly(loadData()).catch(() => {});
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
   }, []);
 
-  // Poll every 20s as a backup for realtime
   useEffect(() => {
     const iv = setInterval(async () => {
       if (SAVING_IN_PROGRESS) return;
@@ -1337,68 +1462,122 @@ export default function App() {
     return () => clearInterval(iv);
   }, []);
 
-  const setView = useCallback((v) => {
-    setViewState(v);
-    if (["dashboard", "enquiries", "jobs", "customers", "calendar"].includes(v.screen)) setTab(v.screen);
-    setData(loadData());
-  }, []);
-  useEffect(() => { setData(loadData()); }, [tab]);
+  const setView = useCallback((v) => { setViewState(v); setData(loadData()); }, []);
 
-  const tabs = [
-    { id: "dashboard", icon: "dashboard", label: "Home" },
-    { id: "enquiries", icon: "enquiries", label: "Enquiries" },
-    { id: "calendar", icon: "calendar", label: "Calendar" },
-    { id: "jobs", icon: "jobs", label: "Moves" },
-    { id: "customers", icon: "customers", label: "Customers" },
+  const NAV = [
+    { id: "dashboard", icon: "dashboard", label: "Dashboard", phone: "Home" },
+    { id: "enquiries", icon: "enquiries", label: "Enquiries", phone: "Enquiries" },
+    { id: "calendar",  icon: "calendar",  label: "Calendar",  phone: "Calendar" },
+    { id: "jobs",      icon: "jobs",      label: "Moves",     phone: "Moves" },
+    { id: "customers", icon: "customers", label: "Customers", phone: "Customers" },
   ];
-  const isTab = ["dashboard", "enquiries", "jobs", "customers", "calendar"].includes(view.screen);
+  const sectionKey = sectionFor(view.screen);
+  const activeTab = view.screen === "dashboard" ? "dashboard" : view.screen === "calendar" ? "calendar" : (sectionKey || "dashboard");
 
-  return (
-    <div className="rm-shell" style={{ fontFamily: "'Inter',system-ui,sans-serif", background: "#F8FAFC", minHeight: "100vh", margin: "0 auto" }}>
-      <ResponsiveStyles device={device} />
-      {/* Header */}
-      <div style={{ background: TEAL, padding: device === "phone" ? "14px 18px" : "12px 18px", position: "sticky", top: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {!isTab && <button onClick={() => setView({ screen: tab })} style={{ background: "rgba(255,255,255,.15)", border: "none", borderRadius: 8, padding: "8px 12px", color: "#fff", cursor: "pointer", fontSize: 22, lineHeight: 1 }}>‹</button>}
-          <div style={{ width: 44, height: 44, borderRadius: 10, background: "rgba(255,255,255,.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Icon name="truck" size={26} color="#fff" />
+  const SyncDot = () => (
+    <span title={syncStatus} style={{ width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
+      background: syncStatus === "synced" ? "#22C55E" : syncStatus === "syncing" ? "#FBBF24" : "#9CA3AF",
+      boxShadow: syncStatus === "synced" ? "0 0 0 3px #22C55E22" : "none" }} />
+  );
+
+  function fullScreen() {
+    if (view.screen === "dashboard") return <Dashboard data={data} setView={setView} />;
+    if (view.screen === "calendar") return <CalendarView data={data} setView={setView} />;
+    return null;
+  }
+
+  function content() {
+    const full = fullScreen();
+    if (full) return <div style={{ flex: 1, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: 1080, margin: "0 auto" }}>{full}</div></div>;
+    const sec = SECTIONS[sectionKey];
+    if (!sec) return null;
+    const { List, Detail } = sec;
+    const detailId = view.screen === sec.detail ? view.id : null;
+    if (wide) {
+      return (
+        <div style={{ flex: 1, display: "flex", minWidth: 0 }}>
+          <div style={{ width: 384, flexShrink: 0, borderRight: "1px solid #E9EEED", overflowY: "auto", padding: "18px 15px", background: "#fff" }}>
+            <List data={data} setView={setView} initialFilter={view.filter} />
           </div>
-          <div>
-            <div style={{ fontSize: device === "phone" ? 17 : 16, fontWeight: 800, color: "#fff", letterSpacing: "-0.02em", lineHeight: 1.2 }}>Removals CRM</div>
-            <div style={{ fontSize: 11, color: "#99F6E4", fontWeight: 500, letterSpacing: "0.06em", textTransform: "uppercase" }}>Enquiries &amp; Moves</div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px 40px" }}>
+            {detailId ? <Detail data={data} id={detailId} setView={setView} />
+              : <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><Empty icon={sec.list === "customers" ? "customers" : sec.list === "jobs" ? "truck" : "enquiries"} text="Select an item to view details" /></div>}
           </div>
         </div>
-        <div title={syncStatus === "synced" ? "Synced" : syncStatus === "syncing" ? "Syncing…" : "Offline — saved locally"}
-          style={{ width: 10, height: 10, borderRadius: "50%", background: syncStatus === "synced" ? "#22C55E" : syncStatus === "syncing" ? "#FBBF24" : "#9CA3AF", boxShadow: syncStatus === "synced" ? "0 0 6px #22C55E" : "none" }} />
-      </div>
+      );
+    }
+    return <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 90px" }}>{detailId ? <Detail data={data} id={detailId} setView={setView} /> : <List data={data} setView={setView} initialFilter={view.filter} />}</div>;
+  }
 
-      {/* Content */}
-      <div style={{ padding: "16px 16px 110px" }}>
-        {view.screen === "dashboard" && <Dashboard data={data} setView={setView} />}
-        {view.screen === "enquiries" && <EnquiriesList data={data} setView={setView} initialFilter={view.filter} />}
-        {view.screen === "enquiryDetail" && <EnquiryDetail data={data} id={view.id} setView={setView} />}
-        {view.screen === "jobs" && <JobsList data={data} setView={setView} />}
-        {view.screen === "jobDetail" && <JobDetail data={data} id={view.id} setView={setView} />}
-        {view.screen === "customers" && <CustomersList data={data} setView={setView} />}
-        {view.screen === "customerDetail" && <CustomerDetail data={data} id={view.id} setView={setView} />}
-        {view.screen === "calendar" && <CalendarView data={data} setView={setView} />}
+  // ---- WIDE (iPad / desktop): sidebar + content ----
+  if (wide) {
+    return (
+      <div style={{ display: "flex", height: "100vh", maxWidth: 1360, margin: "0 auto", background: "#EEF3F2", boxShadow: "0 0 60px rgba(16,33,30,.06)" }}>
+        <ResponsiveStyles device={device} />
+        <aside style={{ width: 244, flexShrink: 0, background: "#fff", borderRight: "1px solid #E9EEED", display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "22px 18px 18px" }}>
+            <div style={{ width: 44, height: 44, borderRadius: 13, background: `linear-gradient(145deg, ${TEAL}, ${TEAL_D})`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 16px rgba(14,124,115,.32)" }}>
+              <Icon name="truck" size={25} color="#fff" />
+            </div>
+            <div>
+              <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: "-.02em", lineHeight: 1.1 }}>Removals CRM</div>
+              <div style={{ fontSize: 10, color: "#94A4A0", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".09em" }}>Enquiries &amp; moves</div>
+            </div>
+          </div>
+          <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+            {NAV.map(n => {
+              const on = activeTab === n.id;
+              return (
+                <button key={n.id} onClick={() => setView({ screen: n.id })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", borderRadius: 11, border: "none", cursor: "pointer", textAlign: "left", fontSize: 14.5, fontWeight: on ? 700 : 600, position: "relative",
+                  background: on ? "linear-gradient(90deg,#E6F3F1,#EDF6F5)" : "transparent", color: on ? TEAL_D : "#43534F" }}>
+                  {on && <span style={{ position: "absolute", left: -12, top: 9, bottom: 9, width: 3.5, borderRadius: "0 4px 4px 0", background: AMBER }} />}
+                  <Icon name={n.icon} size={20} color={on ? TEAL : "#7C8B87"} /> {n.label}
+                </button>
+              );
+            })}
+          </nav>
+          <div style={{ marginTop: "auto", padding: "14px 18px", borderTop: "1px solid #E9EEED", display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: "#6A7B77", fontWeight: 600 }}>
+            <SyncDot /> {syncStatus === "synced" ? "All changes synced" : syncStatus === "syncing" ? "Syncing…" : "Offline — saved on device"}
+          </div>
+        </aside>
+        <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
+          {content()}
+        </main>
+        {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} />}
       </div>
+    );
+  }
 
+  // ---- PHONE: header + content + bottom nav ----
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#EEF3F2" }}>
+      <ResponsiveStyles device={device} />
+      <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: "rgba(255,255,255,.16)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="truck" size={23} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", letterSpacing: "-.02em", lineHeight: 1.15 }}>Removals CRM</div>
+            <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>Enquiries &amp; moves</div>
+          </div>
+        </div>
+        <SyncDot />
+      </header>
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>{content()}</div>
       {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} />}
-
-      {/* Bottom nav */}
-      <div className="rm-shell" style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", background: "#fff", borderTop: "1px solid #E5E7EB", display: "flex", zIndex: 50 }}>
-        {tabs.map(t => {
-          const active = tab === t.id;
+      <nav style={{ background: "#fff", borderTop: "1px solid #E9EEED", display: "flex", flexShrink: 0 }}>
+        {NAV.map(n => {
+          const on = activeTab === n.id;
           return (
-            <button key={t.id} onClick={() => { setTab(t.id); setView({ screen: t.id }); }} style={{ flex: 1, padding: device === "phone" ? "14px 0 18px" : "12px 0 14px", background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-              <Icon name={t.icon} size={device === "phone" ? 25 : 22} color={active ? TEAL : "#9CA3AF"} />
-              <span style={{ fontSize: device === "phone" ? 11 : 10.5, fontWeight: 600, color: active ? TEAL : "#9CA3AF", letterSpacing: "0.02em" }}>{t.label}</span>
-              {active && <div style={{ width: 18, height: 2.5, borderRadius: 99, background: AMBER, marginTop: 2 }} />}
+            <button key={n.id} onClick={() => setView({ screen: n.id })} style={{ flex: 1, padding: "11px 0 16px", background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+              <Icon name={n.icon} size={24} color={on ? TEAL : "#9CA3AF"} />
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: on ? TEAL : "#9CA3AF" }}>{n.phone}</span>
+              {on && <span style={{ width: 16, height: 2.5, borderRadius: 99, background: AMBER }} />}
             </button>
           );
         })}
-      </div>
+      </nav>
     </div>
   );
 }
