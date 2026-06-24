@@ -309,7 +309,7 @@ function Dashboard({ data, setView }) {
     .slice(0, 6);
   const todaysSurveys = enquiries
     .filter(e => e.surveyDate === todayISO() && e.status !== "Lost")
-    .sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+    .sort((a, b) => (a.surveyTime || "").localeCompare(b.surveyTime || ""));
   // Availability today
   const vehIdsOf = j => (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []);
   const todayJobs = jobs.filter(j => j.moveDate === todayISO());
@@ -353,7 +353,7 @@ function Dashboard({ data, setView }) {
             <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: AMBER, textTransform: "uppercase", letterSpacing: ".05em" }}>Survey</div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: AMBER, textTransform: "uppercase", letterSpacing: ".05em" }}>Survey{e.surveyTime ? ` · ${e.surveyTime}` : ""}</div>
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
                 </div>
@@ -502,7 +502,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
   const [newCust, setNewCust] = useState({ name: "", phone: "", email: "" });
   const [f, setF] = useState({
     preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false,
-    surveyDate: e.surveyDate || "",
+    surveyDate: e.surveyDate || "", surveyTime: e.surveyTime || "",
     fromAddress1: e.fromAddress1 || "", fromAddress2: e.fromAddress2 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
     fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
     toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
@@ -560,7 +560,10 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
 
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date"><Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} /></Field>
-      <Field label="Survey date" hint="When you'll visit to quote — shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Survey date" hint="Shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field></div>
+        <div style={{ width: 130 }}><Field label="Time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field></div>
+      </div>
       <Field label="Dates flexible?">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
           <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
@@ -982,7 +985,7 @@ function EnquiryDetail({ data, id, setView }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontWeight: 700, color: "#111827" }}>Survey / Inventory</div>
-            {e.surveyDate && <div style={{ fontSize: 13, color: TEAL_D, fontWeight: 600, marginTop: 2 }}>📅 {fmtDate(e.surveyDate)}</div>}
+            {e.surveyDate && <div style={{ fontSize: 13, color: TEAL_D, fontWeight: 600, marginTop: 2 }}>📅 {fmtDate(e.surveyDate)}{e.surveyTime ? ` · ${e.surveyTime}` : ""}</div>}
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
               {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³ · ${e.weightKg} kg` : "Not surveyed yet"}
             </div>
@@ -1473,7 +1476,7 @@ function CalendarView({ data, setView }) {
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
   const jobsOn = d => jobs.filter(j => j.moveDate === isoOf(d)).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||""));
-  const surveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost");
+  const surveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost").sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
   const colorOf = j => (STATUS_META[j.status]?.color) || TEAL;
   const vehIdsOf = j => (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []);
   const bookedVehiclesOn = d => new Set(jobsOn(d).flatMap(vehIdsOf));
@@ -1510,7 +1513,7 @@ function CalendarView({ data, setView }) {
   const SurveyCard = ({ en, big }) => (
     <div onClick={() => setView({ screen:"enquiryDetail", id:en.id })}
       style={{ background:"#FFFBF2", border:"1px solid #FBE3B3", borderLeft:`4px solid ${AMBER}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
-      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:AMBER, textTransform:"uppercase", letterSpacing:".05em" }}>Survey</div>
+      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:AMBER, textTransform:"uppercase", letterSpacing:".05em" }}>Survey{en.surveyTime ? ` · ${en.surveyTime}` : ""}</div>
       <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, en.customerId)}</div>
       <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:1, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{en.fromTown || "—"} → {en.toTown || "—"}</div>
     </div>
