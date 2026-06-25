@@ -1575,7 +1575,7 @@ function CalendarView({ data, setView }) {
     <div onClick={() => setView({ screen:"jobDetail", id:j.id })}
       style={{ background:"#fff", border:"1px solid #E9EEED", borderLeft:`4px solid ${colorOf(m)}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
-        <span style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</span>
+        <span style={{ flex:1, minWidth:0, fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</span>
         {st.time && <span style={{ fontSize: big?12:10.5, fontWeight:700, color:"#6A7B77", flexShrink:0 }}>{st.time}</span>}
       </div>
       <div style={{ fontSize: big?12:10.5, fontWeight:800, color:colorOf(m), marginTop:1, textTransform:"uppercase", letterSpacing:".03em" }}>{st.type}</div>
