@@ -1,113 +1,119 @@
 import { useState, useEffect, useCallback } from "react";
-import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase } from "./supabase";
-import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
+import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, uploadPhoto, deletePhoto } from "./supabase";
 
-const DB_KEY = "removals_data";
-const SIG_KEY = "removals_sigs";
-const TOMB_KEY = "removals_deleted";
-const TABLES = ["customers", "enquiries", "jobs", "vehicles", "staff"];
-const EMPTY = { customers: [], enquiries: [], jobs: [], vehicles: [], staff: [] };
-
-// Brand
-const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
-
-const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost"];
-const JOB_STATUSES = ["Booked", "In Progress", "Completed"];
-const PROPERTY_TYPES = ["House", "Flat / Apartment", "Bungalow", "Maisonette", "Office", "Storage Unit", "Other"];
-const QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Declined"];
+const DB_KEY = "wscrm_data";
 
 const STATUS_META = {
-  New:         { color: "#2563EB", bg: "#EFF6FF" },
-  Surveyed:    { color: "#0891B2", bg: "#ECFEFF" },
-  Quoted:      { color: "#D97706", bg: "#FFFBEB" },
-  Won:         { color: "#059669", bg: "#ECFDF5" },
-  Lost:        { color: "#DC2626", bg: "#FEF2F2" },
-  Booked:      { color: "#2563EB", bg: "#EFF6FF" },
-  "In Progress": { color: "#D97706", bg: "#FFFBEB" },
-  Completed:   { color: "#059669", bg: "#ECFDF5" },
+  Booked:        { color: "#2563EB", bg: "#EFF6FF" },
+  Complete:      { color: "#059669", bg: "#ECFDF5" },
+  Invoiced:      { color: "#7C3AED", bg: "#F5F3FF" },
+  Paid:          { color: "#374151", bg: "#F9FAFB" },
 };
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+const DAMAGE_TYPES    = ["Chip", "Crack", "Scratch"];
+const JOB_TYPES       = ["Repair", "Replace"];
+const PAYMENT_TYPES   = ["Private", "Insurance"];
+
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function todayISO() { return new Date().toISOString().split("T")[0]; }
+
+// App settings (stored locally) — e.g. the starting customer number
+const SETTINGS_KEY = "wscrm_settings";
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch { return {}; }
+}
+function saveSettings(s) {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+}
+// Work out the next customer number: highest existing + 1, or the start number if none yet
+function nextCustNumber(customers) {
+  const start = parseInt(loadSettings().custNumberStart) || 1000;
+  const nums = (customers || []).map(c => parseInt(c.custNumber)).filter(n => !isNaN(n));
+  if (nums.length === 0) return start;
+  return Math.max(...nums) + 1;
+}
+
+// Format ISO date (YYYY-MM-DD) → DD/MM/YYYY for display
 function fmtDate(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d)) return iso;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
-function fmtDateShort(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d)) return iso;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
-function gbp(n) { return "£" + (Number(n) || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
-
-// Compute inventory totals from a list of {cuFt,m3,kg,qty}
-function inventoryTotals(inv) {
-  let cuFt = 0, m3 = 0, kg = 0;
-  for (const it of inv || []) {
-    const q = it.qty || 0;
-    cuFt += (it.cuFt || 0) * q;
-    m3 += (it.m3 || 0) * q;
-    kg += (it.kg || 0) * q;
-  }
-  return { cuFt: Math.round(cuFt), m3: Math.round(m3 * 100) / 100, kg: Math.round(kg) };
-}
-function quoteTotal(lines, vat) {
-  const sub = (lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  return Math.round((vat ? sub * 1.2 : sub) * 100) / 100;
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
 }
 
-// ── Local storage (working copy) ────────────────────────────────────────────
 function loadData() {
   try {
     const raw = localStorage.getItem(DB_KEY);
-    if (raw) return { ...EMPTY, ...JSON.parse(raw) };
+    if (raw) {
+      const data = JSON.parse(raw);
+      // Strip any leftover base64 photo data (old format) but keep URL references
+      if (data.jobs) {
+        data.jobs = data.jobs.map(j => {
+          const strip = arr => (arr || []).filter(p => p && p.url); // keep only uploaded (url) photos
+          return { ...j, photosBefore: strip(j.photosBefore), photosAfter: strip(j.photosAfter) };
+        });
+      }
+      return data;
+    }
   } catch {}
-  return { ...EMPTY };
+  return { customers: [], vehicles: [], jobs: [], invoices: [], mileage: [], technicians: [] };
 }
 
-// Add/refresh updatedAt so the newest edit wins on merge
+// One-time cleanup: remove the old duplicate lastsync copy
+function clearStorageBloat() {
+  try {
+    localStorage.removeItem("wscrm_lastsync");
+  } catch {}
+}
+function saveData(data) {
+  const stamped = stampData(data);
+  localStorage.setItem(DB_KEY, JSON.stringify(stamped));
+  return pushToCloud(stamped).catch(() => {/* offline — will sync later */});
+}
+
+// Add/refresh an updatedAt timestamp so the newest edit wins when merging
 function stampData(data) {
   const now = Date.now();
   const prev = loadData();
   const stamp = (arr, prevArr) => (arr || []).map(rec => {
     const old = (prevArr || []).find(p => p.id === rec.id);
-    const a = old ? { ...old } : null; if (a) delete a.updatedAt;
-    const b = { ...rec }; delete b.updatedAt;
-    const changed = !old || JSON.stringify(a) !== JSON.stringify(b);
+    const oldComparable = old ? { ...old } : null;
+    if (oldComparable) delete oldComparable.updatedAt;
+    const recComparable = { ...rec };
+    delete recComparable.updatedAt;
+    const changed = !old || JSON.stringify(oldComparable) !== JSON.stringify(recComparable);
     return { ...rec, updatedAt: changed ? now : (old.updatedAt || now) };
   });
   return {
+    ...data,
     customers: stamp(data.customers, prev.customers),
-    enquiries: stamp(data.enquiries, prev.enquiries),
-    jobs: stamp(data.jobs, prev.jobs),
-    vehicles: stamp(data.vehicles, prev.vehicles),
-    staff: stamp(data.staff, prev.staff),
+    vehicles:  stamp(data.vehicles,  prev.vehicles),
+    jobs:      stamp(data.jobs,      prev.jobs),
+    invoices:  stamp(data.invoices,  prev.invoices),
   };
 }
 
+// Global flag so the realtime listener doesn't interfere mid-save
 let SAVING_IN_PROGRESS = false;
 
-// Save then reload, waiting for the cloud push first (important on mobile)
+// Save then reload, but wait for cloud push first (important on mobile)
 async function saveAndReload(data) {
   showSavingOverlay();
   SAVING_IN_PROGRESS = true;
   const stamped = stampData(data);
   localStorage.setItem(DB_KEY, JSON.stringify(stamped));
+  // Push only changed records, with a safety timeout so it never hangs forever
   try {
     await Promise.race([
       pushChangedOnly(stamped),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after 12s")), 12000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout after 12s")), 12000)),
     ]);
   } catch (e) {
     hideSavingOverlay();
     SAVING_IN_PROGRESS = false;
+    // Only warn if genuinely online — offline saves are normal and sync later
     const msg = e?.message || "";
-    const offline = !navigator.onLine || /Load failed|timeout|Failed to fetch|NetworkError/.test(msg);
-    if (!offline) alert("Sync problem: " + (msg || JSON.stringify(e)));
+    const isOffline = !navigator.onLine || msg.includes("Load failed") || msg.includes("timeout") || msg.includes("Failed to fetch") || msg.includes("NetworkError");
+    if (!isOffline) alert("Sync problem: " + (msg || JSON.stringify(e)));
     window.location.reload();
     return;
   }
@@ -115,90 +121,140 @@ async function saveAndReload(data) {
   window.location.reload();
 }
 
+// Simple full-screen "Saving…" overlay to prevent double-taps during save
 function showSavingOverlay() {
-  if (document.getElementById("rm-saving")) return;
+  if (document.getElementById("crm-saving-overlay")) return;
   const el = document.createElement("div");
-  el.id = "rm-saving";
-  el.style.cssText = "position:fixed;inset:0;background:rgba(15,118,110,.5);z-index:9999;display:flex;align-items:center;justify-content:center;";
-  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px 28px;font-family:Inter,sans-serif;font-weight:700;color:#0F766E;font-size:15px;box-shadow:0 4px 20px rgba(0,0,0,.2);">💾 Saving…</div>';
+  el.id = "crm-saving-overlay";
+  el.style.cssText = "position:fixed;inset:0;background:rgba(30,58,95,.55);z-index:9999;display:flex;align-items:center;justify-content:center;";
+  el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:20px 28px;font-family:Inter,sans-serif;font-weight:700;color:#1E3A5F;font-size:15px;box-shadow:0 4px 20px rgba(0,0,0,.2);">💾 Saving…</div>';
   document.body.appendChild(el);
 }
-function hideSavingOverlay() { document.getElementById("rm-saving")?.remove(); }
-
-// Signatures: only mark a record uploaded AFTER a genuine success
-function wasUploaded(id) {
-  try { return Object.prototype.hasOwnProperty.call(JSON.parse(localStorage.getItem(SIG_KEY) || "{}"), id); }
-  catch { return false; }
+function hideSavingOverlay() {
+  const el = document.getElementById("crm-saving-overlay");
+  if (el) el.remove();
 }
-// Tombstones: deleted ids can never be re-added by a merge
+
+// Remove a record's signature so a deleted item isn't re-synced
+function removeSig(id) {
+  try {
+    const sigs = JSON.parse(localStorage.getItem("wscrm_sigs") || "{}");
+    delete sigs[id];
+    localStorage.setItem("wscrm_sigs", JSON.stringify(sigs));
+  } catch {}
+}
+
+// Check if an id was previously uploaded to the cloud (exists in signatures)
+function wasUploaded(id) {
+  try {
+    const sigs = JSON.parse(localStorage.getItem("wscrm_sigs") || "{}");
+    return Object.prototype.hasOwnProperty.call(sigs, id);
+  } catch { return false; }
+}
+
+// Tombstones: remember deleted IDs so they can never be re-added by a merge
 function addTombstone(id) {
   try {
-    const t = JSON.parse(localStorage.getItem(TOMB_KEY) || "[]");
-    if (!t.includes(id)) { t.push(id); localStorage.setItem(TOMB_KEY, JSON.stringify(t)); }
+    const t = JSON.parse(localStorage.getItem("wscrm_deleted") || "[]");
+    if (!t.includes(id)) { t.push(id); localStorage.setItem("wscrm_deleted", JSON.stringify(t)); }
   } catch {}
 }
 function getTombstones() {
-  try { return JSON.parse(localStorage.getItem(TOMB_KEY) || "[]"); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem("wscrm_deleted") || "[]"); } catch { return []; }
 }
 
-// Push only changed/new records (compared against last-synced signatures)
+// Compare against last-synced signatures and push only changed/new records
 async function pushChangedOnly(data) {
   let sigs = {};
-  try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
-  let failed = 0, lastError = "";
+  try { sigs = JSON.parse(localStorage.getItem("wscrm_sigs") || "{}"); } catch {}
+
+  const tables = [
+    { name: "customers", key: "customers" },
+    { name: "vehicles",  key: "vehicles"  },
+    { name: "jobs",      key: "jobs"      },
+    { name: "invoices",  key: "invoices"  },
+    { name: "mileage",   key: "mileage"   },
+  ];
+
+  let failed = 0;
+  let lastError = "";
   const newSigs = {};
-  for (const name of TABLES) {
-    for (const rec of data[name] || []) {
-      const sig = JSON.stringify(rec);
+
+  for (const t of tables) {
+    const current = data[t.key] || [];
+    for (const rec of current) {
+      const photoRefs = arr => (arr || []).map(p => p.url || p.id);
+      const clean = { ...rec, photosBefore: photoRefs(rec.photosBefore), photosAfter: photoRefs(rec.photosAfter) };
+      const sig = JSON.stringify(clean);
       if (sigs[rec.id] !== sig) {
         try {
-          await pushOne(name, rec);
-          newSigs[rec.id] = sig; // record signature ONLY after success
+          await pushOne(t.name, rec);
+          newSigs[rec.id] = sig; // only record signature AFTER a successful upload
         } catch (e) {
-          failed++; lastError = e?.message || JSON.stringify(e);
-          if (sigs[rec.id]) newSigs[rec.id] = sigs[rec.id]; // keep old so we retry
+          failed++;
+          lastError = (e?.message || JSON.stringify(e));
+          // Keep the OLD signature (if any) so we retry next time; do NOT mark as uploaded
+          if (sigs[rec.id]) newSigs[rec.id] = sigs[rec.id];
+          console.warn("Sync skipped for", t.name, rec.id, e?.message);
         }
       } else {
-        newSigs[rec.id] = sig;
+        newSigs[rec.id] = sig; // unchanged and already uploaded
       }
     }
   }
-  try { localStorage.setItem(SIG_KEY, JSON.stringify(newSigs)); } catch {}
-  if (failed > 0) throw new Error(`${failed} record(s) failed to sync. Last error: ${lastError}`);
+  // Store only the compact signatures (tiny — no photo data)
+  try { localStorage.setItem("wscrm_sigs", JSON.stringify(newSigs)); } catch {}
+
+  if (failed > 0) {
+    throw new Error(`${failed} record(s) failed to sync. Last error: ${lastError}`);
+  }
 }
 
-// Replace or insert a record into the right table, return new data object
-function upsertLocal(data, table, record) {
-  const arr = data[table] || [];
-  const idx = arr.findIndex(r => r.id === record.id);
-  const next = idx >= 0 ? arr.map(r => r.id === record.id ? record : r) : [...arr, record];
-  return { ...data, [table]: next };
-}
-
+// Export all data as a downloadable JSON backup file
 function exportBackup() {
   const data = loadData();
+  const stamp = new Date().toISOString().split("T")[0];
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = `removals-backup-${todayISO()}.json`; a.click();
-  URL.revokeObjectURL(url);
+  a.href = url;
+  a.download = `windscreen-crm-backup-${stamp}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// ── Icons ───────────────────────────────────────────────────────────────────
+// Delete photos from jobs older than one year (keeps the job records)
+function cleanupOldPhotos() {
+  const data = loadData();
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  let cleaned = 0;
+  const jobs = data.jobs.map(j => {
+    if (j.date && new Date(j.date) < oneYearAgo) {
+      const had = (j.photosBefore?.length || 0) + (j.photosAfter?.length || 0);
+      if (had > 0) { cleaned += had; return { ...j, photosBefore: [], photosAfter: [] }; }
+    }
+    return j;
+  });
+  if (cleaned === 0) { alert("No photos older than a year to remove."); return; }
+  if (!window.confirm(`Remove ${cleaned} photo(s) from jobs older than a year? Job records are kept.`)) return;
+  saveData({ ...data, jobs });
+  alert(`Removed ${cleaned} old photo(s).`);
+}
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = "currentColor" }) => {
   const paths = {
     dashboard: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
-    enquiries: "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 3v-3z",
-    jobs: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01",
     customers: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z",
-    calendar: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
-    plus: "M12 4v16m8-8H4", back: "M15 19l-7-7 7-7", check: "M5 13l4 4L19 7",
-    truck: "M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 001 1h1m-1-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1",
-    box: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4",
-    trash: "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16",
-    edit: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
-    quote: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
-    company: "M3 21h18M5 21V7l8-4v18M19 21V11l-6-4M9 9v.01M9 12v.01M9 15v.01M9 18v.01",
+    jobs:      "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
+    invoices:  "M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z",
+    plus:      "M12 4v16m8-8H4",
+    back:      "M15 19l-7-7 7-7",
+    edit:      "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
+    trash:     "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16",
+    check:     "M5 13l4 4L19 7",
+    calendar:  "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -207,991 +263,1454 @@ const Icon = ({ name, size = 18, color = "currentColor" }) => {
   );
 };
 
-// ── Shared UI ───────────────────────────────────────────────────────────────
+// ── Shared UI ─────────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
-  const m = STATUS_META[status] || { color: "#6B7280", bg: "#F3F4F6" };
+  const m = STATUS_META[status] || STATUS_META["Booked"];
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 10px", borderRadius: 99, fontSize: 12, fontWeight: 600, color: m.color, background: m.bg, border: `1px solid ${m.color}33` }}>
+    <span style={{ display:"inline-flex", alignItems:"center", padding:"2px 10px", borderRadius:99, fontSize:12, fontWeight:600, color:m.color, background:m.bg, border:`1px solid ${m.color}33` }}>
       {status}
     </span>
   );
 }
-function Field({ label, children, required, hint }) {
+
+function Field({ label, children, required }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-        {label}{required && <span style={{ color: "#EF4444" }}> *</span>}
+      <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6B7280", marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>
+        {label}{required && <span style={{ color:"#EF4444" }}> *</span>}
       </label>
       {children}
-      {hint && <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 4 }}>{hint}</div>}
     </div>
   );
 }
-const inputStyle = { width: "100%", padding: "10px 13px", borderRadius: 11, border: "1.5px solid #E3E9E8", fontSize: 15, background: "#F7FAF9", boxSizing: "border-box", outline: "none", fontFamily: "inherit", color: "#10211E" };
-function Input({ value, onChange, type = "text", placeholder, required }) {
-  return <input style={inputStyle} type={type} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} />;
-}
-function Textarea({ value, onChange, placeholder, rows = 3 }) {
-  return <textarea style={{ ...inputStyle, resize: "vertical" }} rows={rows} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} />;
+
+const inputStyle = { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #E5E7EB", fontSize:15, background:"#FAFAFA", boxSizing:"border-box", outline:"none", fontFamily:"inherit", color:"#111827" };
+
+function Input({ value, onChange, type="text", placeholder, required }) {
+  return <input style={inputStyle} type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} />;
 }
 function Select({ value, onChange, options, placeholder }) {
   return (
-    <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={value ?? ""} onChange={e => onChange(e.target.value)}>
+    <select style={{ ...inputStyle, appearance:"none", cursor:"pointer" }} value={value} onChange={e => onChange(e.target.value)}>
       {placeholder && <option value="">{placeholder}</option>}
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
   );
 }
-function Btn({ children, onClick, variant = "primary", size = "md", disabled, style: extra }) {
-  const base = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 11, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer", border: "none", fontFamily: "inherit", transition: "transform .15s, opacity .15s" };
-  const v = {
-    primary: { background: TEAL, color: "#fff", boxShadow: "0 4px 12px rgba(14,124,115,.26)" },
-    amber: { background: AMBER, color: "#fff", boxShadow: "0 4px 12px rgba(245,158,11,.30)" },
-    ghost: { background: "#EEF3F2", color: TEAL_D },
-    danger: { background: "#FEE2E2", color: "#DC2626" },
-    grey: { background: "#EEF3F2", color: "#34433F" },
-  };
-  const p = size === "sm" ? { padding: "7px 13px", fontSize: 13 } : { padding: "10px 18px", fontSize: 14 };
-  return <button className={size === "sm" ? "rm-btn-sm" : "rm-btn"} style={{ ...base, ...v[variant], ...p, opacity: disabled ? .5 : 1, ...extra }} onClick={onClick} disabled={disabled}>{children}</button>;
+function Btn({ children, onClick, variant="primary", size="md", disabled, style: extra }) {
+  const base = { display:"inline-flex", alignItems:"center", gap:6, borderRadius:8, fontWeight:600, cursor:disabled?"not-allowed":"pointer", border:"none", fontFamily:"inherit", transition:"opacity .15s" };
+  const v = { primary:{background:"#1E3A5F",color:"#fff"}, amber:{background:"#F59E0B",color:"#fff"}, ghost:{background:"transparent",color:"#1E3A5F",border:"1.5px solid #1E3A5F"}, danger:{background:"#FEE2E2",color:"#DC2626"} };
+  const p = size==="sm" ? { padding:"6px 12px", fontSize:13 } : { padding:"10px 18px", fontSize:14 };
+  return <button className={size==="sm" ? "crm-btn-sm" : "crm-btn"} style={{ ...base, ...v[variant], ...p, opacity:disabled?.5:1, ...extra }} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 function Card({ children, onClick, style: extra }) {
-  return <div onClick={onClick} style={{ background: "#fff", borderRadius: 16, padding: "15px 17px", boxShadow: "0 1px 2px rgba(16,33,30,.05), 0 6px 18px rgba(16,33,30,.05)", marginBottom: 11, cursor: onClick ? "pointer" : "default", border: "1px solid #E9EEED", ...extra }}>{children}</div>;
+  return <div onClick={onClick} style={{ background:"#fff", borderRadius:12, padding:"14px 16px", boxShadow:"0 1px 3px rgba(0,0,0,.07)", marginBottom:10, cursor:onClick?"pointer":"default", border:"1px solid #F3F4F6", ...extra }}>{children}</div>;
 }
-function Modal({ title, onClose, children, wide }) {
+function Modal({ title, onClose, children }) {
   return (
-    <div className="rm-modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(15,46,42,.45)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div className="rm-modal" style={{ background: "#fff", borderRadius: "22px 22px 0 0", width: "100%", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "20px 20px 0", flexShrink: 0 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#10211E", letterSpacing: "-.01em" }}>{title}</h3>
-            <button onClick={onClose} style={{ background: "#EEF3F2", border: "none", borderRadius: 99, width: 34, height: 34, cursor: "pointer", fontSize: 18, color: "#6A7B77" }}>×</button>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:100, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div className="crm-shell" style={{ background:"#fff", borderRadius:"20px 20px 0 0", width:"100%", maxHeight:"90vh", display:"flex", flexDirection:"column" }}>
+        <div style={{ padding:"20px 20px 0", flexShrink:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+            <h3 style={{ margin:0, fontSize:18, fontWeight:700, color:"#111827" }}>{title}</h3>
+            <button onClick={onClose} style={{ background:"#F3F4F6", border:"none", borderRadius:99, width:32, height:32, cursor:"pointer", fontSize:18, color:"#6B7280" }}>×</button>
           </div>
         </div>
-        <div style={{ overflowY: "auto", padding: "0 20px 20px", flex: 1 }}>{children}</div>
+        <div style={{ overflowY:"auto", padding:"0 20px 20px", flex:1 }}>
+          {children}
+        </div>
       </div>
     </div>
   );
 }
-function Empty({ icon, text }) {
-  return (
-    <div style={{ textAlign: "center", padding: "48px 20px", color: "#94A4A0" }}>
-      <div style={{ marginBottom: 10, display: "flex", justifyContent: "center" }}><Icon name={icon} size={40} color="#C4D0CD" /></div>
-      <div style={{ fontSize: 14 }}>{text}</div>
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({ data, setView, notifStatus, requestNotifications }) {
+  const todayStr = todayISO();
+  const todayJobs = data.jobs
+    .filter(j => j.date === todayStr)
+    .sort((a, b) => {
+      if (!a.jobTime && !b.jobTime) return 0;
+      if (!a.jobTime) return 1;
+      if (!b.jobTime) return -1;
+      return a.jobTime.localeCompare(b.jobTime);
+    });
+  const openJobs = data.jobs.filter(j => !["Paid","Complete"].includes(j.status));
+  const unpaidInvoices = data.invoices.filter(i => !i.paid);
+  const unpaidTotal = unpaidInvoices.reduce((s,i) => s + (parseFloat(i.total)||0), 0);
+  // Follow-ups due today or overdue
+  const dueFollowUps = data.customers
+    .filter(c => c.followUpDate && c.followUpDate <= todayStr)
+    .sort((a,b) => a.followUpDate.localeCompare(b.followUpDate));
+
+  const StatCard = ({ label, value, color, sub, onClick }) => (
+    <div onClick={onClick} style={{ background:"#fff", borderRadius:12, padding:16, border:"1px solid #F3F4F6", boxShadow:"0 1px 3px rgba(0,0,0,.07)", flex:1, minWidth:100, cursor: onClick ? "pointer" : "default" }}>
+      <div style={{ fontSize:26, fontWeight:800, color }}>{value}</div>
+      <div style={{ fontSize:12, color:"#6B7280", fontWeight:600, marginTop:2 }}>{label}</div>
+      {sub && <div style={{ fontSize:11, color:"#9CA3AF", marginTop:2 }}>{sub}</div>}
     </div>
   );
-}
 
-// ── Lookups ─────────────────────────────────────────────────────────────────
-function custName(data, id) {
-  const c = (data.customers || []).find(x => x.id === id);
-  if (!c) return "Unknown";
-  return c.company ? `${c.name} (${c.company})` : c.name;
-}
-
-// ── Dashboard ───────────────────────────────────────────────────────────────
-function Dashboard({ data, setView }) {
-  const enquiries = data.enquiries || [];
-  const jobs = data.jobs || [];
-  const open = enquiries.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status));
-  const quotesOut = enquiries.filter(e => e.status === "Quoted");
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  const thisMonthEnq = enquiries.filter(e => new Date(e.createdAt).getTime() >= monthStart);
-  const wonThisMonth = thisMonthEnq.filter(e => e.status === "Won").length;
-  const convRate = thisMonthEnq.length ? Math.round((wonThisMonth / thisMonthEnq.length) * 100) : 0;
-  const upcoming = jobs
-    .filter(j => j.status !== "Completed" && j.moveDate && j.moveDate >= todayISO())
-    .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""))
-    .slice(0, 6);
-  const followUps = enquiries
-    .filter(e => e.followUpDate && !["Won", "Lost"].includes(e.status))
-    .sort((a, b) => (a.followUpDate || "").localeCompare(b.followUpDate || ""))
-    .slice(0, 6);
-  const todaysSurveys = enquiries
-    .filter(e => e.surveyDate === todayISO() && e.status !== "Lost")
-    .sort((a, b) => (a.surveyTime || "").localeCompare(b.surveyTime || ""));
-  // Availability today
-  const vehIdsOf = j => (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []);
-  const todayJobs = jobs.filter(j => j.moveDate === todayISO());
-  const bookedVehToday = new Set(todayJobs.flatMap(vehIdsOf));
-  const bookedStaffToday = new Set(todayJobs.flatMap(j => j.crew || []));
-  const vehicles = data.vehicles || [];
-  const staffActive = (data.staff || []).filter(s => s.active !== false);
-  const availChip = (label, booked) => (
-    <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 11px", borderRadius: 99, fontSize: 12.5, fontWeight: 700, background: booked ? "#F2F5F4" : "#E7F2F0", color: booked ? "#B7C3C0" : TEAL_D, textDecoration: booked ? "line-through" : "none", border: booked ? "1px solid #EAEFEE" : "1px solid #CDE7E2" }}>
-      <span style={{ width: 8, height: 8, borderRadius: 99, background: booked ? "#C4D0CD" : "#22C55E" }} />{label}
-    </span>
-  );
-
-  const Stat = ({ label, value, sub, color, onClick }) => (
-    <div onClick={onClick} style={{ flex: 1, background: "#fff", borderRadius: 12, padding: "14px 12px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", cursor: onClick ? "pointer" : "default", border: "1px solid #F3F4F6", minWidth: 0 }}>
-      <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 5, fontWeight: 600 }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
+  // Follow-up actions
+  async function clearFollowUp(custId) {
+    const customers = data.customers.map(c => c.id === custId ? { ...c, followUpDate:"", followUpNote:"" } : c);
+    await saveAndReload({ ...data, customers });
+  }
+  async function snoozeFollowUp(custId, days) {
+    const base = new Date();
+    base.setDate(base.getDate() + days);
+    const newDate = `${base.getFullYear()}-${String(base.getMonth()+1).padStart(2,"0")}-${String(base.getDate()).padStart(2,"0")}`;
+    const customers = data.customers.map(c => c.id === custId ? { ...c, followUpDate:newDate } : c);
+    await saveAndReload({ ...data, customers });
+  }
+  async function snoozeToDate(custId, newDate) {
+    if (!newDate) return;
+    const customers = data.customers.map(c => c.id === custId ? { ...c, followUpDate:newDate } : c);
+    await saveAndReload({ ...data, customers });
+  }
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-        <Stat label="Open enquiries" value={open.length} color={TEAL} onClick={() => setView({ screen: "enquiries", filter: "Open" })} />
-        <Stat label="Quotes out" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
+      {notifStatus === "default" && (
+        <div onClick={requestNotifications} style={{ background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:10, padding:"10px 14px", marginBottom:16, cursor:"pointer", display:"flex", alignItems:"center", gap:10 }}>
+          <span style={{ fontSize:20 }}>🔔</span>
+          <div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#92400E" }}>Enable job alerts</div>
+            <div style={{ fontSize:12, color:"#B45309" }}>Tap to get notified at 9am & 1hr before each job</div>
+          </div>
+        </div>
+      )}
+      {notifStatus === "denied" && (
+        <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:10, padding:"10px 14px", marginBottom:16 }}>
+          <div style={{ fontSize:12, color:"#991B1B" }}>🔕 Notifications blocked — enable in phone Settings → Safari/Chrome → Notifications</div>
+        </div>
+      )}
+      <div style={{ marginBottom:20 }}>
+        <h2 style={{ margin:0, fontSize:22, fontWeight:800, color:"#1E3A5F" }}>Good day 👋</h2>
+        <p style={{ margin:"4px 0 0", color:"#6B7280", fontSize:14 }}>{new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</p>
       </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-        <Stat label="Booked moves" value={jobs.filter(j => j.status !== "Completed").length} color="#2563EB" onClick={() => setView({ screen: "jobs" })} />
-        <Stat label="Won this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" />
+      <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
+        <StatCard label="Today's Jobs" value={todayJobs.length} color="#1E3A5F" onClick={() => setView({ screen:"jobs", filter:"Today" })} />
+        <StatCard label="Open Jobs" value={openJobs.length} color="#D97706" onClick={() => setView({ screen:"jobs", filter:"Open" })} />
+        <StatCard label="Outstanding" value={`£${unpaidTotal.toFixed(0)}`} color="#059669" sub={`${unpaidInvoices.length} invoices`} onClick={() => setView({ screen:"invoices", filter:"Unpaid" })} />
       </div>
-
-      <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
-        <Icon name="plus" size={16} /> New Enquiry
-      </Btn>
-
-      {todaysSurveys.length > 0 && (
-        <>
-          <SectionTitle>Today's surveys</SectionTitle>
-          {todaysSurveys.map(e => (
-            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: AMBER, textTransform: "uppercase", letterSpacing: ".05em" }}>Survey{e.surveyTime ? ` · ${e.surveyTime}` : ""}</div>
-                  <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
-                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
+      {dueFollowUps.length > 0 && (
+        <div style={{ marginBottom:20 }}>
+          <h3 style={{ fontSize:14, fontWeight:700, color:"#374151", margin:"0 0 10px", textTransform:"uppercase", letterSpacing:"0.05em" }}>📞 Follow-ups Due</h3>
+          {dueFollowUps.map(c => (
+            <Card key={c.id}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                <div onClick={() => setView({ screen:"customerDetail", id:c.id })} style={{ cursor:"pointer", flex:1 }}>
+                  <div style={{ fontWeight:700, fontSize:15, color:"#1E3A5F" }}>{c.company || c.companyContact || "Customer"}</div>
+                  {c.followUpNote && <div style={{ fontSize:13, color:"#6B7280", marginTop:2 }}>{c.followUpNote}</div>}
+                  <div style={{ fontSize:12, color: c.followUpDate < todayStr ? "#DC2626" : "#D97706", fontWeight:600, marginTop:2 }}>
+                    {c.followUpDate < todayStr ? "⚠️ Overdue · " : "Due today · "}{fmtDate(c.followUpDate)}
+                  </div>
                 </div>
-                <StatusBadge status={e.status} />
+                {c.phone && <a href={`tel:${c.phone}`} onClick={e => e.stopPropagation()} style={{ background:"#1E3A5F", color:"#fff", borderRadius:8, padding:"10px 14px", textDecoration:"none", fontSize:14, fontWeight:600, whiteSpace:"nowrap" }}>📞 Call</a>}
+              </div>
+              <div style={{ display:"flex", gap:8, marginTop:10, flexWrap:"wrap", alignItems:"center" }}>
+                <button onClick={() => clearFollowUp(c.id)} style={{ background:"#DCFCE7", color:"#15803D", border:"none", borderRadius:8, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>✓ Done</button>
+                <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:"#F3F4F6", borderRadius:8, padding:"6px 10px" }}>
+                  <span style={{ fontSize:13, fontWeight:600, color:"#374151" }}>📅 New date:</span>
+                  <input type="date" defaultValue={c.followUpDate} onChange={e => snoozeToDate(c.id, e.target.value)}
+                    style={{ border:"none", background:"transparent", fontSize:13, fontFamily:"inherit", color:"#1E3A5F", fontWeight:600 }} />
+                </div>
               </div>
             </Card>
           ))}
-        </>
-      )}
-
-      {(vehicles.length > 0 || staffActive.length > 0) && (
-        <>
-          <SectionTitle>Available today</SectionTitle>
-          <Card>
-            {vehicles.length > 0 && <>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 7 }}>Vehicles</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: staffActive.length ? 13 : 0 }}>{vehicles.map(v => availChip(v.name, bookedVehToday.has(v.id)))}</div>
-            </>}
-            {staffActive.length > 0 && <>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 7 }}>Staff</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>{staffActive.map(s => availChip(s.name, bookedStaffToday.has(s.name)))}</div>
-            </>}
-          </Card>
-        </>
-      )}
-
-      {followUps.length > 0 && (
-        <>
-          <SectionTitle>Follow-ups</SectionTitle>
-          {followUps.map(e => {
-            const overdue = e.followUpDate <= todayISO();
-            return (
-              <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={overdue ? { borderColor: "#FBD9A0", background: "#FFFBF2" } : undefined}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
-                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.followUpNote || "Follow up"}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77" }}>{overdue ? "Due " : ""}{fmtDateShort(e.followUpDate)}</div>
-                    <StatusBadge status={e.status} />
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-        </>
-      )}
-
-      <SectionTitle>Upcoming moves</SectionTitle>
-      {upcoming.length === 0 && <Empty icon="truck" text="No moves coming up" />}
-      {upcoming.map(j => (
-        <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(j.moveDate)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
-            </div>
-            <StatusBadge status={j.status} />
-          </div>
-        </Card>
-      ))}
-    </div>
-  );
-}
-function SectionTitle({ children }) {
-  return <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "18px 0 8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{children}</div>;
-}
-
-// ── Enquiries list ──────────────────────────────────────────────────────────
-function EnquiriesList({ data, setView, initialFilter }) {
-  const [filter, setFilter] = useState(initialFilter || "Open");
-  const enquiries = data.enquiries || [];
-  const filters = ["Open", ...ENQUIRY_STATUSES, "All"];
-  const shown = enquiries
-    .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : e.status === filter)
-    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
-        <Btn size="sm" onClick={() => setView({ screen: "newEnquiry" })}><Icon name="plus" size={14} /> New</Btn>
-      </div>
-      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 6 }}>
-        {filters.map(f => (
-          <button key={f} onClick={() => setFilter(f)} style={{
-            padding: "6px 14px", borderRadius: 99, border: "none", whiteSpace: "nowrap", cursor: "pointer",
-            fontSize: 13, fontWeight: 600, background: filter === f ? TEAL : "#F3F4F6", color: filter === f ? "#fff" : "#6B7280",
-          }}>{f}</button>
-        ))}
-      </div>
-      {shown.length === 0 && <Empty icon="enquiries" text="No enquiries here" />}
-      {shown.map(e => (
-        <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, e.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
-              <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
-                {e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"}
-                {e.volumeCuFt ? ` · ${e.volumeCuFt} cu ft` : ""}
-                {e.quoteTotal ? ` · ${gbp(e.quoteTotal)}` : ""}
-              </div>
-            </div>
-            <StatusBadge status={e.status} />
-          </div>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-// ── Customer picker (existing or add new inline) ────────────────────────────
-function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
-  const [mode, setMode] = useState(customerId ? "existing" : (data.customers || []).length ? "existing" : "new");
-  const customers = [...(data.customers || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  return (
-    <div style={{ background: "#F9FAFB", borderRadius: 10, padding: 12, marginBottom: 14, border: "1px solid #F3F4F6" }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        <Btn size="sm" variant={mode === "existing" ? "primary" : "grey"} onClick={() => setMode("existing")}>Existing customer</Btn>
-        <Btn size="sm" variant={mode === "new" ? "primary" : "grey"} onClick={() => { setMode("new"); onPick(""); }}>New customer</Btn>
-      </div>
-      {mode === "existing" ? (
-        <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={customerId || ""} onChange={e => onPick(e.target.value)}>
-          <option value="">Select customer…</option>
-          {customers.map(c => <option key={c.id} value={c.id}>{c.company ? `${c.name} — ${c.company}` : c.name}</option>)}
-        </select>
-      ) : (
-        <div>
-          <Input value={newCust.name} onChange={v => setNewCust({ ...newCust, name: v })} placeholder="Full name *" />
-          <div style={{ height: 8 }} />
-          <Input value={newCust.phone} onChange={v => setNewCust({ ...newCust, phone: v })} placeholder="Phone" />
-          <div style={{ height: 8 }} />
-          <Input value={newCust.email} onChange={v => setNewCust({ ...newCust, email: v })} placeholder="Email" type="email" />
         </div>
       )}
-    </div>
-  );
-}
-
-// ── Enquiry form (create / edit) ────────────────────────────────────────────
-function EnquiryForm({ data, onClose, editEnquiry }) {
-  const e = editEnquiry || {};
-  const [customerId, setCustomerId] = useState(e.customerId || "");
-  const [newCust, setNewCust] = useState({ name: "", phone: "", email: "" });
-  const [f, setF] = useState({
-    preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false,
-    surveyDate: e.surveyDate || "", surveyTime: e.surveyTime || "",
-    fromAddress1: e.fromAddress1 || "", fromAddress2: e.fromAddress2 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
-    fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
-    toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
-    toPropertyType: e.toPropertyType || "", toFloor: e.toFloor || "", toAccess: e.toAccess || "",
-    distanceMiles: e.distanceMiles || "", notes: e.notes || "",
-  });
-  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-
-  // When an existing customer is picked, prefill "moving from":
-  // their last move's TO address if they've moved before, else their stored address.
-  function selectCustomer(cid) {
-    setCustomerId(cid);
-    if (!cid) return;
-    const cust = (data.customers || []).find(c => c.id === cid);
-    const pastMoves = (data.jobs || [])
-      .filter(jb => jb.customerId === cid && (jb.toAddress1 || jb.toTown || jb.toPostcode))
-      .sort((a, b) => (b.moveDate || b.createdAt || "").localeCompare(a.moveDate || a.createdAt || ""));
-    let a1 = "", a2 = "", town = "", pc = "";
-    if (pastMoves[0]) { a1 = pastMoves[0].toAddress1 || ""; a2 = pastMoves[0].toAddress2 || ""; town = pastMoves[0].toTown || ""; pc = pastMoves[0].toPostcode || ""; }
-    else if (cust) { a1 = cust.address1 || ""; a2 = cust.address2 || ""; town = cust.town || ""; pc = cust.postcode || ""; }
-    setF(p => ({ ...p, fromAddress1: a1, fromAddress2: a2, fromTown: town, fromPostcode: pc }));
-  }
-
-  async function save() {
-    let data2 = data;
-    let cid = customerId;
-    if (!cid) {
-      if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
-      cid = uid();
-      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, custType: "Private", createdAt: new Date().toISOString() };
-      data2 = upsertLocal(data2, "customers", customer);
-    }
-    const rec = {
-      id: e.id || uid(), customerId: cid,
-      status: e.status || "New",
-      enquiryDate: e.enquiryDate || todayISO(),
-      ...f,
-      inventory: e.inventory || [], volumeCuFt: e.volumeCuFt || 0, volumeM3: e.volumeM3 || 0, weightKg: e.weightKg || 0,
-      extras: e.extras || [], quoteLines: e.quoteLines || [], quoteVat: e.quoteVat || false,
-      quoteTotal: e.quoteTotal || 0, quoteStatus: e.quoteStatus || "Draft", quoteSentDate: e.quoteSentDate || "",
-      followUpDate: e.followUpDate || "", followUpNote: e.followUpNote || "", lostReason: e.lostReason || "",
-      createdAt: e.createdAt || new Date().toISOString(),
-    };
-    data2 = upsertLocal(data2, "enquiries", rec);
-    await saveAndReload(data2);
-  }
-
-  return (
-    <Modal title={e.id ? "Edit Enquiry" : "New Enquiry"} onClose={onClose}>
-      {!e.id && (
-        <Field label="Customer" required>
-          <CustomerPicker data={data} customerId={customerId} onPick={selectCustomer} newCust={newCust} setNewCust={setNewCust} />
-        </Field>
-      )}
-
-      <SectionTitle>Move details</SectionTitle>
-      <Field label="Preferred move date"><Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} /></Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Survey date" hint="Shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field></div>
-        <div style={{ width: 130 }}><Field label="Time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field></div>
-      </div>
-      <Field label="Dates flexible?">
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
-          <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
-        </label>
-      </Field>
-      <Field label="Distance (miles)" hint="Used to help price the quote"><Input type="number" value={f.distanceMiles} onChange={v => set("distanceMiles", v)} placeholder="e.g. 12" /></Field>
-
-      <SectionTitle>Moving from</SectionTitle>
-      {customerId && (f.fromAddress1 || f.fromTown || f.fromPostcode) && (
-        <div style={{ fontSize: 12, color: TEAL_D, background: "#EAF4F2", borderRadius: 9, padding: "8px 11px", marginBottom: 10 }}>
-          Prefilled from {(data.jobs || []).some(jb => jb.customerId === customerId && (jb.toAddress1 || jb.toTown)) ? "their last move" : "their saved address"} — edit if needed.
-        </div>
-      )}
-      <Field label="Address"><Input value={f.fromAddress1} onChange={v => set("fromAddress1", v)} placeholder="House/flat & street" /></Field>
-      <Field label="Address line 2"><Input value={f.fromAddress2} onChange={v => set("fromAddress2", v)} placeholder="(optional)" /></Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Town"><Input value={f.fromTown} onChange={v => set("fromTown", v)} /></Field></div>
-        <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.fromPostcode} onChange={v => set("fromPostcode", v)} /></Field></div>
-      </div>
-      <Field label="Property type"><Select value={f.fromPropertyType} onChange={v => set("fromPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Bedrooms"><Input type="number" value={f.fromBedrooms} onChange={v => set("fromBedrooms", v)} placeholder="e.g. 3" /></Field></div>
-        <div style={{ flex: 1 }}><Field label="Floor / level"><Input value={f.fromFloor} onChange={v => set("fromFloor", v)} placeholder="e.g. Ground, 2nd" /></Field></div>
-      </div>
-      <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={f.fromAccess} onChange={v => set("fromAccess", v)} rows={2} /></Field>
-
-      <SectionTitle>Moving to</SectionTitle>
-      <Field label="Address"><Input value={f.toAddress1} onChange={v => set("toAddress1", v)} placeholder="House/flat & street" /></Field>
-      <Field label="Address line 2"><Input value={f.toAddress2} onChange={v => set("toAddress2", v)} placeholder="(optional)" /></Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Town"><Input value={f.toTown} onChange={v => set("toTown", v)} /></Field></div>
-        <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.toPostcode} onChange={v => set("toPostcode", v)} /></Field></div>
-      </div>
-      <Field label="Property type"><Select value={f.toPropertyType} onChange={v => set("toPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
-      <Field label="Floor / level"><Input value={f.toFloor} onChange={v => set("toFloor", v)} placeholder="e.g. Ground, 2nd" /></Field>
-      <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={f.toAccess} onChange={v => set("toAccess", v)} rows={2} /></Field>
-
-      <Field label="General notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
-
-      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
-        <Btn style={{ flex: 2 }} onClick={save}>{e.id ? "Save changes" : "Create enquiry"}</Btn>
-      </div>
-    </Modal>
-  );
-}
-
-// ── Inventory / volume calculator ───────────────────────────────────────────
-function InventoryModal({ data, enquiry, onClose }) {
-  // Unified line store keyed by slot:
-  //   catalog slot  = `${roomLabel}::${catalogId}`
-  //   custom slot   = `c_<uid>`   (catalogId null)
-  // Each value: { catalogId, room (label), name, cuFt, m3, kg, qty }
-  const [lines, setLines] = useState(() => {
-    const out = {};
-    (enquiry.inventory || []).forEach(it => {
-      if (it.slot) {                       // new format
-        out[it.slot] = { catalogId: it.catalogId ?? null, room: it.room, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg, qty: it.qty };
-      } else {                             // old format → migrate
-        const label = it.room === "Bedroom" ? "Bedroom 1" : it.room;
-        const slot = `${label}::${it.id}`;
-        out[slot] = { catalogId: it.id, room: label, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg, qty: it.qty };
-      }
-    });
-    return out;
-  });
-  // initialise bedrooms from existing lines
-  const initialBedrooms = (() => {
-    const set = new Set();
-    (enquiry.inventory || []).forEach(it => {
-      const lbl = it.room || (it.slot ? "" : "");
-      if (lbl && /^Bedroom/.test(lbl)) set.add(lbl);
-      if (!it.slot && it.room === "Bedroom") set.add("Bedroom 1");
-    });
-    const arr = [...set].sort((a, b) => (parseInt(a.replace(/\D/g, "")) || 0) - (parseInt(b.replace(/\D/g, "")) || 0));
-    return arr.length ? arr : ["Bedroom 1"];
-  })();
-  const [beds, setBeds] = useState(initialBedrooms);
-  const [search, setSearch] = useState("");
-  const [openSection, setOpenSection] = useState(ROOMS[0]);
-
-  const matches = txt => !search || (txt || "").toLowerCase().includes(search.toLowerCase());
-
-  function bump(slot, meta, d) {
-    setLines(p => {
-      const cur = p[slot]?.qty || 0;
-      const n = Math.max(0, cur + d);
-      const next = { ...p };
-      if (n === 0) delete next[slot];
-      else next[slot] = { ...(p[slot] || meta), qty: n };
-      return next;
-    });
-  }
-  function addCustom(label) {
-    const name = (prompt("Item name?") || "").trim();
-    if (!name) return;
-    const cuFt = parseFloat(prompt("Approx volume in cubic feet? (e.g. 20)") || "");
-    if (!cuFt || cuFt <= 0) { alert("Please enter a number for cubic feet."); return; }
-    const kg = parseFloat(prompt("Approx weight in kg? (optional, e.g. 30)") || "") || 0;
-    const slot = "c_" + uid();
-    setLines(p => ({ ...p, [slot]: { catalogId: null, room: label, name, cuFt: Math.round(cuFt * 100) / 100, m3: Math.round(cuFt * 0.0283168 * 1000) / 1000, kg: Math.round(kg), qty: 1 } }));
-    setOpenSection(label);
-  }
-  function addBedroom() {
-    const nums = beds.map(b => parseInt(b.replace(/\D/g, "")) || 0);
-    const next = `Bedroom ${Math.max(0, ...nums) + 1}`;
-    setBeds([...beds, next]);
-    setOpenSection(next);
-  }
-  function removeBedroom(label) {
-    if (!confirm(`Remove ${label} and its items?`)) return;
-    setBeds(b => b.filter(x => x !== label));
-    setLines(p => { const n = { ...p }; Object.keys(n).forEach(s => { if (n[s].room === label) delete n[s]; }); return n; });
-  }
-
-  const totals = inventoryTotals(Object.values(lines).map(v => ({ cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty })));
-  const rec = recommendVehicle(totals.cuFt);
-
-  async function save() {
-    const inventory = Object.entries(lines).filter(([, v]) => v.qty > 0)
-      .map(([slot, v]) => ({ slot, catalogId: v.catalogId ?? null, room: v.room, name: v.name, cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty }));
-    const rec2 = {
-      ...enquiry, inventory,
-      volumeCuFt: totals.cuFt, volumeM3: totals.m3, weightKg: totals.kg,
-      status: enquiry.status === "New" ? "Surveyed" : enquiry.status,
-    };
-    await saveAndReload(upsertLocal(data, "enquiries", rec2));
-  }
-
-  // Build ordered section list, expanding Bedroom into Bedroom 1..N
-  const sections = [];
-  ROOMS.forEach(room => {
-    if (room === "Bedroom") {
-      beds.forEach(lbl => sections.push({ label: lbl, catalogRoom: "Bedroom", isBedroom: true }));
-      sections.push({ addBedroom: true });
-    } else {
-      sections.push({ label: room, catalogRoom: room });
-    }
-  });
-
-  function Section({ label, catalogRoom, isBedroom }) {
-    const catItems = FURNITURE.filter(it => it.room === catalogRoom && matches(it.name));
-    const customSlots = Object.entries(lines).filter(([, v]) => v.catalogId == null && v.room === label && matches(v.name));
-    if (search && catItems.length === 0 && customSlots.length === 0) return null;
-    const sectionQty = Object.values(lines).filter(v => v.room === label).reduce((s, v) => s + v.qty, 0);
-    const isOpen = search ? true : openSection === label;
-    const Stepper = ({ slot, meta }) => {
-      const q = lines[slot]?.qty || 0;
-      return (
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={() => bump(slot, meta, -1)} style={stepBtn(q > 0)}>−</button>
-          <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700, color: q ? "#111827" : "#D1D5DB" }}>{q}</span>
-          <button onClick={() => bump(slot, meta, 1)} style={stepBtn(true)}>+</button>
-        </div>
-      );
-    };
-    return (
-      <div style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
-        <button onClick={() => setOpenSection(isOpen ? null : label)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#111827" }}>
-          <span>{label}</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {isBedroom && beds.length > 1 && <span onClick={e => { e.stopPropagation(); removeBedroom(label); }} style={{ color: "#DC2626", fontSize: 13, fontWeight: 600 }}>Remove</span>}
-            {sectionQty > 0 && <span style={{ background: TEAL, color: "#fff", borderRadius: 99, fontSize: 12, padding: "1px 8px", fontWeight: 700 }}>{sectionQty}</span>}
-            <span style={{ color: "#9CA3AF" }}>{isOpen ? "▾" : "▸"}</span>
-          </span>
-        </button>
-        {isOpen && (
-          <div style={{ padding: "4px 0" }}>
-            {catItems.map(it => {
-              const slot = `${label}::${it.id}`;
-              return (
-                <div key={slot} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{it.name}</div>
-                    <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg</div>
-                  </div>
-                  <Stepper slot={slot} meta={{ catalogId: it.id, room: label, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg }} />
-                </div>
-              );
-            })}
-            {customSlots.map(([slot, v]) => (
-              <div key={slot} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{v.name} <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}>· custom</span></div>
-                  <div style={{ fontSize: 11, color: "#9CA3AF" }}>{v.cuFt} cu ft · {v.kg} kg</div>
-                </div>
-                <Stepper slot={slot} meta={v} />
-              </div>
-            ))}
-            <div style={{ padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
-              <button onClick={() => addCustom(label)} style={{ background: "transparent", border: "none", color: TEAL, fontWeight: 600, fontSize: 13, cursor: "pointer", padding: 0 }}>+ Add custom item</button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <Modal title="Survey / Inventory" onClose={onClose}>
-      <div style={{ marginBottom: 12 }}><Input value={search} onChange={setSearch} placeholder="🔍 Search items…" /></div>
-
-      {sections.map((s, i) => s.addBedroom
-        ? (!search && <button key="addbed" onClick={addBedroom} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another bedroom</button>)
-        : <Section key={s.label} {...s} />
-      )}
-
-      {/* sticky totals */}
-      <div style={{ position: "sticky", bottom: 0, background: "#fff", paddingTop: 12, marginTop: 8, borderTop: "2px solid #F3F4F6" }}>
-        <div style={{ background: NAVY, color: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 13, opacity: .85 }}>Total volume</span>
-            <span style={{ fontWeight: 800 }}>{totals.cuFt} cu ft · {totals.m3} m³</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 13, opacity: .85 }}>Est. weight</span>
-            <span style={{ fontWeight: 700 }}>{totals.kg} kg</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 13, opacity: .85 }}>Recommended</span>
-            <span style={{ fontWeight: 700 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads} loads` : ""}</span>
-          </div>
-        </div>
-        <Btn style={{ width: "100%" }} onClick={save}><Icon name="check" size={16} /> Save inventory</Btn>
-      </div>
-    </Modal>
-  );
-}
-function stepBtn(active) {
-  return { width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", fontSize: 18, fontWeight: 700, background: active ? "#E6F4F1" : "#F3F4F6", color: active ? TEAL : "#9CA3AF", lineHeight: 1 };
-}
-
-// ── Quote builder ───────────────────────────────────────────────────────────
-const EXTRA_PRESETS = ["Packing service", "Packing materials", "Dismantle / reassemble furniture", "Storage", "Piano move", "Parking suspension / permit", "Additional crew"];
-
-function QuoteModal({ data, enquiry, onClose }) {
-  const [lines, setLines] = useState(() => {
-    if (enquiry.quoteLines && enquiry.quoteLines.length) return enquiry.quoteLines;
-    return [{ desc: "Removal service", amount: "" }];
-  });
-  const [vat, setVat] = useState(enquiry.quoteVat || false);
-  const total = quoteTotal(lines, vat);
-  const customer = (data.customers || []).find(c => c.id === enquiry.customerId);
-
-  const setLine = (i, k, v) => setLines(p => p.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
-  const addLine = (desc = "") => setLines(p => [...p, { desc, amount: "" }]);
-  const removeLine = i => setLines(p => p.filter((_, idx) => idx !== i));
-
-  function buildRecord(status, sentDate) {
-    return {
-      ...enquiry,
-      quoteLines: lines.filter(l => l.desc || l.amount),
-      quoteVat: vat, quoteTotal: total,
-      quoteStatus: status, quoteSentDate: sentDate ?? enquiry.quoteSentDate,
-      status: status === "Sent" ? "Quoted" : status === "Accepted" ? enquiry.status : enquiry.status,
-    };
-  }
-  async function saveDraft() {
-    await saveAndReload(upsertLocal(data, "enquiries", buildRecord(enquiry.quoteStatus || "Draft")));
-  }
-  async function send() {
-    const rec = buildRecord("Sent", todayISO());
-    // local-first save, then open email
-    const stamped = stampData(upsertLocal(data, "enquiries", rec));
-    localStorage.setItem(DB_KEY, JSON.stringify(stamped));
-    pushChangedOnly(stamped).catch(() => {});
-    const body = encodeURIComponent(
-      `Hi ${customer?.name || ""},\n\nThank you for your enquiry. Please find your removal quote below:\n\n` +
-      rec.quoteLines.map(l => `• ${l.desc}: ${gbp(l.amount)}`).join("\n") +
-      `\n\n${vat ? "Total (inc. VAT): " : "Total: "}${gbp(total)}\n\n` +
-      `Move date: ${enquiry.preferredDate ? fmtDate(enquiry.preferredDate) : "to be confirmed"}\n` +
-      `From: ${[enquiry.fromAddress1, enquiry.fromAddress2, enquiry.fromTown, enquiry.fromPostcode].filter(Boolean).join(", ")}\n` +
-      `To: ${[enquiry.toAddress1, enquiry.toAddress2, enquiry.toTown, enquiry.toPostcode].filter(Boolean).join(", ")}\n\n` +
-      `This quote is valid for 30 days. To book, just reply to this email.\n\nKind regards`
-    );
-    const subject = encodeURIComponent("Your removal quote");
-    window.location.href = `mailto:${customer?.email || ""}?subject=${subject}&body=${body}`;
-    setTimeout(() => window.location.reload(), 600);
-  }
-
-  return (
-    <Modal title="Quote" onClose={onClose}>
-      {enquiry.volumeCuFt > 0 && (
-        <div style={{ background: "#F0FDFA", border: "1px solid #CCFBF1", borderRadius: 10, padding: "10px 12px", marginBottom: 14, fontSize: 13, color: "#0F766E" }}>
-          Survey: <b>{enquiry.volumeCuFt} cu ft</b> · {recommendVehicle(enquiry.volumeCuFt).vehicle}
-          {enquiry.distanceMiles ? ` · ${enquiry.distanceMiles} miles` : ""}
-        </div>
-      )}
-
-      {lines.map((l, i) => (
-        <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
-          <input style={{ ...inputStyle, flex: 1 }} value={l.desc} onChange={ev => setLine(i, "desc", ev.target.value)} placeholder="Description" />
-          <input style={{ ...inputStyle, width: 90 }} type="number" value={l.amount} onChange={ev => setLine(i, "amount", ev.target.value)} placeholder="£" />
-          <button onClick={() => removeLine(i)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 8, width: 34, height: 34, cursor: "pointer", flexShrink: 0 }}>×</button>
-        </div>
-      ))}
-      <Btn size="sm" variant="ghost" onClick={() => addLine()} style={{ marginTop: 2 }}><Icon name="plus" size={14} /> Add line</Btn>
-
-      <div style={{ marginTop: 14 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Quick add</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {EXTRA_PRESETS.map(x => (
-            <button key={x} onClick={() => addLine(x)} style={{ padding: "5px 10px", borderRadius: 99, border: "1px solid #E5E7EB", background: "#fff", fontSize: 12, color: "#374151", cursor: "pointer" }}>+ {x}</button>
-          ))}
-        </div>
-      </div>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer", margin: "16px 0 8px" }}>
-        <input type="checkbox" checked={vat} onChange={ev => setVat(ev.target.checked)} style={{ width: 18, height: 18 }} /> Add VAT (20%)
-      </label>
-
-      <div style={{ background: NAVY, color: "#fff", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0 14px" }}>
-        <span style={{ fontSize: 14, opacity: .85 }}>{vat ? "Total (inc. VAT)" : "Total"}</span>
-        <span style={{ fontSize: 22, fontWeight: 800 }}>{gbp(total)}</span>
-      </div>
-
-      <div style={{ display: "flex", gap: 10 }}>
-        <Btn variant="grey" style={{ flex: 1 }} onClick={saveDraft}>Save draft</Btn>
-        <Btn variant="amber" style={{ flex: 2 }} onClick={send}>📧 Email quote</Btn>
-      </div>
-    </Modal>
-  );
-}
-
-// ── Enquiry detail ──────────────────────────────────────────────────────────
-function Row({ label, value }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #F3F4F6", fontSize: 14, gap: 12 }}>
-      <span style={{ color: "#6B7280", flexShrink: 0 }}>{label}</span>
-      <span style={{ color: "#111827", fontWeight: 500, textAlign: "right" }}>{value || "—"}</span>
-    </div>
-  );
-}
-
-function EnquiryDetail({ data, id, setView }) {
-  const e = (data.enquiries || []).find(x => x.id === id);
-  const [showEdit, setShowEdit] = useState(false);
-  const [showInv, setShowInv] = useState(false);
-  const [showQuote, setShowQuote] = useState(false);
-  const customer = (data.customers || []).find(c => c.id === e?.customerId);
-  if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
-
-  async function setStatus(status, extra = {}) {
-    await saveAndReload(upsertLocal(data, "enquiries", { ...e, status, ...extra }));
-  }
-  async function markWon() {
-    const jid = uid();
-    const job = {
-      id: jid, customerId: e.customerId, enquiryId: e.id,
-      moveDate: e.preferredDate || "", startTime: "",
-      fromAddress1: e.fromAddress1, fromAddress2: e.fromAddress2, fromTown: e.fromTown, fromPostcode: e.fromPostcode, fromAccess: e.fromAccess,
-      toAddress1: e.toAddress1, toAddress2: e.toAddress2, toTown: e.toTown, toPostcode: e.toPostcode, toAccess: e.toAccess,
-      crew: [], vehicle: recommendVehicle(e.volumeCuFt).vehicle,
-      volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
-      price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
-      status: "Booked", notes: "", createdAt: new Date().toISOString(),
-    };
-    let d2 = upsertLocal(data, "jobs", job);
-    d2 = upsertLocal(d2, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
-    showSavingOverlay(); SAVING_IN_PROGRESS = true;
-    const stamped = stampData(d2);
-    localStorage.setItem(DB_KEY, JSON.stringify(stamped));
-    try { await pushChangedOnly(stamped); } catch {}
-    SAVING_IN_PROGRESS = false;
-    window.location.reload();
-  }
-  async function markLost() {
-    const reason = prompt("Reason lost? (optional)") || "";
-    await setStatus("Lost", { lostReason: reason });
-  }
-  async function setFollowUp() {
-    const date = prompt("Follow-up date (YYYY-MM-DD):", e.followUpDate || todayISO());
-    if (date === null) return;
-    const note = prompt("Follow-up note:", e.followUpNote || "") || "";
-    await saveAndReload(upsertLocal(data, "enquiries", { ...e, followUpDate: date, followUpNote: note }));
-  }
-  async function del() {
-    if (!confirm("Delete this enquiry? This cannot be undone.")) return;
-    addTombstone(e.id);
-    showSavingOverlay(); SAVING_IN_PROGRESS = true;
-    try { await deleteRecord("enquiries", e.id); } catch {}
-    const d2 = { ...data, enquiries: (data.enquiries || []).filter(x => x.id !== e.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2));
-    SAVING_IN_PROGRESS = false;
-    setView({ screen: "enquiries" });
-    window.location.reload();
-  }
-
-  const rec = recommendVehicle(e.volumeCuFt);
-
-  return (
-    <div>
-      <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiries" })}><Icon name="back" size={14} /> Back</Btn>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 4px" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, e.customerId)}</h2>
-        <StatusBadge status={e.status} />
-      </div>
-      {customer && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          {customer.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
-          {customer.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
-        </div>
-      )}
-
-      <Card>
-        <Row label="Move date" value={e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : "TBC"} />
-        <Row label="Distance" value={e.distanceMiles ? `${e.distanceMiles} miles` : ""} />
-        <Row label="From" value={[e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join(", ")} />
-        <Row label="From property" value={[e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.fromFloor].filter(Boolean).join(" · ")} />
-        {e.fromAccess && <Row label="From access" value={e.fromAccess} />}
-        <Row label="To" value={[e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join(", ")} />
-        <Row label="To property" value={[e.toPropertyType, e.toFloor].filter(Boolean).join(" · ")} />
-        {e.toAccess && <Row label="To access" value={e.toAccess} />}
-        {e.notes && <Row label="Notes" value={e.notes} />}
-      </Card>
-
-      {/* Survey */}
-      <Card style={{ background: e.volumeCuFt ? "#F0FDFA" : "#fff" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "#111827" }}>Survey / Inventory</div>
-            {e.surveyDate && <div style={{ fontSize: 13, color: TEAL_D, fontWeight: 600, marginTop: 2 }}>📅 {fmtDate(e.surveyDate)}{e.surveyTime ? ` · ${e.surveyTime}` : ""}</div>}
-            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
-              {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³ · ${e.weightKg} kg` : "Not surveyed yet"}
-            </div>
-            {e.volumeCuFt > 0 && <div style={{ fontSize: 13, color: TEAL, fontWeight: 600, marginTop: 2 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads}` : ""}</div>}
-          </div>
-          <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
-        </div>
-      </Card>
-
-      {/* Quote */}
-      <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "#111827" }}>Quote</div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
-              {e.quoteTotal ? `${gbp(e.quoteTotal)} · ${e.quoteStatus}` : "No quote yet"}
-              {e.quoteSentDate ? ` · sent ${fmtDateShort(e.quoteSentDate)}` : ""}
-            </div>
-          </div>
-          <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {e.quoteTotal ? "Edit" : "Build"}</Btn>
-        </div>
-      </Card>
-
-      {e.followUpDate && (
-        <Card style={{ background: "#FFFBEB" }}>
-          <div style={{ fontSize: 13, color: "#92400E" }}><b>Follow-up {fmtDate(e.followUpDate)}:</b> {e.followUpNote || "—"}</div>
-        </Card>
-      )}
-
-      {/* Actions */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {!["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Mark Won → Book move</Btn>}
-        {e.status === "Won" && e.enquiryId !== false && <Btn variant="grey" style={{ flex: 1 }} onClick={() => { const j = (data.jobs || []).find(x => x.enquiryId === e.id); if (j) setView({ screen: "jobDetail", id: j.id }); }}>View booked move</Btn>}
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-        <Btn variant="grey" size="sm" onClick={() => setShowEdit(true)}><Icon name="edit" size={14} /> Edit</Btn>
-        <Btn variant="grey" size="sm" onClick={setFollowUp}>⏰ Follow-up</Btn>
-        {!["Won", "Lost"].includes(e.status) && <Btn variant="grey" size="sm" onClick={markLost}>Mark Lost</Btn>}
-        <Btn variant="danger" size="sm" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
-      </div>
-
-      {showEdit && <EnquiryForm data={data} editEnquiry={e} onClose={() => setShowEdit(false)} />}
-      {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
-      {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
-    </div>
-  );
-}
-
-// ── Customers ───────────────────────────────────────────────────────────────
-function CustomersList({ data, setView }) {
-  const [q, setQ] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const customers = [...(data.customers || [])]
-    .filter(c => !q || `${c.name} ${c.company} ${c.phone} ${c.town}`.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Customers</h2>
-        <Btn size="sm" onClick={() => setShowForm(true)}><Icon name="plus" size={14} /> New</Btn>
-      </div>
-      <div style={{ marginBottom: 12 }}><Input value={q} onChange={setQ} placeholder="🔍 Search customers…" /></div>
-      {customers.length === 0 && <Empty icon="customers" text="No customers yet" />}
-      {customers.map(c => {
-        const jobs = (data.jobs || []).filter(j => j.customerId === c.id).length;
+      <h3 style={{ fontSize:14, fontWeight:700, color:"#374151", margin:"0 0 10px", textTransform:"uppercase", letterSpacing:"0.05em" }}>Today's Jobs</h3>
+      {todayJobs.length === 0 && <Card><p style={{ margin:0, color:"#9CA3AF", fontSize:14, textAlign:"center" }}>No jobs scheduled today</p></Card>}
+      {todayJobs.map(job => {
+        const cust = data.customers.find(c => c.id === job.customerId);
+        const veh  = data.vehicles.find(v => v.id === job.vehicleId);
         return (
-          <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <Card key={job.id} onClick={() => setView({ screen:"jobDetail", id:job.id })}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
               <div>
-                <div style={{ fontWeight: 700, color: "#111827" }}>{c.name}{c.company ? ` · ${c.company}` : ""}</div>
-                <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{[c.phone, c.town].filter(Boolean).join(" · ") || "—"}</div>
+                {job.jobTime && <div style={{ fontSize:13, fontWeight:700, color:"#F59E0B", marginBottom:2 }}>🕐 {job.jobTime}</div>}
+                <div style={{ fontWeight:700, fontSize:15, color:"#111827" }}>{cust?.company || cust?.companyContact || job.driverName || "No Company"}</div>
+                {job.driverName && <div style={{ fontSize:13, color:"#374151", fontWeight:600 }}>Driver: {job.driverName}</div>}
+                <div style={{ fontSize:13, color:"#6B7280", marginTop:2 }}>{veh ? `${veh.make} ${veh.model} · ${veh.reg}` : "No vehicle"}</div>
+                <div style={{ fontSize:13, color:"#6B7280" }}>{job.jobType}</div>
+                {job.locAddress1 && <div style={{ fontSize:12, color:"#9CA3AF", marginTop:2 }}>📍 {[job.locAddress1, job.locTown, job.locPostcode].filter(Boolean).join(", ")}</div>}
               </div>
-              <span style={{ fontSize: 12, color: "#9CA3AF" }}>{jobs} move{jobs !== 1 ? "s" : ""}</span>
+              <StatusBadge status={job.status} />
             </div>
           </Card>
         );
       })}
-      {showForm && <CustomerForm data={data} onClose={() => setShowForm(false)} />}
+      <div style={{ marginTop:16 }}>
+        <Btn onClick={() => setView({ screen:"newJob" })} variant="amber" style={{ width:"100%", justifyContent:"center" }}>
+          <Icon name="plus" size={16} /> New Job
+        </Btn>
+      </div>
+
+      <div style={{ marginTop:20, display:"flex", gap:10 }}>
+        <Btn onClick={() => setView({ screen:"reports" })} style={{ flex:1, justifyContent:"center" }}>📊 Reports</Btn>
+        <Btn onClick={() => setView({ screen:"mileage" })} variant="ghost" style={{ flex:1, justifyContent:"center" }}>🚗 Mileage</Btn>
+      </div>
+
+      <div style={{ marginTop:24, paddingTop:16, borderTop:"1px solid #E5E7EB" }}>
+        <h3 style={{ fontSize:13, fontWeight:700, color:"#6B7280", margin:"0 0 10px", textTransform:"uppercase", letterSpacing:"0.05em" }}>Tools</h3>
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          <Btn variant="ghost" onClick={exportBackup} style={{ width:"100%", justifyContent:"center" }}>💾 Download Backup</Btn>
+          <Btn variant="ghost" onClick={() => setView({ screen:"settings" })} style={{ width:"100%", justifyContent:"center" }}>⚙️ Settings</Btn>
+          <Btn variant="ghost" onClick={cleanupOldPhotos} style={{ width:"100%", justifyContent:"center" }}>🗑️ Clear Photos Over 1 Year Old</Btn>
+        </div>
+      </div>
     </div>
   );
 }
 
-function CustomerForm({ data, onClose, editCustomer }) {
-  const c = editCustomer || {};
-  const [f, setF] = useState({
-    name: c.name || "", company: c.company || "", phone: c.phone || "", email: c.email || "",
-    address1: c.address1 || "", address2: c.address2 || "", town: c.town || "", county: c.county || "", postcode: c.postcode || "",
-    custType: c.custType || "Private", notes: c.notes || "",
-  });
-  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  async function save() {
-    if (!f.name.trim()) { alert("Name is required."); return; }
-    const rec = { id: c.id || uid(), ...f, createdAt: c.createdAt || new Date().toISOString() };
-    await saveAndReload(upsertLocal(data, "customers", rec));
-  }
+// ── Customers List ────────────────────────────────────────────────────────────
+function CustomersList({ data, setView }) {
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [hidePrivate, setHidePrivate] = useState(true);
+  const filtered = data.customers.filter(c => {
+    if (hidePrivate && c.custType === "Private") return false;
+    return (
+      c.company?.toLowerCase().includes(search.toLowerCase()) ||
+      c.companyContact?.toLowerCase().includes(search.toLowerCase()) ||
+      c.phone?.includes(search) ||
+      c.postcode?.toLowerCase().includes(search.toLowerCase()) ||
+      c.town?.toLowerCase().includes(search.toLowerCase())
+    );
+  }).sort((a,b) => (a.company || a.companyContact || "").localeCompare(b.company || b.companyContact || "", undefined, { sensitivity:"base" }));
   return (
-    <Modal title={c.id ? "Edit Customer" : "New Customer"} onClose={onClose}>
-      <Field label="Full name" required><Input value={f.name} onChange={v => set("name", v)} /></Field>
-      <Field label="Type"><Select value={f.custType} onChange={v => set("custType", v)} options={["Private", "Commercial"]} /></Field>
-      {f.custType === "Commercial" && <Field label="Company"><Input value={f.company} onChange={v => set("company", v)} /></Field>}
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Phone"><Input value={f.phone} onChange={v => set("phone", v)} /></Field></div>
-        <div style={{ flex: 1 }}><Field label="Email"><Input type="email" value={f.email} onChange={v => set("email", v)} /></Field></div>
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <h2 style={{ margin:0, fontSize:20, fontWeight:800, color:"#1E3A5F" }}>Customers</h2>
+        <Btn size="sm" onClick={() => setShowForm(true)}><Icon name="plus" size={14} /> Add</Btn>
       </div>
-      <Field label="Address"><Input value={f.address1} onChange={v => set("address1", v)} /></Field>
-      <Field label="Address line 2"><Input value={f.address2} onChange={v => set("address2", v)} placeholder="(optional)" /></Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Town"><Input value={f.town} onChange={v => set("town", v)} /></Field></div>
-        <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.postcode} onChange={v => set("postcode", v)} /></Field></div>
+      <input style={{ ...inputStyle, marginBottom:10 }} placeholder="Search name, phone, town, postcode…" value={search} onChange={e => setSearch(e.target.value)} />
+      <button onClick={() => setHidePrivate(v => !v)}
+        style={{ marginBottom:12, padding:"10px 16px", borderRadius:99, fontSize:14, fontWeight:600, cursor:"pointer", border:"none", background: hidePrivate ? "#1E3A5F" : "#F3F4F6", color: hidePrivate ? "#fff" : "#6B7280", fontFamily:"inherit" }}>
+        {hidePrivate ? "✓ Hiding private (showing trade only)" : "Hide private customers"}
+      </button>
+      {filtered.length === 0 && <p style={{ color:"#9CA3AF", textAlign:"center", fontSize:14 }}>No customers found</p>}
+      {filtered.map(c => (
+        <Card key={c.id} onClick={() => setView({ screen:"customerDetail", id:c.id })}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+            <div style={{ fontWeight:700, fontSize:15, color:"#111827" }}>{c.custNumber ? <span style={{ color:"#9CA3AF", fontWeight:600 }}>#{c.custNumber} </span> : ""}{c.company || c.companyContact || "No name"}</div>
+            {c.onStop && <span style={{ background:"#DC2626", color:"#fff", fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:6, whiteSpace:"nowrap", letterSpacing:"0.03em" }}>ON STOP</span>}
+            {c.custType === "Private" && !c.onStop && <span style={{ background:"#E5E7EB", color:"#6B7280", fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:6, whiteSpace:"nowrap" }}>PRIVATE</span>}
+          </div>
+          {c.companyContact && <div style={{ fontSize:13, color:"#1E3A5F", fontWeight:600 }}>{c.companyContact}</div>}
+          <div style={{ fontSize:13, color:"#6B7280", marginTop:2 }}>{c.phone}{c.town ? ` · ${c.town}` : ""}{c.postcode ? ` · ${c.postcode}` : ""}</div>
+          {c.email && <div style={{ fontSize:12, color:"#9CA3AF" }}>{c.email}</div>}
+        </Card>
+      ))}
+      {showForm && <CustomerForm data={data} onClose={() => setShowForm(false)} setView={setView} />}
+    </div>
+  );
+}
+
+// ── Customer Form ─────────────────────────────────────────────────────────────
+function CustomerForm({ data, onClose, setView, editCustomer }) {
+  const [company,        setCompany]        = useState(editCustomer?.company        || "");
+  const [companyContact, setCompanyContact] = useState(editCustomer?.companyContact || "");
+  const [phone,          setPhone]          = useState(editCustomer?.phone          || "");
+  const [email,    setEmail]    = useState(editCustomer?.email    || "");
+  const [address1, setAddress1] = useState(editCustomer?.address1 || "");
+  const [address2, setAddress2] = useState(editCustomer?.address2 || "");
+  const [town,     setTown]     = useState(editCustomer?.town     || "");
+  const [county,   setCounty]   = useState(editCustomer?.county   || "");
+  const [postcode, setPostcode] = useState(editCustomer?.postcode || "");
+  const [notes,    setNotes]    = useState(editCustomer?.notes    || "");
+  const [onStop,   setOnStop]   = useState(editCustomer?.onStop   || false);
+  const [custType, setCustType] = useState(editCustomer?.custType || "Trade");
+  const [followUpDate, setFollowUpDate] = useState(editCustomer?.followUpDate || "");
+  const [followUpNote, setFollowUpNote] = useState(editCustomer?.followUpNote || "");
+  // Unified contacts list. One contact is flagged main:true. For existing customers
+  // without a contacts list yet, seed it from their old single company-contact fields.
+  const [contacts, setContacts] = useState(() => {
+    if (editCustomer?.contacts?.length) return editCustomer.contacts;
+    if (editCustomer) return [{ id: uid(), name: editCustomer.companyContact || "", role: "Main Contact", phone: editCustomer.phone || "", email: editCustomer.email || "", main: true }];
+    return [{ id: uid(), name:"", role:"Main Contact", phone:"", email:"", main:true }];
+  });
+  const addContact    = () => setContacts(cs => [...cs, { id: uid(), name:"", role:"Director", phone:"", email:"", main: cs.length===0 }]);
+  const updateContact = (id, field, value) => setContacts(cs => cs.map(c => c.id === id ? { ...c, [field]: value } : c));
+  const removeContact = (id) => setContacts(cs => {
+    const filtered = cs.filter(c => c.id !== id);
+    // If we removed the main contact, make the first remaining one main
+    if (!filtered.some(c => c.main) && filtered.length) filtered[0].main = true;
+    return filtered;
+  });
+  const setMainContact = (id) => setContacts(cs => cs.map(c => ({ ...c, main: c.id === id })));
+
+  // Inline vehicle (private customers, new only) — optional
+  const [vehMake, setVehMake] = useState("");
+  const [vehModel, setVehModel] = useState("");
+  const [vehReg, setVehReg] = useState("");
+
+  async function save() {
+    if (!company) return;
+    const customers = [...data.customers];
+    // Keep the legacy single fields in sync with whoever is the main contact,
+    // so customer cards, dropdowns and call buttons keep working.
+    const main = contacts.find(c => c.main) || contacts[0] || {};
+    const rec = { company, companyContact: main.name || companyContact, phone: main.phone || phone, email: main.email || email, address1, address2, town, county, postcode, notes, onStop, custType, followUpDate, followUpNote, contacts };
+    let newData = { ...data };
+    let savedCustomerId;
+    if (editCustomer) {
+      const idx = customers.findIndex(c => c.id === editCustomer.id);
+      customers[idx] = { ...editCustomer, ...rec };
+      savedCustomerId = editCustomer.id;
+    } else {
+      savedCustomerId = uid();
+      customers.push({ id:savedCustomerId, ...rec, custNumber: nextCustNumber(data.customers), createdAt:todayISO() });
+    }
+    newData.customers = customers;
+    // If an inline vehicle was entered (new private customer), add it too
+    if (!editCustomer && (vehMake || vehModel || vehReg)) {
+      const vehicles = [...(data.vehicles || []), { id: uid(), customerId: savedCustomerId, make: vehMake, model: vehModel, reg: vehReg, createdAt: todayISO() }];
+      newData.vehicles = vehicles;
+    }
+    await saveAndReload(newData);
+  }
+
+  return (
+    <Modal title={editCustomer ? "Edit Customer" : "New Customer"} onClose={onClose}>
+      <div style={{ marginTop:8 }} />
+      <Field label="Customer Type"><Select value={custType} onChange={setCustType} options={["Trade","Private"]} /></Field>
+      <Field label={custType === "Private" ? "Customer Name" : "Company Name"} required>
+        <Input value={company} onChange={setCompany} placeholder={custType === "Private" ? "John Smith" : "Acme Ltd"} />
+      </Field>
+      {custType === "Private" && (
+        <>
+          <Field label="Phone"><Input value={phone} onChange={setPhone} placeholder="07700 900000" type="tel" /></Field>
+          <Field label="Email"><Input value={email} onChange={setEmail} placeholder="jane@email.com" type="email" /></Field>
+          {!editCustomer && (
+            <div style={{ background:"#F8FAFC", border:"1px solid #E5E7EB", borderRadius:10, padding:12, marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:"#1E3A5F", marginBottom:8, textTransform:"uppercase", letterSpacing:"0.05em" }}>Vehicle (optional)</div>
+              <div style={{ marginBottom:6 }}><Input value={vehMake} onChange={setVehMake} placeholder="Make (e.g. Ford)" /></div>
+              <div style={{ marginBottom:6 }}><Input value={vehModel} onChange={setVehModel} placeholder="Model (e.g. Focus)" /></div>
+              <Input value={vehReg} onChange={setVehReg} placeholder="Reg (e.g. AB12 CDE)" />
+            </div>
+          )}
+        </>
+      )}
+      {custType === "Trade" && (
+        <div style={{ background:"#F8FAFC", border:"1px solid #E5E7EB", borderRadius:10, padding:12, marginBottom:14 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"#1E3A5F", marginBottom:8, textTransform:"uppercase", letterSpacing:"0.05em" }}>Contacts</div>
+          {contacts.map((ct, idx) => (
+            <div key={ct.id} style={{ background:"#fff", border: ct.main ? "1.5px solid #F59E0B" : "1px solid #F3F4F6", borderRadius:8, padding:10, marginBottom:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                <button onClick={() => setMainContact(ct.id)} style={{ background: ct.main ? "#FEF3C7" : "#F3F4F6", color: ct.main ? "#92400E" : "#6B7280", border:"none", borderRadius:6, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                  {ct.main ? "★ Main contact" : "☆ Set as main"}
+                </button>
+                {contacts.length > 1 && <button onClick={() => removeContact(ct.id)} style={{ background:"#FEE2E2", color:"#DC2626", border:"none", borderRadius:6, padding:"3px 8px", fontSize:12, fontWeight:600, cursor:"pointer" }}>Remove</button>}
+              </div>
+              <div style={{ marginBottom:6 }}><Input value={ct.name} onChange={v => updateContact(ct.id, "name", v)} placeholder="Contact name" /></div>
+              <div style={{ marginBottom:6 }}><Select value={ct.role} onChange={v => updateContact(ct.id, "role", v)} options={["Main Contact","Director","Owner","Manager","Salesman","Mechanic","Accounts","Other"]} /></div>
+              <div style={{ marginBottom:6 }}><Input value={ct.phone} onChange={v => updateContact(ct.id, "phone", v)} placeholder="Phone" type="tel" /></div>
+              <Input value={ct.email} onChange={v => updateContact(ct.id, "email", v)} placeholder="Email" type="email" />
+            </div>
+          ))}
+          <Btn size="sm" variant="ghost" onClick={addContact} style={{ width:"100%", justifyContent:"center" }}>+ Add contact</Btn>
+        </div>
+      )}
+      <Field label="Address Line 1"><Input value={address1} onChange={setAddress1} placeholder="12 High Street" /></Field>
+      <Field label="Address Line 2"><Input value={address2} onChange={setAddress2} placeholder="Clifton" /></Field>
+      <Field label="Town / City"><Input value={town} onChange={setTown} placeholder="Bristol" /></Field>
+      <Field label="County"><Input value={county} onChange={setCounty} placeholder="Avon" /></Field>
+      <Field label="Postcode"><Input value={postcode} onChange={setPostcode} placeholder="BS1 1AA" /></Field>
+      <Field label="Notes"><Input value={notes} onChange={setNotes} placeholder="Any notes…" /></Field>
+      <div style={{ background:"#F8FAFC", border:"1px solid #E5E7EB", borderRadius:10, padding:12, marginBottom:14 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:"#1E3A5F", marginBottom:8, textTransform:"uppercase", letterSpacing:"0.05em" }}>📞 Follow-up Reminder</div>
+        <Field label="Call back on"><Input type="date" value={followUpDate} onChange={setFollowUpDate} /></Field>
+        <Field label="About"><Input value={followUpNote} onChange={setFollowUpNote} placeholder="e.g. screen repair Monday" /></Field>
+        {followUpDate && <button onClick={() => { setFollowUpDate(""); setFollowUpNote(""); }} style={{ background:"#FEE2E2", color:"#DC2626", border:"none", borderRadius:6, padding:"6px 12px", fontSize:13, fontWeight:600, cursor:"pointer" }}>Clear reminder</button>}
       </div>
-      <Field label="Notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
-      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
-        <Btn style={{ flex: 2 }} onClick={save}>{c.id ? "Save" : "Create"}</Btn>
+      <div style={{ marginBottom:14 }}>
+        <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", padding:"12px 14px", borderRadius:8, border:`1.5px solid ${onStop ? "#FCA5A5" : "#E5E7EB"}`, background: onStop ? "#FEF2F2" : "#fff" }}>
+          <input type="checkbox" checked={onStop} onChange={e => setOnStop(e.target.checked)} style={{ width:18, height:18 }} />
+          <span style={{ fontSize:14, fontWeight:600, color: onStop ? "#DC2626" : "#374151" }}>🛑 Put account on stop (non-payment)</span>
+        </label>
       </div>
+      <Btn onClick={save} style={{ width:"100%", justifyContent:"center" }} disabled={!company}>Save Customer</Btn>
     </Modal>
   );
 }
 
+// ── Repair Terms message (Text / WhatsApp) ────────────────────────────────────
+function RepairTermsModal({ customer, onClose }) {
+  const [price, setPrice] = useState("40.00");
+
+  const message =
+`The cost of the repair is £${price}. Please bear in mind it's not a cosmetic repair, the main purpose is to restore strength and integrity to the screen. There is also a slight chance during the repair that the screen can crack due to various conditions, we can NOT be held liable if a crack developed during or after the repair.
+
+Please reply if you are happy for me to carry out the repair knowing the points above.`;
+
+  // Normalise UK number for WhatsApp (needs international format, no leading 0)
+  const waNumber = (customer.phone || "").replace(/[^0-9]/g, "").replace(/^0/, "44");
+  const smsLink = `sms:${customer.phone}${/iphone|ipad|mac/i.test(navigator.userAgent) ? "&" : "?"}body=${encodeURIComponent(message)}`;
+  const waLink  = `https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`;
+
+  return (
+    <Modal title="Send Repair Terms" onClose={onClose}>
+      <Field label="Repair Price (£)"><Input type="number" value={price} onChange={setPrice} placeholder="40.00" /></Field>
+      <div style={{ background:"#F9FAFB", borderRadius:8, padding:"12px 14px", marginBottom:16, fontSize:13, color:"#374151", whiteSpace:"pre-wrap", lineHeight:1.5, maxHeight:200, overflowY:"auto" }}>
+        {message}
+      </div>
+      <div style={{ display:"flex", gap:8 }}>
+        <a href={waLink} target="_blank" rel="noreferrer" style={{ textDecoration:"none", flex:1 }}>
+          <Btn style={{ width:"100%", justifyContent:"center", background:"#25D366" }}>💬 WhatsApp</Btn>
+        </a>
+        <a href={smsLink} style={{ textDecoration:"none", flex:1 }}>
+          <Btn variant="primary" style={{ width:"100%", justifyContent:"center" }}>✉️ Text</Btn>
+        </a>
+      </div>
+      <p style={{ fontSize:11, color:"#9CA3AF", marginTop:10, textAlign:"center" }}>Opens your messaging app with the text ready to send</p>
+    </Modal>
+  );
+}
+
+// ── Customer Detail ───────────────────────────────────────────────────────────
 function CustomerDetail({ data, id, setView }) {
-  const c = (data.customers || []).find(x => x.id === id);
-  const [showEdit, setShowEdit] = useState(false);
-  if (!c) return <div style={{ padding: 20 }}>Customer not found.</div>;
-  const enquiries = (data.enquiries || []).filter(e => e.customerId === id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-  const jobs = (data.jobs || []).filter(j => j.customerId === id);
-  async function del() {
-    if (!confirm("Delete this customer?")) return;
-    addTombstone(c.id);
-    SAVING_IN_PROGRESS = true; showSavingOverlay();
-    try { await deleteRecord("customers", c.id); } catch {}
-    const d2 = { ...data, customers: (data.customers || []).filter(x => x.id !== c.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2));
-    SAVING_IN_PROGRESS = false; setView({ screen: "customers" }); window.location.reload();
+  const customer = data.customers.find(c => c.id === id);
+  const vehicles = data.vehicles.filter(v => v.customerId === id);
+  const jobs     = data.jobs.filter(j => j.customerId === id).sort((a,b) => b.date.localeCompare(a.date));
+  const [showEdit, setShowEdit]       = useState(false);
+  const [showVehicle, setShowVehicle] = useState(false);
+  const [showTerms, setShowTerms]     = useState(false);
+  if (!customer) return <p>Not found</p>;
+
+  const addrParts = [customer.address1, customer.address2, customer.town, customer.county, customer.postcode].filter(Boolean);
+
+  async function deleteCustomer() {
+    if (!window.confirm("Delete this customer?")) return;
+    try {
+      await deleteRecord("customers", id);
+    } catch (e) {
+      alert("Delete failed: " + (e?.message || JSON.stringify(e)));
+      return;
+    }
+    addTombstone(id);
+    removeSig(id);
+    // Remove locally and save WITHOUT re-pushing everything
+    const updated = { ...loadData(), customers: loadData().customers.filter(c => c.id !== id) };
+    localStorage.setItem(DB_KEY, JSON.stringify(updated));
+    window.location.reload();
   }
+
   return (
     <div>
-      <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "customers" })}><Icon name="back" size={14} /> Back</Btn>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{c.name}</h2>
-        <StatusBadge status={c.custType} />
+      <div style={{ marginBottom:16 }}>
+        <Btn variant="ghost" size="sm" onClick={() => setView({ screen:"customers" })}><Icon name="back" size={14} /> Back</Btn>
       </div>
+      {customer.onStop && (
+        <div style={{ background:"#DC2626", color:"#fff", borderRadius:10, padding:"12px 16px", marginBottom:14, fontWeight:700, fontSize:15, display:"flex", alignItems:"center", gap:8 }}>
+          🛑 ACCOUNT ON STOP — do not carry out work until paid
+        </div>
+      )}
+      {customer.followUpDate && (
+        <div style={{ background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:10, padding:"12px 16px", marginBottom:14, fontSize:14, display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
+          <div>
+            <span style={{ fontWeight:700, color:"#92400E" }}>📞 Follow up {fmtDate(customer.followUpDate)}</span>
+            {customer.followUpNote && <span style={{ color:"#B45309" }}> — {customer.followUpNote}</span>}
+          </div>
+          <button onClick={async () => {
+            const customers = data.customers.map(c => c.id === customer.id ? { ...c, followUpDate:"", followUpNote:"" } : c);
+            await saveAndReload({ ...data, customers });
+          }} style={{ background:"#FEE2E2", color:"#DC2626", border:"none", borderRadius:6, padding:"6px 12px", fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}>Delete</button>
+        </div>
+      )}
       <Card>
-        <Row label="Phone" value={c.phone} />
-        <Row label="Email" value={c.email} />
-        {c.company && <Row label="Company" value={c.company} />}
-        <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
-        {c.notes && <Row label="Notes" value={c.notes} />}
+        {customer.custNumber && <div style={{ fontSize:13, color:"#9CA3AF", fontWeight:700, marginBottom:2 }}>Customer #{customer.custNumber}</div>}
+        <div style={{ fontWeight:800, fontSize:20, color:"#1E3A5F" }}>{customer.company || "No company name"}</div>
+        {customer.companyContact && <div style={{ fontSize:14, color:"#374151", marginTop:4 }}>Contact: {customer.companyContact}</div>}
+        <div style={{ fontSize:14, color:"#6B7280", marginTop:4 }}>{customer.phone}</div>
+        {customer.email && <div style={{ fontSize:14, color:"#6B7280" }}>{customer.email}</div>}
+        {addrParts.length > 0 && (
+          <div style={{ fontSize:13, color:"#6B7280", marginTop:6, lineHeight:1.6 }}>
+            {addrParts.map((p,i) => <span key={i}>{p}{i < addrParts.length-1 ? ", " : ""}</span>)}
+          </div>
+        )}
+        {customer.notes && <div style={{ fontSize:13, color:"#9CA3AF", marginTop:6 }}>{customer.notes}</div>}
+        <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
+          {customer.phone && (
+            <a href={`tel:${customer.phone}`} style={{ textDecoration:"none" }}>
+              <Btn size="sm" variant="primary">📞 Call</Btn>
+            </a>
+          )}
+          {customer.email && (
+            <a href={`mailto:${customer.email}`} style={{ textDecoration:"none" }}>
+              <Btn size="sm" variant="ghost">✉️ Email</Btn>
+            </a>
+          )}
+          {customer.phone && customer.custType === "Private" && <Btn size="sm" variant="ghost" onClick={() => setShowTerms(true)}>💬 Send Terms</Btn>}
+          <Btn size="sm" variant="ghost" onClick={() => setShowEdit(true)}><Icon name="edit" size={13} /> Edit</Btn>
+          <Btn size="sm" variant="danger" onClick={deleteCustomer}><Icon name="trash" size={13} /> Delete</Btn>
+        </div>
       </Card>
-      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-        {c.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${c.phone}`}>📞 Call</Btn>}
-        {c.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${c.email}`}>✉️ Email</Btn>}
-        <Btn size="sm" variant="grey" onClick={() => setShowEdit(true)}><Icon name="edit" size={14} /> Edit</Btn>
-        <Btn size="sm" variant="danger" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
-      </div>
+      {showTerms && <RepairTermsModal customer={customer} onClose={() => setShowTerms(false)} />}
 
-      <SectionTitle>Enquiries</SectionTitle>
-      {enquiries.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>None yet.</div>}
-      {enquiries.map(e => (
-        <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 14, color: "#111827" }}>{e.fromTown || "—"} → {e.toTown || "—"} · {fmtDateShort(e.preferredDate)}</div>
-            <StatusBadge status={e.status} />
+      {customer.contacts?.length > 0 && (
+        <div style={{ marginTop:16 }}>
+          <h3 style={{ margin:"0 0 8px", fontSize:14, fontWeight:700, color:"#374151", textTransform:"uppercase", letterSpacing:"0.05em" }}>Contacts</h3>
+          {[...customer.contacts].sort((a,b) => (b.main?1:0)-(a.main?1:0)).map(ct => (
+            <Card key={ct.id}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:15, color:"#1E3A5F" }}>{ct.name || "Unnamed"} {ct.main && <span style={{ fontSize:11, color:"#92400E", background:"#FEF3C7", padding:"2px 7px", borderRadius:6, fontWeight:700 }}>★ Main</span>}</div>
+                  {ct.role && <div style={{ fontSize:12, color:"#6B7280", fontWeight:600 }}>{ct.role}</div>}
+                  {ct.phone && <div style={{ fontSize:13, color:"#6B7280", marginTop:2 }}>{ct.phone}</div>}
+                  {ct.email && <div style={{ fontSize:12, color:"#9CA3AF" }}>{ct.email}</div>}
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:8, marginTop:10, flexWrap:"wrap" }}>
+                {ct.phone && <a href={`tel:${ct.phone}`} style={{ textDecoration:"none" }}><Btn size="sm" variant="primary">📞 Call</Btn></a>}
+                {ct.email && <a href={`mailto:${ct.email}`} style={{ textDecoration:"none" }}><Btn size="sm" variant="ghost">✉️ Email</Btn></a>}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", margin:"16px 0 8px" }}>
+        <h3 style={{ margin:0, fontSize:14, fontWeight:700, color:"#374151", textTransform:"uppercase", letterSpacing:"0.05em" }}>Vehicles</h3>
+        <Btn size="sm" onClick={() => setShowVehicle(true)}><Icon name="plus" size={13} /> Add</Btn>
+      </div>
+      {vehicles.map(v => (
+        <Card key={v.id}>
+          <div onClick={() => setView({ screen:"vehicleDetail", id:v.id, customerId:id })} style={{ cursor:"pointer" }}>
+            <div style={{ fontWeight:600, fontSize:14 }}>{v.make} {v.model}</div>
+            <div style={{ fontSize:13, color:"#6B7280" }}>{v.reg}</div>
+          </div>
+          <div style={{ marginTop:8 }}>
+            <Btn size="sm" onClick={() => setView({ screen:"newJob", prefill:{ customerId:id, vehicleId:v.id } })}><Icon name="plus" size={12} /> Add Job</Btn>
           </div>
         </Card>
       ))}
+      {vehicles.length === 0 && <p style={{ fontSize:13, color:"#9CA3AF" }}>No vehicles added</p>}
 
-      <SectionTitle>Booked moves</SectionTitle>
-      {jobs.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>None yet.</div>}
+      <h3 style={{ fontSize:14, fontWeight:700, color:"#374151", textTransform:"uppercase", letterSpacing:"0.05em", margin:"16px 0 8px" }}>Job History</h3>
       {jobs.map(j => (
-        <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 14, color: "#111827" }}>{fmtDate(j.moveDate)} · {gbp(j.price)}</div>
+        <Card key={j.id} onClick={() => setView({ screen:"jobDetail", id:j.id })}>
+          <div style={{ display:"flex", justifyContent:"space-between" }}>
+            <div>
+              <div style={{ fontWeight:600, fontSize:14 }}>{j.jobType}</div>
+              <div style={{ fontSize:12, color:"#9CA3AF" }}>{fmtDate(j.date)}</div>
+            </div>
             <StatusBadge status={j.status} />
           </div>
         </Card>
       ))}
-      {showEdit && <CustomerForm data={data} editCustomer={c} onClose={() => setShowEdit(false)} />}
+      {jobs.length === 0 && <p style={{ fontSize:13, color:"#9CA3AF" }}>No jobs yet</p>}
+
+      {showEdit    && <CustomerForm data={data} onClose={() => setShowEdit(false)}    setView={setView} editCustomer={customer} />}
+      {showVehicle && <VehicleForm  data={data} onClose={() => setShowVehicle(false)} customerId={id} />}
     </div>
   );
 }
 
-// ── Jobs (booked moves) ─────────────────────────────────────────────────────
-function JobsList({ data, setView }) {
-  const [filter, setFilter] = useState("Active");
-  const jobs = (data.jobs || [])
-    .filter(j => filter === "All" ? true : filter === "Active" ? j.status !== "Completed" : j.status === filter)
-    .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""));
-  const filters = ["Active", ...JOB_STATUSES, "All"];
+// ── Vehicle Form ──────────────────────────────────────────────────────────────
+function VehicleForm({ data, customerId, onClose, editVehicle }) {
+  const [make,  setMake]  = useState(editVehicle?.make  || "");
+  const [model, setModel] = useState(editVehicle?.model || "");
+  const [reg,   setReg]   = useState(editVehicle?.reg   || "");
+
+  async function save() {
+    if (!reg) return;
+    const vehicles = [...data.vehicles];
+    if (editVehicle) {
+      const idx = vehicles.findIndex(v => v.id === editVehicle.id);
+      vehicles[idx] = { ...editVehicle, make, model, reg: reg.toUpperCase() };
+    } else {
+      vehicles.push({ id:uid(), customerId, make, model, reg:reg.toUpperCase() });
+    }
+    await saveAndReload({ ...data, vehicles });
+  }
+  return (
+    <Modal title={editVehicle ? "Edit Vehicle" : "Add Vehicle"} onClose={onClose}>
+      <Field label="Registration" required><Input value={reg} onChange={setReg} placeholder="AB12 CDE" /></Field>
+      <Field label="Make"><Input value={make} onChange={setMake} placeholder="Ford" /></Field>
+      <Field label="Model"><Input value={model} onChange={setModel} placeholder="Focus" /></Field>
+      <Btn onClick={save} style={{ width:"100%", justifyContent:"center" }} disabled={!reg}>Save Vehicle</Btn>
+    </Modal>
+  );
+}
+
+// ── Vehicle Detail ────────────────────────────────────────────────────────────
+function VehicleDetail({ data, id, customerId, setView }) {
+  const vehicle = data.vehicles.find(v => v.id === id);
+  const [showEdit, setShowEdit] = useState(false);
+  if (!vehicle) return <p>Not found</p>;
+
+  const customer = data.customers.find(c => c.id === vehicle.customerId);
+  const jobs = data.jobs.filter(j => j.vehicleId === id).sort((a,b) => b.date.localeCompare(a.date));
+
+  async function deleteVehicle() {
+    if (!window.confirm("Delete this vehicle?")) return;
+    try { await deleteRecord("vehicles", id); } catch (e) { alert("Delete failed: " + (e?.message||e)); return; }
+    addTombstone(id);
+    removeSig(id);
+    const d = loadData();
+    localStorage.setItem(DB_KEY, JSON.stringify({ ...d, vehicles: d.vehicles.filter(v => v.id !== id) }));
+    window.location.reload();
+  }
+
   return (
     <div>
-      <h2 style={{ margin: "0 0 12px", fontSize: 20, fontWeight: 800, color: "#111827" }}>Booked Moves</h2>
-      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 6 }}>
-        {filters.map(f => (
-          <button key={f} onClick={() => setFilter(f)} style={{ padding: "6px 14px", borderRadius: 99, border: "none", whiteSpace: "nowrap", cursor: "pointer", fontSize: 13, fontWeight: 600, background: filter === f ? TEAL : "#F3F4F6", color: filter === f ? "#fff" : "#6B7280" }}>{f}</button>
+      <div style={{ marginBottom:16 }}>
+        <Btn variant="ghost" size="sm" onClick={() => setView({ screen:"customerDetail", id: customerId || vehicle.customerId })}><Icon name="back" size={14} /> Back</Btn>
+      </div>
+      <Card>
+        <div style={{ fontWeight:800, fontSize:20, color:"#1E3A5F" }}>{vehicle.make} {vehicle.model}</div>
+        <div style={{ fontSize:15, color:"#6B7280", marginTop:4 }}>{vehicle.reg}</div>
+        {customer && <div style={{ fontSize:13, color:"#9CA3AF", marginTop:6 }}>Owner: {customer.company || customer.companyContact || "—"}</div>}
+        <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
+          <Btn size="sm" onClick={() => setView({ screen:"newJob", prefill:{ customerId: vehicle.customerId, vehicleId: vehicle.id } })}><Icon name="plus" size={13} /> Add Job</Btn>
+          <Btn size="sm" variant="ghost" onClick={() => setShowEdit(true)}><Icon name="edit" size={13} /> Edit</Btn>
+          <Btn size="sm" variant="danger" onClick={deleteVehicle}><Icon name="trash" size={13} /> Delete</Btn>
+        </div>
+      </Card>
+
+      <h3 style={{ fontSize:14, fontWeight:700, color:"#374151", textTransform:"uppercase", letterSpacing:"0.05em", margin:"16px 0 8px" }}>Job History</h3>
+      {jobs.map(j => (
+        <Card key={j.id} onClick={() => setView({ screen:"jobDetail", id:j.id })}>
+          <div style={{ display:"flex", justifyContent:"space-between" }}>
+            <div>
+              <div style={{ fontWeight:600, fontSize:14 }}>{j.jobType}</div>
+              <div style={{ fontSize:12, color:"#9CA3AF" }}>{fmtDate(j.date)}</div>
+            </div>
+            <StatusBadge status={j.status} />
+          </div>
+        </Card>
+      ))}
+      {jobs.length === 0 && <p style={{ fontSize:13, color:"#9CA3AF" }}>No jobs for this vehicle yet</p>}
+
+      {showEdit && <VehicleForm data={data} onClose={() => setShowEdit(false)} editVehicle={vehicle} />}
+    </div>
+  );
+}
+
+// ── Jobs List ─────────────────────────────────────────────────────────────────
+function JobsList({ data, setView, initialFilter }) {
+  const [filter, setFilter] = useState(initialFilter || "Open");
+
+  // Find which job ids have an invoice, and which are unpaid/overdue
+  const invoiceByJob = {};
+  (data.invoices || []).forEach(inv => { invoiceByJob[inv.jobId] = inv; });
+  const oneMonthAgo = (() => { const d = new Date(); d.setMonth(d.getMonth()-1); return d.toISOString().split("T")[0]; })();
+  const isUnpaid = (j) => { const inv = invoiceByJob[j.id]; return inv && !inv.paid; };
+  const isOverdue = (j) => {
+    const inv = invoiceByJob[j.id];
+    if (!inv || inv.paid) return false;
+    const dateRef = (j.date || inv.createdAt || "");
+    return dateRef && dateRef < oneMonthAgo;
+  };
+  const anyOverdue = data.jobs.some(isOverdue);
+
+  const filtered = data.jobs.filter(j => {
+    if (filter==="Today")    return j.date === todayISO();
+    if (filter==="Open")     return !invoiceByJob[j.id];          // not invoiced yet
+    if (filter==="Unpaid")   return isUnpaid(j);                  // invoiced but not paid
+    if (filter==="Complete") return ["Complete","Paid"].includes(j.status);
+    return true;
+  }).sort((a,b) => b.date.localeCompare(a.date));
+
+  const pill = (active, red) => ({ padding:"12px 22px", borderRadius:99, fontSize:15, fontWeight:600, cursor:"pointer", border: red && !active ? "2px solid #DC2626" : "none", background:active?(red?"#DC2626":"#1E3A5F"):"#F3F4F6", color:active?"#fff":(red?"#DC2626":"#6B7280"), fontFamily:"inherit", whiteSpace:"nowrap" });
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <h2 style={{ margin:0, fontSize:20, fontWeight:800, color:"#1E3A5F" }}>Jobs</h2>
+        <Btn size="sm" onClick={() => setView({ screen:"newJob" })}><Icon name="plus" size={14} /> New</Btn>
+      </div>
+      {anyOverdue && (
+        <div style={{ background:"#DC2626", color:"#fff", borderRadius:10, padding:"10px 14px", marginBottom:12, fontSize:14, fontWeight:700 }}>
+          ⚠️ You have unpaid invoices over 1 month overdue
+        </div>
+      )}
+      <div style={{ display:"flex", gap:10, marginBottom:16, overflowX:"auto", paddingBottom:4 }}>
+        {["Today","Open","Unpaid","Complete","All"].map(f => (
+          <button key={f} style={pill(filter===f, f==="Unpaid" && anyOverdue)} onClick={() => setFilter(f)}>{f}</button>
         ))}
       </div>
-      {jobs.length === 0 && <Empty icon="truck" text="No moves here" />}
-      {jobs.map(j => (
-        <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{fmtDate(j.moveDate)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
-              <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{j.vehicle || "—"} · {gbp(j.price)}{j.deposit ? ` · dep ${gbp(j.deposit)}${j.depositPaid ? " ✓" : ""}` : ""}</div>
+      {filtered.length === 0 && <p style={{ color:"#9CA3AF", textAlign:"center", fontSize:14 }}>No jobs found</p>}
+      {filtered.map(job => {
+        const cust = data.customers.find(c => c.id === job.customerId);
+        const veh  = data.vehicles.find(v => v.id === job.vehicleId);
+        return (
+          <Card key={job.id} onClick={() => setView({ screen:"jobDetail", id:job.id })}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                  <div style={{ fontWeight:700, fontSize:15, color:"#111827" }}>{cust?.company || cust?.companyContact || job.driverName || "No Company"}</div>
+                  {cust?.onStop && <span style={{ background:"#DC2626", color:"#fff", fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:6, letterSpacing:"0.03em" }}>ON STOP</span>}
+                  {isOverdue(job) ? <span style={{ background:"#DC2626", color:"#fff", fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:6 }}>OVERDUE</span> : isUnpaid(job) ? <span style={{ background:"#FEF3C7", color:"#92400E", fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:6 }}>UNPAID</span> : null}
+                </div>
+                {job.driverName && cust?.company && <div style={{ fontSize:13, color:"#374151", fontWeight:600 }}>Driver: {job.driverName}</div>}
+                <div style={{ fontSize:13, color:"#6B7280", marginTop:2 }}>{veh ? `${veh.make} ${veh.model} · ${veh.reg}` : "No vehicle"}</div>
+                <div style={{ fontSize:13, color:"#6B7280" }}>{fmtDate(job.date)}{job.jobTime ? ` · ${job.jobTime}` : ""}</div>
+                {job.locAddress1 && <div style={{ fontSize:12, color:"#9CA3AF", marginTop:2 }}>📍 {[job.locAddress1, job.locTown, job.locPostcode].filter(Boolean).join(", ")}</div>}
+                {(job.photosBefore?.length > 0 || job.photosAfter?.length > 0) && <div style={{ fontSize:11, color:"#6B7280", marginTop:3 }}>📷 {(job.photosBefore?.length||0)} before · {(job.photosAfter?.length||0)} after</div>}
+              </div>
+              <StatusBadge status={job.status} />
             </div>
-            <StatusBadge status={j.status} />
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Photo Uploader ────────────────────────────────────────────────────────────
+function resizeImage(file, maxW = 800) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width  = img.width  * scale;
+        canvas.height = img.height * scale;
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.6));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function PhotoUploader({ label, photos = [], onChange, jobId }) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    setLoading(true);
+    try {
+      const newPhotos = [];
+      for (const file of files) {
+        const dataUrl = await resizeImage(file);
+        const photoId = uid();
+        // Try to upload to cloud storage immediately
+        try {
+          const { url, path } = await uploadPhoto(dataUrl, jobId || "unassigned");
+          newPhotos.push({ id: photoId, url, path });
+        } catch (err) {
+          // No signal / upload failed — keep locally, mark pending for later upload
+          newPhotos.push({ id: photoId, pending: dataUrl, jobId: jobId || "unassigned" });
+        }
+      }
+      onChange([...photos, ...newPhotos]);
+    } finally {
+      setLoading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function remove(photo) {
+    if (photo.path) { deletePhoto(photo.path).catch(() => {}); }
+    onChange(photos.filter(p => p.id !== photo.id));
+  }
+
+  const photoSrc = p => p.url || p.pending; // show uploaded URL or local pending image
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6B7280", marginBottom:6, textTransform:"uppercase", letterSpacing:"0.05em" }}>{label}</label>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:8 }}>
+        {photos.map(p => (
+          <div key={p.id} style={{ position:"relative", width:80, height:80 }}>
+            <img src={photoSrc(p)} alt="job" style={{ width:80, height:80, objectFit:"cover", borderRadius:8, border:"1.5px solid #E5E7EB" }} />
+            {p.pending && <div style={{ position:"absolute", bottom:2, left:2, background:"rgba(245,158,11,.9)", color:"#fff", fontSize:8, fontWeight:700, padding:"1px 4px", borderRadius:4 }}>PENDING</div>}
+            <button onClick={() => remove(p)} style={{ position:"absolute", top:-6, right:-6, background:"#EF4444", border:"none", borderRadius:"50%", width:20, height:20, color:"#fff", fontSize:12, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>×</button>
+          </div>
+        ))}
+        <label style={{ width:80, height:80, border:`2px dashed ${loading ? "#93C5FD" : "#D1D5DB"}`, borderRadius:8, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", color: loading ? "#3B82F6" : "#9CA3AF", fontSize:11, fontWeight:600, gap:4, background: loading ? "#EFF6FF" : "transparent" }}>
+          <span style={{ fontSize:24, lineHeight:1 }}>{loading ? "⏳" : "📷"}</span>
+          {loading ? "Uploading…" : "Add"}
+          <input type="file" accept="image/*" capture="environment" multiple onChange={handleFiles} style={{ display:"none" }} disabled={loading} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ── Photo Viewer ──────────────────────────────────────────────────────────────
+function PhotoViewer({ label, photos = [] }) {
+  const [lightbox, setLightbox] = useState(null);
+  if (photos.length === 0) return null;
+  const src = p => p.url || p.pending;
+  return (
+    <div style={{ marginBottom:14 }}>
+      <div style={{ fontSize:12, fontWeight:600, color:"#6B7280", marginBottom:6, textTransform:"uppercase", letterSpacing:"0.05em" }}>{label} ({photos.length})</div>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+        {photos.map(p => (
+          <img key={p.id} src={src(p)} alt="job" onClick={() => setLightbox(src(p))}
+            style={{ width:80, height:80, objectFit:"cover", borderRadius:8, border:"1.5px solid #E5E7EB", cursor:"pointer" }} />
+        ))}
+      </div>
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.9)", zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <img src={lightbox} alt="full" style={{ maxWidth:"100%", maxHeight:"100%", borderRadius:8 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+function LocationPopup({ customerId, data, initial, onSave, onClose }) {
+  const [addr1,     setAddr1]     = useState(initial?.locAddress1  || "");
+  const [addr2,     setAddr2]     = useState(initial?.locAddress2  || "");
+  const [town,      setTown]      = useState(initial?.locTown      || "");
+  const [county,    setCounty]    = useState(initial?.locCounty    || "");
+  const [postcode,  setPostcode]  = useState(initial?.locPostcode  || "");
+
+  function useCustomer() {
+    const cust = data.customers.find(c => c.id === customerId);
+    if (!cust) return;
+    setAddr1(cust.address1 || "");
+    setAddr2(cust.address2 || "");
+    setTown(cust.town || "");
+    setCounty(cust.county || "");
+    setPostcode(cust.postcode || "");
+  }
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+      <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:400, padding:20 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <h3 style={{ margin:0, fontSize:16, fontWeight:700, color:"#111827" }}>Job Location</h3>
+          <button onClick={onClose} style={{ background:"#F3F4F6", border:"none", borderRadius:99, width:30, height:30, cursor:"pointer", fontSize:16, color:"#6B7280" }}>×</button>
+        </div>
+        {customerId && (
+          <button onClick={useCustomer} style={{ width:"100%", marginBottom:14, fontSize:13, color:"#2563EB", background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:8, padding:"8px 12px", cursor:"pointer", fontFamily:"inherit", fontWeight:600, textAlign:"left" }}>
+            📍 Use customer's address
+          </button>
+        )}
+        <Field label="Address Line 1"><Input value={addr1} onChange={setAddr1} placeholder="12 High Street" /></Field>
+        <Field label="Address Line 2"><Input value={addr2} onChange={setAddr2} placeholder="Clifton" /></Field>
+        <Field label="Town / City"><Input value={town} onChange={setTown} placeholder="Bristol" /></Field>
+        <Field label="County"><Input value={county} onChange={setCounty} placeholder="Avon" /></Field>
+        <Field label="Postcode"><Input value={postcode} onChange={setPostcode} placeholder="BS1 1AA" /></Field>
+        <Btn onClick={() => onSave({ locAddress1:addr1, locAddress2:addr2, locTown:town, locCounty:county, locPostcode:postcode })} style={{ width:"100%", justifyContent:"center", marginTop:4 }}>
+          Save Location
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+// ── Job Form ──────────────────────────────────────────────────────────────────
+function JobForm({ data, onClose, editJob, prefill }) {
+  const [customerId,    setCustomerId]    = useState(editJob?.customerId    || prefill?.customerId || "");
+  const [custSearch,    setCustSearch]    = useState("");
+  const [custDropOpen,  setCustDropOpen]  = useState(false);
+  const [driverName,    setDriverName]    = useState(editJob?.driverName    || "");
+  const [vehicleId,     setVehicleId]     = useState(editJob?.vehicleId     || prefill?.vehicleId || "");
+  const [date,          setDate]          = useState(editJob?.date          || todayISO());
+  const [jobTime,       setJobTime]       = useState(editJob?.jobTime       || "");
+  const [locAddress1,   setLocAddress1]   = useState(editJob?.locAddress1   || "");
+  const [locAddress2,   setLocAddress2]   = useState(editJob?.locAddress2   || "");
+  const [locTown,       setLocTown]       = useState(editJob?.locTown       || "");
+  const [locCounty,     setLocCounty]     = useState(editJob?.locCounty     || "");
+  const [locPostcode,   setLocPostcode]   = useState(editJob?.locPostcode   || "");
+  const [showLocPopup,  setShowLocPopup]  = useState(false);
+  const [jobType,       setJobType]       = useState(editJob?.jobType       || "Repair");
+  const [damageType,    setDamageType]    = useState(editJob?.damageType    || "Chip");
+  const [damageSide,    setDamageSide]    = useState(editJob?.damageSide    || "");
+  const [damagePosition,setDamagePosition]= useState(editJob?.damagePosition|| "");
+  // Repairs list — supports multiple repairs per windscreen. Falls back to the old
+  // single damage fields for jobs created before this feature.
+  const [repairs, setRepairs] = useState(() => {
+    if (editJob?.repairs?.length) return editJob.repairs;
+    if (editJob?.damageType) return [{ id: uid(), type: editJob.damageType, side: editJob.damageSide || "", position: editJob.damagePosition || "" }];
+    return [{ id: uid(), type: "Chip", side: "", position: "" }];
+  });
+  const updateRepair = (id, field, value) => setRepairs(rs => rs.map(r => r.id === id ? { ...r, [field]: value } : r));
+  const addRepair = () => setRepairs(rs => [...rs, { id: uid(), type: "Chip", side: "", position: "" }]);
+  const removeRepair = (id) => setRepairs(rs => rs.length > 1 ? rs.filter(r => r.id !== id) : rs);
+  const [adasRequired,  setAdasRequired]  = useState(editJob?.adasRequired  || false);
+  const [status,        setStatus]        = useState(editJob?.status        || "Booked");
+  const [technicianId,  setTechnicianId]  = useState(editJob?.technicianId  || "");
+  const [notes,         setNotes]         = useState(editJob?.notes         || "");
+  const [paymentType,   setPaymentType]   = useState(editJob?.paymentType   || "Private");
+  const [insuranceCo,   setInsuranceCo]   = useState(editJob?.insuranceCo   || "");
+  const [claimNo,       setClaimNo]       = useState(editJob?.claimNo       || "");
+  const [photosBefore,  setPhotosBefore]  = useState(editJob?.photosBefore  || []);
+  const [photosAfter,   setPhotosAfter]   = useState(editJob?.photosAfter   || []);
+
+  const custVehicles = data.vehicles.filter(v => v.customerId === customerId);
+  const locSummary = [locAddress1, locTown, locPostcode].filter(Boolean).join(", ");
+
+  async function save() {
+    if (!customerId) return;
+    const jobs = [...data.jobs];
+    const first = repairs[0] || {};
+    const rec = { customerId, driverName, vehicleId, date, jobTime, locAddress1, locAddress2, locTown, locCounty, locPostcode, jobType, repairs, damageType: first.type || "", damageSide: first.side || "", damagePosition: first.position || "", adasRequired, status, technicianId, notes, paymentType, insuranceCo, claimNo, photosBefore, photosAfter };
+    if (editJob) {
+      const idx = jobs.findIndex(j => j.id === editJob.id);
+      jobs[idx] = { ...editJob, ...rec };
+    } else {
+      jobs.push({ id:uid(), ...rec, createdAt:todayISO() });
+    }
+    try {
+      await saveAndReload({ ...data, jobs });
+    } catch(e) {
+      alert("Storage full — try using fewer or smaller photos.");
+      return;
+    }
+    onClose();
+  }
+
+  return (
+    <>
+    <Modal title={editJob ? "Edit Job" : "New Job"} onClose={onClose}>
+      <Field label="Customer" required>
+        {(() => {
+          const selected = data.customers.find(c => c.id === customerId);
+          const sortedCusts = [...data.customers].sort((a,b) => (a.company || a.companyContact || "").localeCompare(b.company || b.companyContact || "", undefined, { sensitivity:"base" }));
+          const matches = custSearch.trim()
+            ? sortedCusts.filter(c => (c.company || "").toLowerCase().includes(custSearch.toLowerCase()) || (c.companyContact || "").toLowerCase().includes(custSearch.toLowerCase()) || (c.phone || "").includes(custSearch) || (c.town || "").toLowerCase().includes(custSearch.toLowerCase()))
+            : sortedCusts;
+          if (customerId && !custDropOpen) {
+            // Show the selected customer with a change button
+            return (
+              <div style={{ display:"flex", alignItems:"center", gap:8, ...inputStyle, cursor:"default" }}>
+                <span style={{ flex:1, fontWeight:600 }}>{selected ? (selected.company || selected.companyContact || "Unnamed") : "Select customer…"}{selected?.onStop ? " 🛑" : ""}</span>
+                <button onClick={() => { setCustDropOpen(true); setCustSearch(""); }} style={{ background:"#1E3A5F", color:"#fff", border:"none", borderRadius:6, padding:"6px 12px", fontSize:13, fontWeight:600, cursor:"pointer" }}>Change</button>
+              </div>
+            );
+          }
+          return (
+            <div>
+              <input autoFocus style={{ ...inputStyle, marginBottom:6 }} placeholder="Search customer by name, phone, town…" value={custSearch} onChange={e => setCustSearch(e.target.value)} />
+              <div style={{ maxHeight:220, overflowY:"auto", border:"1px solid #E5E7EB", borderRadius:8 }}>
+                {matches.length === 0 && <div style={{ padding:12, fontSize:13, color:"#9CA3AF" }}>No customers found</div>}
+                {matches.map(c => (
+                  <div key={c.id} onClick={() => { setCustomerId(c.id); setVehicleId(""); setCustDropOpen(false); setCustSearch(""); }}
+                    style={{ padding:"10px 12px", borderBottom:"1px solid #F3F4F6", cursor:"pointer", fontSize:14, background: c.id===customerId ? "#EFF6FF" : "#fff" }}>
+                    <div style={{ fontWeight:600 }}>{c.company || c.companyContact || "Unnamed"}{c.onStop ? " 🛑" : ""}</div>
+                    {(c.town || c.phone) && <div style={{ fontSize:12, color:"#9CA3AF" }}>{[c.town, c.phone].filter(Boolean).join(" · ")}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+      </Field>
+      {(() => {
+        const cust = data.customers.find(c => c.id === customerId);
+        return cust?.onStop ? (
+          <div style={{ background:"#FEF2F2", border:"1.5px solid #FCA5A5", color:"#DC2626", borderRadius:8, padding:"10px 14px", marginBottom:14, fontWeight:600, fontSize:13 }}>
+            🛑 This customer is ON STOP for non-payment. You can still book the job, but check before carrying out work.
+          </div>
+        ) : null;
+      })()}
+      {(() => {
+        const selCust = data.customers.find(c => c.id === customerId);
+        // Private customers are the driver themselves, so no separate driver field needed
+        if (selCust?.custType === "Private") return null;
+        return <Field label="Driver / Customer Name"><Input value={driverName} onChange={setDriverName} placeholder="Name of the driver or car owner" /></Field>;
+      })()}
+      {customerId && (
+        <Field label="Vehicle">
+          <select style={{ ...inputStyle, appearance:"none" }} value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
+            <option value="">No vehicle / select…</option>
+            {custVehicles.map(v => <option key={v.id} value={v.id}>{v.make} {v.model} · {v.reg}</option>)}
+          </select>
+        </Field>
+      )}
+      <div style={{ display:"flex", gap:10 }}>
+        <div style={{ flex:1 }}><Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field></div>
+        <div style={{ flex:1 }}><Field label="Time"><Input type="time" value={jobTime} onChange={setJobTime} /></Field></div>
+      </div>
+      <Field label="Job Location">
+        <div onClick={() => setShowLocPopup(true)} style={{ ...inputStyle, cursor:"pointer", color: locSummary ? "#111827" : "#9CA3AF", display:"flex", alignItems:"center", gap:6 }}>
+          📍 {locSummary || "Tap to enter address…"}
+        </div>
+      </Field>
+      <div style={{ display:"flex", gap:10 }}>
+        <div style={{ flex:1 }}><Field label="Status"><Select value={status} onChange={setStatus} options={Object.keys(STATUS_META)} /></Field></div>
+      </div>
+
+      <div style={{ marginBottom:14 }}>
+        <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6B7280", marginBottom:6, textTransform:"uppercase", letterSpacing:"0.05em" }}>Repairs</label>
+        {repairs.map((r, idx) => (
+          <div key={r.id} style={{ background:"#F8FAFC", border:"1px solid #F3F4F6", borderRadius:10, padding:12, marginBottom:8 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <span style={{ fontSize:12, fontWeight:700, color:"#1E3A5F" }}>Repair {idx + 1}</span>
+              {repairs.length > 1 && (
+                <button onClick={() => removeRepair(r.id)} style={{ background:"#FEE2E2", color:"#DC2626", border:"none", borderRadius:6, padding:"2px 8px", fontSize:12, fontWeight:600, cursor:"pointer" }}>Remove</button>
+              )}
+            </div>
+            <div style={{ marginBottom:8 }}>
+              <Select value={r.type} onChange={v => updateRepair(r.id, "type", v)} options={DAMAGE_TYPES} />
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <div style={{ flex:1 }}>
+                <Select value={r.side} onChange={v => updateRepair(r.id, "side", v)} options={["Drivers Side","Passenger Side","Middle"]} placeholder="Side…" />
+              </div>
+              <div style={{ flex:1 }}>
+                <Select value={r.position} onChange={v => updateRepair(r.id, "position", v)} options={["Top Right","Top Left","Top Centre","Centre","Bottom Right","Bottom Left","Bottom Centre"]} placeholder="Position…" />
+              </div>
+            </div>
+          </div>
+        ))}
+        <Btn size="sm" variant="ghost" onClick={addRepair} style={{ width:"100%", justifyContent:"center" }}>+ Add repair</Btn>
+      </div>
+      <Field label="Payment Type"><Select value={paymentType} onChange={setPaymentType} options={PAYMENT_TYPES} /></Field>
+      {paymentType==="Insurance" && (
+        <>
+          <Field label="Insurance Company"><Input value={insuranceCo} onChange={setInsuranceCo} placeholder="e.g. Admiral" /></Field>
+          <Field label="Claim Number"><Input value={claimNo} onChange={setClaimNo} placeholder="Claim ref…" /></Field>
+        </>
+      )}
+      {data.technicians.length > 0 && (
+        <Field label="Technician">
+          <select style={{ ...inputStyle, appearance:"none" }} value={technicianId} onChange={e => setTechnicianId(e.target.value)}>
+            <option value="">Unassigned</option>
+            {data.technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+      )}
+      <Field label="Notes"><Input value={notes} onChange={setNotes} placeholder="Any notes…" /></Field>
+      {editJob ? (
+        <>
+          <PhotoUploader label="Before Photos" photos={photosBefore} onChange={setPhotosBefore} jobId={editJob.id} />
+          <PhotoUploader label="After Photos"  photos={photosAfter}  onChange={setPhotosAfter}  jobId={editJob.id} />
+        </>
+      ) : (
+        <div style={{ fontSize:12, color:"#9CA3AF", textAlign:"center", margin:"4px 0 12px" }}>📷 You can add before/after photos once the job is saved</div>
+      )}
+      <Btn onClick={save} style={{ width:"100%", justifyContent:"center" }} disabled={!customerId}>Save Job</Btn>
+    </Modal>
+    {showLocPopup && (
+      <LocationPopup
+        customerId={customerId}
+        data={data}
+        initial={{ locAddress1, locAddress2, locTown, locCounty, locPostcode }}
+        onSave={(loc) => { setLocAddress1(loc.locAddress1); setLocAddress2(loc.locAddress2); setLocTown(loc.locTown); setLocCounty(loc.locCounty); setLocPostcode(loc.locPostcode); setShowLocPopup(false); }}
+        onClose={() => setShowLocPopup(false)}
+      />
+    )}
+    </>
+  );
+}
+
+// ── Job Card Email ────────────────────────────────────────────────────────────
+function sendJobCard(job, customer, vehicle, invoice) {
+  const company  = customer?.company        || "";
+  const contact  = customer?.companyContact || "";
+  const driver   = job.driverName           || "";
+  const car      = vehicle ? `${vehicle.make} ${vehicle.model} · ${vehicle.reg}` : "";
+  const location = [job.locAddress1, job.locAddress2, job.locTown, job.locPostcode].filter(Boolean).join(", ");
+  const toEmail  = customer?.email          || "";
+  const subject  = encodeURIComponent(`Job Report — ${company || driver} · ${car}`);
+  const body     = encodeURIComponent(`Please find your job completion report attached.\n\nWindscreen Repairs (Bristol)\n07946 222246\nwww.windscreenrepairsbristol.co.uk`);
+  const mailtoLink = `mailto:${toEmail}?subject=${subject}&body=${body}`;
+
+  const photoSection = (photos, label) => {
+    if (!photos || photos.length === 0) return "";
+    return `
+      <h3 style="color:#1E3A5F;font-size:15px;margin:20px 0 10px;border-bottom:2px solid #F3F4F6;padding-bottom:6px;">${label}</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${photos.map(p => `<img src="${p.url || p.pending}" style="width:160px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #E5E7EB;" />`).join("")}
+      </div>`;
+  };
+
+  const row = (label, value) => value ? `
+    <tr>
+      <td style="padding:7px 0;font-size:13px;color:#6B7280;width:40%;vertical-align:top;">${label}</td>
+      <td style="padding:7px 0;font-size:13px;color:#111827;font-weight:600;">${value}</td>
+    </tr>` : "";
+
+  const fmtD = iso => { if (!iso) return ""; const [y,m,d] = iso.split("-"); return `${d}/${m}/${y}`; };
+
+  const html = `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Job Report</title>
+<style>
+  body { margin:0; padding:0; background:#F8FAFC; font-family:Arial,sans-serif; }
+  @media print {
+    .no-print { display:none !important; }
+    body { background:#fff; }
+    .card { box-shadow:none !important; border-radius:0 !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Action Bar (hidden when printing) -->
+<div class="no-print" style="position:sticky;top:0;z-index:100;background:#1E3A5F;padding:12px 16px;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;">
+  <div style="font-size:13px;color:#93C5FD;font-weight:600;width:100%;text-align:center;">Tap Save as PDF first, then attach to email</div>
+  <button onclick="window.print()" style="background:#F59E0B;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;">
+    💾 Save as PDF
+  </button>
+  <a href="${mailtoLink}" style="background:#fff;color:#1E3A5F;border:none;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;text-decoration:none;display:flex;align-items:center;gap:6px;">
+    ✉️ Open Mail App
+  </a>
+</div>
+
+<!-- Job Card -->
+<div class="card" style="max-width:600px;margin:16px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);">
+  <div style="background:#1E3A5F;padding:24px 28px;">
+    <div style="font-size:20px;font-weight:800;color:#fff;">Windscreen Repairs (Bristol)</div>
+    <div style="font-size:12px;color:#93C5FD;margin-top:4px;">3 Goosander Grove, Cheddar, BS27 3FY</div>
+    <div style="font-size:12px;color:#93C5FD;">07946 222246 · info@windscreenrepairsbristol.co.uk</div>
+    <div style="font-size:12px;color:#93C5FD;">www.windscreenrepairsbristol.co.uk</div>
+  </div>
+  <div style="background:#F59E0B;padding:12px 28px;">
+    <div style="font-size:16px;font-weight:700;color:#fff;">Job Completion Report</div>
+    <div style="font-size:12px;color:#FEF3C7;">${fmtD(job.date)}${job.jobTime ? " · " + job.jobTime : ""}</div>
+  </div>
+  <div style="padding:24px 28px;">
+    <h3 style="color:#1E3A5F;font-size:15px;margin:0 0 10px;border-bottom:2px solid #F3F4F6;padding-bottom:6px;">Job Details</h3>
+    <table style="width:100%;border-collapse:collapse;">
+      ${row("Company", company)}
+      ${row("Contact", contact)}
+      ${row("Driver", driver)}
+      ${row("Vehicle", car)}
+      ${row("Location", location)}
+      ${(job.repairs?.length ? job.repairs : [{type:job.damageType,side:job.damageSide,position:job.damagePosition}]).map((r,i) => row(job.repairs?.length>1?`Repair ${i+1}`:"Damage", [r.type, r.side, r.position].filter(Boolean).join(" · "))).join("")}
+      ${row("Payment", job.paymentType)}
+      ${job.paymentType === "Insurance" ? row("Insurance", [job.insuranceCo, job.claimNo].filter(Boolean).join(" · ")) : ""}
+      ${row("Notes", job.notes)}
+    </table>
+
+    ${invoice ? `
+    <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:14px 16px;margin:20px 0;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-size:13px;color:#065F46;font-weight:600;">Total${invoice.vat ? " (inc. 20% VAT)" : ""}</div>
+        <div style="font-size:11px;color:#059669;">Labour: £${parseFloat(invoice.labour||0).toFixed(2)} · Parts: £${parseFloat(invoice.parts||0).toFixed(2)}</div>
+        <div style="font-size:12px;color:${invoice.paid?"#059669":"#D97706"};font-weight:600;margin-top:4px;">${invoice.paid ? "✓ Paid" : "⏳ Payment Awaited"}</div>
+      </div>
+      <div style="font-size:28px;font-weight:800;color:#065F46;">£${parseFloat(invoice.total).toFixed(2)}</div>
+    </div>` : ""}
+
+    ${photoSection(job.photosBefore, "📷 Before")}
+    ${photoSection(job.photosAfter,  "✅ After")}
+
+    <div style="margin-top:28px;padding-top:16px;border-top:1px solid #F3F4F6;text-align:center;font-size:12px;color:#9CA3AF;">
+      Thank you for choosing Windscreen Repairs (Bristol)<br>
+      <a href="https://www.windscreenrepairsbristol.co.uk" style="color:#1E3A5F;">www.windscreenrepairsbristol.co.uk</a>
+    </div>
+  </div>
+</div>
+
+<!-- How to attach instructions -->
+<div class="no-print" style="max-width:600px;margin:0 auto 32px;padding:16px;background:#FFF7ED;border-radius:12px;border:1px solid #FED7AA;">
+  <div style="font-size:13px;font-weight:700;color:#92400E;margin-bottom:8px;">📎 How to attach to email on iPhone:</div>
+  <ol style="margin:0;padding-left:18px;font-size:12px;color:#B45309;line-height:1.8;">
+    <li>Tap <strong>💾 Save as PDF</strong> above</li>
+    <li>In the print preview, <strong>pinch outward</strong> on the page to convert to PDF</li>
+    <li>Tap the <strong>Share icon</strong> → <strong>Save to Files</strong></li>
+    <li>Tap <strong>✉️ Open Mail App</strong> above</li>
+    <li>In Mail, tap the <strong>paperclip icon</strong> → find your saved PDF in Files</li>
+  </ol>
+</div>
+
+</body></html>`;
+
+  const blob = new Blob([html], { type:"text/html" });
+  const url  = URL.createObjectURL(blob);
+  window.open(url, "_blank");
+}
+
+// ── iCal Export ──────────────────────────────────────────────────────────────
+function addToCalendar(job, customer, vehicle) {
+  if (!job.date) { alert("Job has no date set."); return; }
+
+  // Build start datetime
+  const [y, m, d] = job.date.split("-").map(Number);
+  const [h, min]  = job.jobTime ? job.jobTime.split(":").map(Number) : [9, 0];
+  const start = new Date(y, m - 1, d, h, min, 0);
+  const end   = new Date(start.getTime() + 60 * 60 * 1000); // 1hr duration
+
+  function icsDate(dt) {
+    const pad = n => String(n).padStart(2, "0");
+    return `${dt.getFullYear()}${pad(dt.getMonth()+1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+  }
+
+  const company  = customer?.company  || "Unknown Company";
+  const driver   = job.driverName     || "";
+  const reg      = vehicle?.reg       || "";
+  const car      = vehicle ? `${vehicle.make} ${vehicle.model} ${reg}`.trim() : "";
+  const location = [job.locAddress1, job.locAddress2, job.locTown, job.locPostcode].filter(Boolean).join(", ");
+
+  const title    = `Windscreen Repair — ${company}${driver ? ` (${driver})` : ""}${car ? ` · ${car}` : ""}`;
+  const notes    = [
+    driver   ? `Driver: ${driver}`   : "",
+    car      ? `Vehicle: ${car}`     : "",
+    location ? `Location: ${location}` : "",
+    job.damageType ? `Damage: ${job.damageType}${job.damageSide ? ` · ${job.damageSide}` : ""}${job.damagePosition ? ` · ${job.damagePosition}` : ""}` : "",
+    job.paymentType === "Insurance" && job.insuranceCo ? `Insurance: ${job.insuranceCo} · ${job.claimNo || ""}` : "",
+    job.notes ? `Notes: ${job.notes}` : "",
+  ].filter(Boolean).join("\\n");
+
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Windscreen Repairs Bristol//CRM//EN",
+    "BEGIN:VEVENT",
+    `UID:${job.id}@windscreen-crm`,
+    `DTSTAMP:${icsDate(new Date())}`,
+    `DTSTART:${icsDate(start)}`,
+    `DTEND:${icsDate(end)}`,
+    `SUMMARY:${title}`,
+    location ? `LOCATION:${location}` : "",
+    notes    ? `DESCRIPTION:${notes}` : "",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].filter(Boolean).join("\r\n");
+
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `job-${job.date}-${company.replace(/\s+/g, "-")}.ics`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ── Job Detail ────────────────────────────────────────────────────────────────
+function JobDetail({ data, id, setView }) {
+  const job = data.jobs.find(j => j.id === id);
+  const [showEdit,    setShowEdit]    = useState(false);
+  const [showInvoice, setShowInvoice] = useState(false);
+  const [showEditInvoice, setShowEditInvoice] = useState(false);
+  if (!job) return <p>Not found</p>;
+
+  const customer   = data.customers.find(c => c.id === job.customerId);
+  const vehicle    = data.vehicles.find(v => v.id === job.vehicleId);
+  const technician = data.technicians.find(t => t.id === job.technicianId);
+  const invoice    = data.invoices.find(i => i.jobId === id);
+
+  const nextStatuses = { "Booked":["Complete"], "Complete":["Invoiced"], "Invoiced":["Paid"], "Paid":[] };
+
+  async function updateStatus(s) {
+    await saveAndReload({ ...data, jobs: data.jobs.map(j => j.id===id ? {...j,status:s} : j) });
+  }
+  async function deleteJob() {
+    if (!window.confirm("Delete this job?")) return;
+    try { await deleteRecord("jobs", id); } catch (e) { alert("Delete failed: " + (e?.message||e)); return; }
+    addTombstone(id);
+    removeSig(id);
+    const d = loadData();
+    localStorage.setItem(DB_KEY, JSON.stringify({ ...d, jobs: d.jobs.filter(j => j.id !== id) }));
+    window.location.reload();
+  }
+
+  const Row = ({ label, value }) => value ? (
+    <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid #F3F4F6" }}>
+      <span style={{ fontSize:13, color:"#6B7280", fontWeight:500 }}>{label}</span>
+      <span style={{ fontSize:13, color:"#111827", fontWeight:600, textAlign:"right", maxWidth:"60%" }}>{value}</span>
+    </div>
+  ) : null;
+
+  return (
+    <div>
+      <div style={{ marginBottom:16 }}>
+        <Btn variant="ghost" size="sm" onClick={() => setView({ screen:"jobs" })}><Icon name="back" size={14} /> Back</Btn>
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+        <h2 style={{ margin:0, fontSize:18, fontWeight:800, color:"#1E3A5F" }}>Job Detail</h2>
+        <StatusBadge status={job.status} />
+      </div>
+      <Card>
+        <Row label="Company"      value={customer?.company || null} />
+        <Row label="Contact"      value={customer?.companyContact || null} />
+        <Row label="Driver"       value={job.driverName || null} />
+        <Row label="Phone"        value={customer?.phone} />
+        <Row label="Address"      value={[customer?.address1, customer?.town, customer?.postcode].filter(Boolean).join(", ")} />
+        <Row label="Vehicle"      value={vehicle ? `${vehicle.make} ${vehicle.model} · ${vehicle.reg}` : null} />
+        <Row label="Date"         value={fmtDate(job.date)} />
+        <Row label="Time"         value={job.jobTime || null} />
+        <Row label="Location"     value={[job.locAddress1, job.locAddress2, job.locTown, job.locCounty, job.locPostcode].filter(Boolean).join(", ") || null} />
+        {(job.repairs?.length ? job.repairs : [{ id:"x", type:job.damageType, side:job.damageSide, position:job.damagePosition }]).map((r, i) => (
+          <Row key={r.id || i} label={job.repairs?.length > 1 ? `Repair ${i+1}` : "Damage"} value={[r.type, r.side, r.position].filter(Boolean).join(" · ") || null} />
+        ))}
+        <Row label="Payment"      value={job.paymentType} />
+        <Row label="Insurance Co" value={job.insuranceCo} />
+        <Row label="Claim No."    value={job.claimNo} />
+        <Row label="Technician"   value={technician?.name} />
+        <Row label="Notes"        value={job.notes} />
+      </Card>
+      {(job.photosBefore?.length > 0 || job.photosAfter?.length > 0) && (
+        <Card>
+          <PhotoViewer label="Before Photos" photos={job.photosBefore} />
+          <PhotoViewer label="After Photos"  photos={job.photosAfter}  />
+        </Card>
+      )}
+
+      {nextStatuses[job.status]?.length > 0 && (
+        <Btn variant="amber" onClick={() => updateStatus(nextStatuses[job.status][0])} style={{ width:"100%", justifyContent:"center", marginBottom:10 }}>
+          <Icon name="check" size={15} /> Mark as {nextStatuses[job.status][0]}
+        </Btn>
+      )}
+      {job.status==="Complete" && !invoice && (
+        <Btn onClick={() => setShowInvoice(true)} style={{ width:"100%", justifyContent:"center", marginBottom:10 }}>
+          Create Invoice
+        </Btn>
+      )}
+      {invoice && (
+        <Card style={{ background:"#F0FDF4", borderColor:"#BBF7D0" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontWeight:700, fontSize:14, color:"#065F46" }}>Invoice · £{invoice.total}</div>
+              <div style={{ fontSize:12, color:"#059669" }}>{invoice.paid ? "✓ Paid" : "Awaiting payment"}</div>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <Btn size="sm" variant="ghost" onClick={() => setShowEditInvoice(true)}>Edit</Btn>
+              {!invoice.paid && (
+                <Btn size="sm" variant="ghost" onClick={async () => {
+                  const invoices = data.invoices.map(i => i.id===invoice.id ? {...i,paid:true,paidDate:todayISO()} : i);
+                  const jobs = data.jobs.map(j => j.id===id ? {...j,status:"Paid"} : j);
+                  await saveAndReload({ ...data, invoices, jobs });
+                }}>Mark Paid</Btn>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
+      <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+        {customer?.phone && (
+          <a href={`tel:${customer.phone}`} style={{ textDecoration:"none", flex:1 }}>
+            <Btn size="sm" variant="primary" style={{ width:"100%", justifyContent:"center" }}>📞 Call</Btn>
+          </a>
+        )}
+        {customer?.email && (
+          <a href={`mailto:${customer.email}`} style={{ textDecoration:"none", flex:1 }}>
+            <Btn size="sm" variant="ghost" style={{ width:"100%", justifyContent:"center" }}>✉️ Email</Btn>
+          </a>
+        )}
+      </div>
+      <div style={{ display:"flex", gap:8, marginTop:8 }}>
+        <Btn size="sm" variant="ghost" onClick={() => setShowEdit(true)}    style={{ flex:1, justifyContent:"center" }}><Icon name="edit"  size={13}/> Edit</Btn>
+        <Btn size="sm" variant="danger" onClick={deleteJob}                 style={{ flex:1, justifyContent:"center" }}><Icon name="trash" size={13}/> Delete</Btn>
+      </div>
+      <Btn variant="ghost" onClick={() => addToCalendar(job, customer, vehicle)} style={{ width:"100%", justifyContent:"center", marginTop:8 }}>
+        📅 Add to iPhone Calendar
+      </Btn>
+      <Btn variant="amber" onClick={() => sendJobCard(job, customer, vehicle, invoice)} style={{ width:"100%", justifyContent:"center", marginTop:8 }}>
+        📧 Email Job Card to Customer
+      </Btn>
+      {showEdit    && <JobForm     data={data} editJob={job} onClose={() => setShowEdit(false)}    />}
+      {showInvoice && <InvoiceForm data={data} jobId={id}   onClose={() => setShowInvoice(false)} />}
+      {showEditInvoice && invoice && <InvoiceForm data={data} jobId={id} editInvoice={invoice} onClose={() => setShowEditInvoice(false)} />}
+    </div>
+  );
+}
+
+// ── Invoice Form ──────────────────────────────────────────────────────────────
+function InvoiceForm({ data, jobId, editInvoice, onClose }) {
+  const job = data.jobs.find(j => j.id === jobId);
+  // Auto-fill details from the job's repairs (for new invoices)
+  const autoDetails = (() => {
+    const reps = job?.repairs?.length ? job.repairs : (job?.damageType ? [{ type: job.damageType, side: job.damageSide, position: job.damagePosition }] : []);
+    return reps.map(r => `${r.type || "Repair"}${r.side ? " – " + r.side : ""}${r.position ? " " + r.position : ""}`).join("\n");
+  })();
+  const [details, setDetails] = useState(editInvoice?.details ?? autoDetails);
+  const [labour, setLabour] = useState(editInvoice?.labour ?? "");
+  const [parts,  setParts]  = useState(editInvoice?.parts ?? "");
+  const [vat,    setVat]    = useState(editInvoice?.vat ?? false);
+  const subtotal = (parseFloat(labour)||0) + (parseFloat(parts)||0);
+  const total    = vat ? subtotal * 1.2 : subtotal;
+
+  async function save() {
+    let invoices;
+    if (editInvoice) {
+      invoices = data.invoices.map(i => i.id === editInvoice.id ? { ...i, details, labour, parts, vat, total: total.toFixed(2) } : i);
+      await saveAndReload({ ...data, invoices });
+    } else {
+      invoices = [...data.invoices, { id:uid(), jobId, details, labour, parts, vat, total:total.toFixed(2), paid:false, createdAt:todayISO() }];
+      const jobs = data.jobs.map(j => j.id===jobId ? {...j,status:"Invoiced"} : j);
+      await saveAndReload({ ...data, invoices, jobs });
+    }
+  }
+
+  return (
+    <Modal title={editInvoice ? "Edit Invoice" : "Create Invoice"} onClose={onClose}>
+      <Field label="Details / Work Done">
+        <textarea value={details} onChange={e => setDetails(e.target.value)} rows={3}
+          style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:"1.5px solid #E5E7EB", fontFamily:"inherit", fontSize:14, resize:"vertical", boxSizing:"border-box" }}
+          placeholder="e.g. Chip repair – Driver Side Top" />
+      </Field>
+      <Field label="Labour (£)"><Input type="number" value={labour} onChange={setLabour} placeholder="0.00" /></Field>
+      <Field label="Parts (£)"><Input type="number" value={parts} onChange={setParts} placeholder="0.00" /></Field>
+      <Field label="VAT">
+        <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:14, color:"#374151" }}>
+          <input type="checkbox" checked={vat} onChange={e => setVat(e.target.checked)} style={{ width:16, height:16 }} />
+          Apply 20% VAT
+        </label>
+      </Field>
+      <div style={{ background:"#F9FAFB", borderRadius:8, padding:"12px 14px", marginBottom:16 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#6B7280", marginBottom:4 }}><span>Subtotal</span><span>£{subtotal.toFixed(2)}</span></div>
+        {vat && <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#6B7280", marginBottom:4 }}><span>VAT (20%)</span><span>£{(subtotal*0.2).toFixed(2)}</span></div>}
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:16, fontWeight:800, color:"#111827", borderTop:"1px solid #E5E7EB", paddingTop:8, marginTop:4 }}><span>Total</span><span>£{total.toFixed(2)}</span></div>
+      </div>
+      <Btn onClick={save} style={{ width:"100%", justifyContent:"center" }}>Save Invoice</Btn>
+    </Modal>
+  );
+}
+
+// ── Invoices List ─────────────────────────────────────────────────────────────
+function InvoicesList({ data, setView, initialFilter }) {
+  const [filter, setFilter] = useState(initialFilter || "Unpaid");
+  const oneMonthAgo = (() => { const d = new Date(); d.setMonth(d.getMonth()-1); return d.toISOString().split("T")[0]; })();
+  const invOverdue = (inv, jobDate) => !inv.paid && ((jobDate || inv.createdAt || "") < oneMonthAgo) && (jobDate || inv.createdAt);
+  const anyOverdue = data.invoices.some(inv => {
+    const job = data.jobs.find(j => j.id === inv.jobId);
+    return invOverdue(inv, job?.date);
+  });
+  const enriched = data.invoices.map(inv => {
+    const job      = data.jobs.find(j => j.id === inv.jobId);
+    const customer = job ? data.customers.find(c => c.id === job.customerId) : null;
+    const vehicle  = job?.vehicleId ? data.vehicles.find(v => v.id === job.vehicleId) : null;
+    return { ...inv, job, customer, vehicle, overdue: invOverdue(inv, job?.date) };
+  }).filter(inv => {
+    if (filter==="Unpaid") return !inv.paid;
+    if (filter==="Paid")   return  inv.paid;
+    return true;
+  }).sort((a,b) => (b.job?.date||b.createdAt||"").localeCompare(a.job?.date||a.createdAt||""));
+
+  const total = enriched.reduce((s,i) => s+(parseFloat(i.total)||0), 0);
+  const pill  = (active, red) => ({ padding:"12px 22px", borderRadius:99, fontSize:15, fontWeight:600, cursor:"pointer", border: red && !active ? "2px solid #DC2626" : "none", background:active?(red?"#DC2626":"#1E3A5F"):"#F3F4F6", color:active?"#fff":(red?"#DC2626":"#6B7280"), fontFamily:"inherit", whiteSpace:"nowrap" });
+
+  return (
+    <div>
+      <h2 style={{ margin:"0 0 14px", fontSize:20, fontWeight:800, color:"#1E3A5F" }}>Invoices</h2>
+      {anyOverdue && (
+        <div style={{ background:"#DC2626", color:"#fff", borderRadius:10, padding:"10px 14px", marginBottom:12, fontSize:14, fontWeight:700 }}>
+          ⚠️ You have unpaid invoices over 1 month overdue
+        </div>
+      )}
+      <div style={{ display:"flex", gap:10, marginBottom:16, overflowX:"auto", paddingBottom:4 }}>
+        {["Unpaid","Paid","All"].map(f => <button key={f} style={pill(filter===f, f==="Unpaid" && anyOverdue)} onClick={() => setFilter(f)}>{f}</button>)}
+      </div>
+      {enriched.length > 0 && (
+        <Card style={{ background:"#EFF6FF", borderColor:"#BFDBFE" }}>
+          <div style={{ display:"flex", justifyContent:"space-between" }}>
+            <span style={{ fontSize:13, color:"#1D4ED8", fontWeight:600 }}>{filter==="Unpaid"?"Outstanding":filter==="Paid"?"Total Received":"Total"}</span>
+            <span style={{ fontSize:18, fontWeight:800, color:"#1D4ED8" }}>£{total.toFixed(2)}</span>
+          </div>
+        </Card>
+      )}
+      {enriched.length === 0 && <p style={{ color:"#9CA3AF", textAlign:"center", fontSize:14 }}>No invoices found</p>}
+      {enriched.map(inv => (
+        <Card key={inv.id} onClick={() => inv.job && setView({ screen:"jobDetail", id:inv.job.id })}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontWeight:700, fontSize:15 }}>{inv.customer?.company||"Unknown"}</div>
+              <div style={{ fontSize:12, color:"#9CA3AF" }}>{fmtDate(inv.job?.date || inv.createdAt)}{inv.job?.jobType ? " · " + inv.job.jobType : ""}</div>
+              {inv.vehicle && <div style={{ fontSize:12, color:"#6B7280", marginTop:1 }}>🚗 {[inv.vehicle.make, inv.vehicle.model, inv.vehicle.reg].filter(Boolean).join(" · ")}</div>}
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontWeight:800, fontSize:16, color:inv.paid?"#059669":"#1E3A5F" }}>£{parseFloat(inv.total).toFixed(2)}</div>
+              <div style={{ fontSize:11, color:inv.paid?"#059669":inv.overdue?"#DC2626":"#D97706", fontWeight:600 }}>{inv.paid?"Paid":inv.overdue?"OVERDUE":"Unpaid"}</div>
+            </div>
           </div>
         </Card>
       ))}
@@ -1199,461 +1718,249 @@ function JobsList({ data, setView }) {
   );
 }
 
-// ── Vehicles & Staff (Company) ──────────────────────────────────────────────
-const VEHICLE_COLORS = ["#0E7C73", "#4F46E5", "#D97706", "#DB2777", "#2563EB", "#16A34A", "#7C3AED", "#EA580C"];
-function vehicleColor(data, vehicleId) {
-  const list = data.vehicles || [];
-  const idx = list.findIndex(v => v.id === vehicleId);
-  return idx >= 0 ? VEHICLE_COLORS[idx % VEHICLE_COLORS.length] : "#94A4A0";
+// ── Root App ──────────────────────────────────────────────────────────────────
+// ── Notification & Sound System ───────────────────────────────────────────────
+function playAlertSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const times = [0, 0.2, 0.4];
+    times.forEach(t => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0, ctx.currentTime + t);
+      gain.gain.linearRampToValueAtTime(0.4, ctx.currentTime + t + 0.05);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + t + 0.18);
+      osc.start(ctx.currentTime + t);
+      osc.stop(ctx.currentTime + t + 0.2);
+    });
+  } catch(e) {}
 }
-const VEHICLE_TYPES = ["Small Van (SWB)", "Medium Van (LWB)", "Luton Van", "7.5 Tonne Lorry", "18 Tonne Lorry", "Other"];
-const STAFF_ROLES = ["Driver", "Porter", "Packer", "Driver / Porter", "Owner", "Office"];
 
-function CompanyView({ data, setView }) {
-  const [vForm, setVForm] = useState(null);   // null | {} | record
-  const [sForm, setSForm] = useState(null);
-  const vehicles = [...(data.vehicles || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  const staff = [...(data.staff || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  const truckIcon = <Icon name="truck" size={20} color="#fff" />;
+function sendNotification(title, body) {
+  playAlertSound();
+  if ("Notification" in window && Notification.permission === "granted") {
+    new Notification(title, { body, icon: "/logo.png", badge: "/logo.png" });
+  }
+}
 
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team</div>
+function scheduleNotifications(data) {
+  // Clear any existing scheduled timers stored on window
+  if (window._crmTimers) window._crmTimers.forEach(clearTimeout);
+  window._crmTimers = [];
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
-        <Card style={{ marginBottom: 0 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <h4 style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Vehicles</h4>
-            <Btn size="sm" onClick={() => setVForm({})}><Icon name="plus" size={14} /> Add</Btn>
-          </div>
-          {vehicles.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0", padding: "10px 0" }}>No vehicles yet.</div>}
-          {vehicles.map((v, i) => (
-            <div key={v.id} onClick={() => setVForm(v)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid #F2F5F4", cursor: "pointer" }}>
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: VEHICLE_COLORS[i % VEHICLE_COLORS.length], display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{truckIcon}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E" }}>{v.name}</div>
-                <div style={{ fontSize: 12, color: "#6A7B77" }}>{[v.reg, v.vtype, v.capacityCuFt ? `${v.capacityCuFt} cu ft` : ""].filter(Boolean).join(" · ") || "—"}</div>
-              </div>
-            </div>
-          ))}
-        </Card>
-
-        <Card style={{ marginBottom: 0 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <h4 style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Staff</h4>
-            <Btn size="sm" onClick={() => setSForm({})}><Icon name="plus" size={14} /> Add</Btn>
-          </div>
-          {staff.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0", padding: "10px 0" }}>No staff yet.</div>}
-          {staff.map(s => (
-            <div key={s.id} onClick={() => setSForm(s)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid #F2F5F4", cursor: "pointer", opacity: s.active === false ? .5 : 1 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: "#7C8B87", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="customers" size={19} color="#fff" /></div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E" }}>{s.name}{s.active === false ? " · inactive" : ""}</div>
-                <div style={{ fontSize: 12, color: "#6A7B77" }}>{[s.role, s.phone].filter(Boolean).join(" · ") || "—"}</div>
-              </div>
-            </div>
-          ))}
-        </Card>
-      </div>
-
-      {vForm && <VehicleForm data={data} editVehicle={vForm.id ? vForm : null} onClose={() => setVForm(null)} />}
-      {sForm && <StaffForm data={data} editStaff={sForm.id ? sForm : null} onClose={() => setSForm(null)} />}
-    </div>
+  const now  = new Date();
+  const today = now.toISOString().split("T")[0];
+  const todayJobs = data.jobs.filter(j =>
+    j.date === today && ["Booked"].includes(j.status)
   );
-}
 
-function VehicleForm({ data, onClose, editVehicle }) {
-  const v = editVehicle || {};
-  const [f, setF] = useState({ reg: v.reg || "", vtype: v.vtype || "", capacityCuFt: v.capacityCuFt || "" });
-  const set = (k, val) => setF(p => ({ ...p, [k]: val }));
-  async function save() {
-    if (!f.reg.trim() && !f.vtype) { alert("Add a registration or a type so you can tell vehicles apart."); return; }
-    const label = [f.vtype, f.reg.trim()].filter(Boolean).join(" · ") || "Vehicle";
-    const rec = { id: v.id || uid(), name: label, reg: f.reg.trim(), vtype: f.vtype, capacityCuFt: Number(f.capacityCuFt) || 0, createdAt: v.createdAt || new Date().toISOString() };
-    await saveAndReload(upsertLocal(data, "vehicles", rec));
+  // 9am daily summary
+  const nineAm = new Date();
+  nineAm.setHours(9, 0, 0, 0);
+  const msTo9am = nineAm - now;
+  if (msTo9am > 0 && todayJobs.length > 0) {
+    window._crmTimers.push(setTimeout(() => {
+      sendNotification(
+        "📋 Windscreen Repairs Bristol",
+        `You have ${todayJobs.length} job${todayJobs.length > 1 ? "s" : ""} booked today`
+      );
+    }, msTo9am));
   }
-  async function del() {
-    if (!confirm("Delete this vehicle?")) return;
-    addTombstone(v.id); SAVING_IN_PROGRESS = true; showSavingOverlay();
-    try { await deleteRecord("vehicles", v.id); } catch {}
-    const d2 = { ...data, vehicles: (data.vehicles || []).filter(x => x.id !== v.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
-  }
-  return (
-    <Modal title={v.id ? "Edit Vehicle" : "Add Vehicle"} onClose={onClose}>
-      <Field label="Type"><Select value={f.vtype} onChange={x => set("vtype", x)} options={VEHICLE_TYPES} placeholder="Select…" /></Field>
-      <Field label="Reg / plate"><Input value={f.reg} onChange={x => set("reg", x)} placeholder="e.g. WX19 ABC" /></Field>
-      <Field label="Capacity (cu ft)" hint="Roughly how much it holds"><Input type="number" value={f.capacityCuFt} onChange={x => set("capacityCuFt", x)} placeholder="e.g. 600" /></Field>
-      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-        {v.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
-        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
-        <Btn style={{ flex: 2 }} onClick={save}>{v.id ? "Save" : "Add vehicle"}</Btn>
-      </div>
-    </Modal>
-  );
-}
 
-function StaffForm({ data, onClose, editStaff }) {
-  const s = editStaff || {};
-  const [f, setF] = useState({ name: s.name || "", role: s.role || "", phone: s.phone || "", active: s.active !== false });
-  const set = (k, val) => setF(p => ({ ...p, [k]: val }));
-  async function save() {
-    if (!f.name.trim()) { alert("Enter a name."); return; }
-    const rec = { id: s.id || uid(), name: f.name.trim(), role: f.role, phone: f.phone, active: f.active, createdAt: s.createdAt || new Date().toISOString() };
-    await saveAndReload(upsertLocal(data, "staff", rec));
-  }
-  async function del() {
-    if (!confirm("Delete this staff member?")) return;
-    addTombstone(s.id); SAVING_IN_PROGRESS = true; showSavingOverlay();
-    try { await deleteRecord("staff", s.id); } catch {}
-    const d2 = { ...data, staff: (data.staff || []).filter(x => x.id !== s.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
-  }
-  return (
-    <Modal title={s.id ? "Edit Staff" : "Add Staff"} onClose={onClose}>
-      <Field label="Name" required><Input value={f.name} onChange={x => set("name", x)} /></Field>
-      <Field label="Role"><Select value={f.role} onChange={x => set("role", x)} options={STAFF_ROLES} placeholder="Select…" /></Field>
-      <Field label="Phone"><Input value={f.phone} onChange={x => set("phone", x)} /></Field>
-      <Field label="Active">
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
-          <input type="checkbox" checked={f.active} onChange={e => set("active", e.target.checked)} style={{ width: 18, height: 18 }} /> Currently working (show when assigning crew)
-        </label>
-      </Field>
-      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-        {s.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
-        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
-        <Btn style={{ flex: 2 }} onClick={save}>{s.id ? "Save" : "Add staff"}</Btn>
-      </div>
-    </Modal>
-  );
-}
-
-function JobDetail({ data, id, setView }) {
-  const j = (data.jobs || []).find(x => x.id === id);
-  const customer = (data.customers || []).find(c => c.id === j?.customerId);
-  if (!j) return <div style={{ padding: 20 }}>Move not found.</div>;
-  const [f, setF] = useState({
-    moveDate: j.moveDate || "", startTime: j.startTime || "",
-    vehicleIds: Array.isArray(j.vehicleIds) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []),
-    crew: Array.isArray(j.crew) ? j.crew : [], price: j.price || 0, deposit: j.deposit || 0,
-    depositPaid: j.depositPaid || false, balancePaid: j.balancePaid || false,
-    status: j.status || "Booked", notes: j.notes || "",
+  // 1 hour before each job
+  todayJobs.forEach(job => {
+    if (!job.jobTime) return;
+    const [h, m] = job.jobTime.split(":").map(Number);
+    const jobDate = new Date();
+    jobDate.setHours(h, m, 0, 0);
+    const alertTime = new Date(jobDate - 60 * 60 * 1000); // 1hr before
+    const msToAlert = alertTime - now;
+    if (msToAlert > 0) {
+      const cust = data.customers.find(c => c.id === job.customerId);
+      const veh  = data.vehicles.find(v => v.id === job.vehicleId);
+      const name = cust?.company || job.driverName || "Customer";
+      const car  = veh ? `${veh.make} ${veh.model} · ${veh.reg}` : "";
+      window._crmTimers.push(setTimeout(() => {
+        sendNotification(
+          `🔧 Job in 1 hour — ${job.jobTime}`,
+          `${name}${car ? ` · ${car}` : ""}${job.locAddress1 ? ` · ${job.locAddress1}` : ""}`
+        );
+      }, msToAlert));
+    }
   });
-  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  const toggleCrew = name => setF(p => ({ ...p, crew: p.crew.includes(name) ? p.crew.filter(n => n !== name) : [...p.crew, name] }));
-  const toggleVehicle = vid => setF(p => ({ ...p, vehicleIds: p.vehicleIds.includes(vid) ? p.vehicleIds.filter(x => x !== vid) : [...p.vehicleIds, vid] }));
-  const vehLabel = vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; };
-  async function save() {
-    const rec = { ...j, ...f, crew: f.crew, vehicle: f.vehicleIds.map(vehLabel).filter(Boolean).join(", "), price: Number(f.price) || 0, deposit: Number(f.deposit) || 0 };
-    await saveAndReload(upsertLocal(data, "jobs", rec));
-  }
-  async function completeMove() {
-    const rec = { ...j, ...f, crew: f.crew, vehicle: f.vehicleIds.map(vehLabel).filter(Boolean).join(", "), price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, status: "Completed", balancePaid: true };
-    await saveAndReload(upsertLocal(data, "jobs", rec));
-  }
-  async function del() {
-    if (!confirm("Delete this booked move?")) return;
-    addTombstone(j.id);
-    SAVING_IN_PROGRESS = true; showSavingOverlay();
-    try { await deleteRecord("jobs", j.id); } catch {}
-    const d2 = { ...data, jobs: (data.jobs || []).filter(x => x.id !== j.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2));
-    SAVING_IN_PROGRESS = false; setView({ screen: "jobs" }); window.location.reload();
-  }
-  const balance = (Number(f.price) || 0) - (Number(f.deposit) || 0);
-  const sameDayJobs = (data.jobs || []).filter(x => x.id !== j.id && f.moveDate && x.moveDate === f.moveDate);
-  const bookedVehicleIds = new Set(sameDayJobs.flatMap(x => (x.vehicleIds && x.vehicleIds.length) ? x.vehicleIds : (x.vehicleId ? [x.vehicleId] : [])));
-  const bookedCrew = new Set(sameDayJobs.flatMap(x => x.crew || []));
-  return (
-    <div>
-      <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "jobs" })}><Icon name="back" size={14} /> Back</Btn>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 8px" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, j.customerId)}</h2>
-        <StatusBadge status={f.status} />
-      </div>
-      {customer && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          {customer.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
-          {customer.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
-          {j.enquiryId && <Btn size="sm" variant="grey" onClick={() => setView({ screen: "enquiryDetail", id: j.enquiryId })}>View enquiry</Btn>}
-        </div>
-      )}
-
-      <Card>
-        <Row label="From" value={[j.fromAddress1, j.fromAddress2, j.fromTown, j.fromPostcode].filter(Boolean).join(", ")} />
-        {j.fromAccess && <Row label="From access" value={j.fromAccess} />}
-        <Row label="To" value={[j.toAddress1, j.toAddress2, j.toTown, j.toPostcode].filter(Boolean).join(", ")} />
-        {j.toAccess && <Row label="To access" value={j.toAccess} />}
-        <Row label="Volume" value={j.volumeCuFt ? `${j.volumeCuFt} cu ft · ${j.volumeM3} m³` : ""} />
-      </Card>
-
-      <SectionTitle>Booking</SectionTitle>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Move date"><Input type="date" value={f.moveDate} onChange={v => set("moveDate", v)} /></Field></div>
-        <div style={{ width: 130 }}><Field label="Start time"><Input type="time" value={f.startTime} onChange={v => set("startTime", v)} /></Field></div>
-      </div>
-      <Field label="Vehicles" hint={f.moveDate ? "Tap to select one or more. Vehicles already out that day are greyed." : "Tap to select one or more"}>
-        {(data.vehicles || []).length === 0
-          ? <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>No vehicles yet — add them under <b>Company</b>.</div>
-          : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {(data.vehicles || []).map(v => {
-                const on = f.vehicleIds.includes(v.id);
-                const taken = !on && bookedVehicleIds.has(v.id);
-                return (
-                  <button key={v.id} onClick={() => !taken && toggleVehicle(v.id)} disabled={taken} title={taken ? "Already out on another move that day" : ""}
-                    style={{ border: on ? `1.5px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : taken ? "#F2F5F4" : "#fff", color: on ? TEAL_D : taken ? "#B7C3C0" : "#43534F", borderRadius: 99, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: taken ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, textDecoration: taken ? "line-through" : "none" }}>
-                    {on && <Icon name="check" size={13} color={TEAL} />}{v.name}{taken ? " · booked" : ""}
-                  </button>
-                );
-              })}
-            </div>}
-      </Field>
-      <Field label="Crew" hint={f.moveDate ? "Crew already booked on this date can't be picked" : undefined}>
-        {(data.staff || []).filter(s => s.active !== false).length === 0
-          ? <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>No staff yet — add them under <b>Company</b>.</div>
-          : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {(data.staff || []).filter(s => s.active !== false).map(s => {
-                const on = f.crew.includes(s.name);
-                const taken = !on && bookedCrew.has(s.name);
-                return (
-                  <button key={s.id} onClick={() => !taken && toggleCrew(s.name)} disabled={taken} title={taken ? "Already booked on another move that day" : ""}
-                    style={{ border: on ? `1.5px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : taken ? "#F2F5F4" : "#fff", color: on ? TEAL_D : taken ? "#B7C3C0" : "#43534F", borderRadius: 99, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: taken ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, textDecoration: taken ? "line-through" : "none" }}>
-                    {on && <Icon name="check" size={13} color={TEAL} />}{s.name}{taken ? " · booked" : ""}
-                  </button>
-                );
-              })}
-            </div>}
-      </Field>
-      <Field label="Status"><Select value={f.status} onChange={v => set("status", v)} options={JOB_STATUSES} /></Field>
-
-      <SectionTitle>Payment</SectionTitle>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Price (£)"><Input type="number" value={f.price} onChange={v => set("price", v)} /></Field></div>
-        <div style={{ flex: 1 }}><Field label="Deposit (£)"><Input type="number" value={f.deposit} onChange={v => set("deposit", v)} /></Field></div>
-      </div>
-      <div style={{ background: "#F9FAFB", borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 14, display: "flex", justifyContent: "space-between" }}>
-        <span style={{ color: "#6B7280" }}>Balance due</span><span style={{ fontWeight: 700, color: "#111827" }}>{gbp(balance)}</span>
-      </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", marginBottom: 8, cursor: "pointer" }}>
-        <input type="checkbox" checked={f.depositPaid} onChange={ev => set("depositPaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Deposit paid
-      </label>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", marginBottom: 12, cursor: "pointer" }}>
-        <input type="checkbox" checked={f.balancePaid} onChange={ev => set("balancePaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Balance paid (move complete)
-      </label>
-
-      <Field label="Notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
-
-      <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-        <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>
-        <Btn style={{ flex: 1 }} onClick={save}><Icon name="check" size={16} /> Save move</Btn>
-      </div>
-      {f.status !== "Completed" && (
-        <Btn variant="primary" style={{ width: "100%", marginTop: 10 }} onClick={completeMove}>
-          <Icon name="check" size={16} /> Mark move complete
-        </Btn>
-      )}
-      {f.status === "Completed" && (
-        <div style={{ textAlign: "center", marginTop: 12, fontSize: 13, fontWeight: 700, color: "#059669" }}>✓ Move completed</div>
-      )}
-    </div>
-  );
 }
 
-// ── Calendar (agenda of booked moves) ───────────────────────────────────────
-const CAL_MON = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-const CAL_DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
-function isoOf(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
-function sameDay(a,b){ return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
-function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
-function startOfWeek(d){ const x=new Date(d); const wd=(x.getDay()+6)%7; return addDays(x,-wd); }
-function parseTime(t){ if(!t) return null; const m=String(t).match(/(\d{1,2}):(\d{2})/); return m ? (+m[1])+(+m[2])/60 : null; }
-function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"am":"pm"; let H=hh%12; if(H===0)H=12; return mm?`${H}:${String(mm).padStart(2,"0")}${ap}`:`${H}${ap}`; }
-
-function CalendarView({ data, setView }) {
-  const [mode, setMode] = useState("week");
-  const [anchor, setAnchor] = useState(() => new Date());
-  const jobs = (data.jobs || []).filter(j => j.moveDate);
+// ── Calendar ──────────────────────────────────────────────────────────────────
+function CalendarView({ data, setView, device }) {
+  const [mode, setMode] = useState("month"); // "month" | "agenda" | "day"
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
   const today = new Date();
-  const jobsOn = d => jobs.filter(j => j.moveDate === isoOf(d)).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||""));
-  const surveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost").sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
-  const colorOf = j => (STATUS_META[j.status]?.color) || TEAL;
-  const vehIdsOf = j => (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []);
-  const bookedVehiclesOn = d => new Set(jobsOn(d).flatMap(vehIdsOf));
-  const bookedStaffOn = d => new Set(jobsOn(d).flatMap(x => x.crew || []));
+  const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
 
-  function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
+  const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const dayNames = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
-  let rangeLabel = "";
-  if (mode==="month") rangeLabel = `${CAL_MON[anchor.getMonth()]} ${anchor.getFullYear()}`;
-  else if (mode==="week") { const s=startOfWeek(anchor), e=addDays(s,6); rangeLabel = `${s.getDate()} ${CAL_MON[s.getMonth()].slice(0,3)} – ${e.getDate()} ${CAL_MON[e.getMonth()].slice(0,3)}`; }
-  else rangeLabel = `${CAL_DOW[(anchor.getDay()+6)%7]} ${anchor.getDate()} ${CAL_MON[anchor.getMonth()]}`;
+  const jobsByDate = {};
+  (data.jobs || []).forEach(j => {
+    if (!j.date) return;
+    (jobsByDate[j.date] = jobsByDate[j.date] || []).push(j);
+  });
+  Object.values(jobsByDate).forEach(arr => arr.sort((a,b) => (a.jobTime||"").localeCompare(b.jobTime||"")));
 
-  const MoveCard = ({ j, big }) => (
-    <div onClick={() => setView({ screen:"jobDetail", id:j.id })}
-      style={{ background:"#fff", border:"1px solid #E9EEED", borderLeft:`4px solid ${colorOf(j)}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
-        <span style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</span>
-        {j.startTime && <span style={{ fontSize: big?12:10.5, fontWeight:700, color:"#6A7B77", flexShrink:0 }}>{j.startTime}</span>}
-      </div>
-      <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:2, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-        {j.fromTown || "—"} → {j.toTown || "—"}
-      </div>
-      {big && (
-        <div style={{ fontSize:12, color:"#41514E", marginTop:6, display:"flex", flexWrap:"wrap", gap:"2px 10px" }}>
-          <span><b style={{ color:colorOf(j) }}>●</b> {j.vehicle || "No vehicle"}</span>
-          {(j.crew||[]).length>0 && <span>· {j.crew.join(", ")}</span>}
-          <StatusBadge status={j.status} />
-        </div>
-      )}
-      {!big && j.vehicle && <div style={{ fontSize:10.5, color:"#94A4A0", marginTop:1, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{j.vehicle}</div>}
-    </div>
-  );
+  const toISO = (y, m, d) => `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  const todayISO = toISO(today.getFullYear(), today.getMonth(), today.getDate());
 
-  const SurveyCard = ({ en, big }) => (
-    <div onClick={() => setView({ screen:"enquiryDetail", id:en.id })}
-      style={{ background:"#FFFBF2", border:"1px solid #FBE3B3", borderLeft:`4px solid ${AMBER}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
-      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:AMBER, textTransform:"uppercase", letterSpacing:".05em" }}>Survey{en.surveyTime ? ` · ${en.surveyTime}` : ""}</div>
-      <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, en.customerId)}</div>
-      <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:1, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{en.fromTown || "—"} → {en.toTown || "—"}</div>
-    </div>
-  );
+  function custName(j) {
+    const c = data.customers.find(x => x.id === j.customerId);
+    return j.driverName || c?.company || c?.companyContact || "Job";
+  }
 
-  const availChip = (label, booked) => (    <span style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:99, fontSize:12.5, fontWeight:700,
-      background: booked ? "#F2F5F4" : "#E7F2F0", color: booked ? "#B7C3C0" : TEAL_D,
-      textDecoration: booked ? "line-through" : "none", border: booked ? "1px solid #EAEFEE" : "1px solid #CDE7E2" }}>
-      <span style={{ width:8, height:8, borderRadius:99, background: booked ? "#C4D0CD" : "#22C55E" }} />{label}{booked ? " · booked" : ""}
-    </span>
-  );
-  const AvailPanel = ({ d }) => {
-    const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
-    const vehicles = data.vehicles || [];
-    const staffActive = (data.staff || []).filter(s => s.active !== false);
-    if (!vehicles.length && !staffActive.length) return null;
+  function MonthGrid() {
+    const year = cursor.getFullYear(), month = cursor.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const startOffset = (firstDay.getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < startOffset; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    const cellMinH = device === "phone" ? 52 : device === "tablet" ? 92 : 110;
+    const maxEntries = device === "phone" ? 2 : 4;
     return (
-      <div style={{ background:"#fff", border:"1px solid #E9EEED", borderRadius:14, padding:"14px 16px", marginBottom:14, boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
-        <div style={{ fontSize:11.5, fontWeight:800, textTransform:"uppercase", letterSpacing:".06em", color:"#94A4A0", marginBottom:10 }}>Availability</div>
-        {vehicles.length>0 && <>
-          <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Vehicles</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom: staffActive.length?12:0 }}>{vehicles.map(v => <span key={v.id}>{availChip(v.name, bv.has(v.id))}</span>)}</div>
-        </>}
-        {staffActive.length>0 && <>
-          <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Staff</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>{staffActive.map(s => <span key={s.id}>{availChip(s.name, bs.has(s.name))}</span>)}</div>
-        </>}
+      <div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <Btn size="sm" variant="ghost" onClick={() => setCursor(new Date(year, month-1, 1))}>‹</Btn>
+          <div style={{ fontWeight:800, fontSize:18, color:"#1E3A5F" }}>{monthNames[month]} {year}</div>
+          <Btn size="sm" variant="ghost" onClick={() => setCursor(new Date(year, month+1, 1))}>›</Btn>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5 }}>
+          {dayNames.map(d => <div key={d} style={{ textAlign:"center", fontSize:12, fontWeight:700, color:"#9CA3AF", padding:"6px 0" }}>{device==="phone" ? d[0] : d}</div>)}
+          {cells.map((d, i) => {
+            if (d === null) return <div key={"e"+i} />;
+            const iso = toISO(year, month, d);
+            const dayJobs = jobsByDate[iso] || [];
+            const isToday = iso === todayISO;
+            return (
+              <div key={iso} onClick={() => { setSelectedDate(iso); setMode("day"); }}
+                style={{ minHeight:cellMinH, borderRadius:10, padding:device==="phone"?4:6, background: isToday ? "#EFF6FF" : "#fff", border: isToday ? "2px solid #2563EB" : "1px solid #F3F4F6", cursor:"pointer", display:"flex", flexDirection:"column" }}>
+                <div style={{ fontSize:device==="phone"?13:15, fontWeight:700, color: isToday ? "#2563EB" : "#374151" }}>{d}</div>
+                {device === "phone" ? (
+                  // Compact: coloured dots on phone
+                  dayJobs.length > 0 && (
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:2, marginTop:2 }}>
+                      {dayJobs.slice(0,4).map(j => (
+                        <div key={j.id} style={{ width:6, height:6, borderRadius:"50%", background:(STATUS_META[j.status]||STATUS_META.Booked).color }} />
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  // Roomy: job labels on tablet/desktop
+                  <>
+                    {dayJobs.slice(0,maxEntries).map(j => (
+                      <div key={j.id} style={{ fontSize:9, fontWeight:600, color:"#fff", background:(STATUS_META[j.status]||STATUS_META.Booked).color, borderRadius:3, padding:"1px 3px", marginTop:2, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
+                        {j.jobTime ? j.jobTime + " " : ""}{custName(j)}
+                      </div>
+                    ))}
+                    {dayJobs.length > maxEntries && <div style={{ fontSize:10, color:"#9CA3AF", marginTop:1 }}>+{dayJobs.length-maxEntries} more</div>}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
-  };
+  }
+
+  // ── Day view ──
+  function DayView() {
+    const d = selectedDate || todayISO;
+    const dayJobs = jobsByDate[d] || [];
+    const dt = new Date(d + "T00:00:00");
+    const prevDay = () => { const x = new Date(dt); x.setDate(x.getDate()-1); setSelectedDate(toISO(x.getFullYear(), x.getMonth(), x.getDate())); };
+    const nextDay = () => { const x = new Date(dt); x.setDate(x.getDate()+1); setSelectedDate(toISO(x.getFullYear(), x.getMonth(), x.getDate())); };
+    const weekday = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][dt.getDay()];
+    return (
+      <div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <Btn size="sm" variant="ghost" onClick={prevDay}>‹</Btn>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontWeight:800, fontSize:17, color:"#1E3A5F" }}>{weekday}</div>
+            <div style={{ fontSize:13, color:"#6B7280" }}>{fmtDate(d)}</div>
+          </div>
+          <Btn size="sm" variant="ghost" onClick={nextDay}>›</Btn>
+        </div>
+        {dayJobs.length === 0 && <p style={{ fontSize:14, color:"#9CA3AF", textAlign:"center", marginTop:30 }}>No jobs on this day</p>}
+        {dayJobs.map(j => (
+          <Card key={j.id} onClick={() => setView({ screen:"jobDetail", id:j.id })}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:16, color:"#1E3A5F" }}>{j.jobTime || "—"}</div>
+                <div style={{ fontWeight:600, fontSize:14, marginTop:2 }}>{custName(j)}</div>
+                <div style={{ fontSize:12, color:"#9CA3AF", marginTop:1 }}>{j.jobType}{j.damageType ? " · " + j.damageType : ""}</div>
+                {(j.locTown || j.locAddress1) && <div style={{ fontSize:12, color:"#9CA3AF", marginTop:1 }}>📍 {[j.locAddress1, j.locTown].filter(Boolean).join(", ")}</div>}
+              </div>
+              <StatusBadge status={j.status} />
+            </div>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  function Agenda() {
+    const upcoming = Object.keys(jobsByDate).filter(d => d >= todayISO).sort();
+    if (upcoming.length === 0) return <p style={{ fontSize:13, color:"#9CA3AF", textAlign:"center", marginTop:30 }}>No upcoming jobs scheduled</p>;
+    return (
+      <div>
+        {upcoming.map(date => (
+          <div key={date} style={{ marginBottom:16 }}>
+            <div style={{ fontSize:13, fontWeight:700, color: date===todayISO ? "#2563EB" : "#374151", marginBottom:6 }}>
+              {date===todayISO ? "Today · " : ""}{fmtDate(date)}
+            </div>
+            {jobsByDate[date].map(j => (
+              <Card key={j.id} onClick={() => setView({ screen:"jobDetail", id:j.id })}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ fontWeight:600, fontSize:14 }}>{j.jobTime ? j.jobTime + " · " : ""}{custName(j)}</div>
+                    <div style={{ fontSize:12, color:"#9CA3AF" }}>{j.jobType}{j.damageType ? " · " + j.damageType : ""}</div>
+                  </div>
+                  <StatusBadge status={j.status} />
+                </div>
+              </Card>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:14 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-          <div style={{ display:"flex", gap:5 }}>
-            <button onClick={()=>navg(-1)} style={navBtn}>‹</button>
-            <button onClick={()=>navg(1)} style={navBtn}>›</button>
-          </div>
-          <Btn size="sm" variant="grey" onClick={()=>setAnchor(new Date())}>Today</Btn>
-          <span style={{ fontSize:17, fontWeight:800, letterSpacing:"-.01em", color:"#10211E" }}>{rangeLabel}</span>
-        </div>
-        <div style={{ display:"inline-flex", background:"#EEF3F2", borderRadius:11, padding:3, gap:2 }}>
-          {["day","week","month"].map(m => (
-            <button key={m} onClick={()=>setMode(m)} style={{ border:"none", background: mode===m?TEAL:"transparent", color: mode===m?"#fff":"#5b6a66", fontWeight:700, fontSize:13, padding:"7px 15px", borderRadius:9, cursor:"pointer", textTransform:"capitalize" }}>{m}</button>
-          ))}
-        </div>
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        <Btn variant={mode==="month"?"primary":"ghost"} size="sm" onClick={() => setMode("month")} style={{ flex:1, justifyContent:"center" }}>Month</Btn>
+        <Btn variant={mode==="day"?"primary":"ghost"} size="sm" onClick={() => { if (!selectedDate) setSelectedDate(todayISO); setMode("day"); }} style={{ flex:1, justifyContent:"center" }}>Day</Btn>
+        <Btn variant={mode==="agenda"?"primary":"ghost"} size="sm" onClick={() => setMode("agenda")} style={{ flex:1, justifyContent:"center" }}>Agenda</Btn>
       </div>
 
-      {/* Availability chips component (used in Day + Week) */}
-
-
-      {mode==="month" && (() => {
-        const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-        const start = startOfWeek(first);
-        const cells = [];
-        for (let i=0;i<42;i++) {
-          const d = addDays(start,i); const out = d.getMonth()!==anchor.getMonth();
-          const evs = jobsOn(d); const svs = surveysOn(d);
-          const total = evs.length + svs.length;
-          cells.push(
-            <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:92, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
-              <div style={{ alignSelf:"flex-start", fontSize:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
-              {svs.slice(0,2).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color:"#92591A", background:"#FFF6E6", borderLeft:`3px solid ${AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>📋 {custName(data,en.customerId)}</div>)}
-              {evs.slice(0,3).map(j => <div key={j.id} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(j)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data,j.customerId)}</div>)}
-              {total>5 && <div style={{ fontSize:10, color:"#94A4A0", fontWeight:700 }}>+{total-5} more</div>}
-            </div>
-          );
-        }
-        return (
-          <div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:7, marginBottom:7 }}>
-              {CAL_DOW.map(d => <div key={d} style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textTransform:"uppercase", letterSpacing:".05em", textAlign:"center" }}>{d}</div>)}
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:7 }}>{cells}</div>
-          </div>
-        );
-      })()}
-
-      {mode==="week" && (() => {
-        const start = startOfWeek(anchor);
-        const days = []; for (let i=0;i<7;i++) days.push(addDays(start,i));
-        return (
-          <div style={{ overflowX:"auto", paddingBottom:6 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7, minmax(120px,1fr))", gap:8, minWidth:860 }}>
-              {days.map((d,i) => {
-                const evs = jobsOn(d); const isToday = sameDay(d,today);
-                return (
-                  <div key={i} style={{ background:"#fff", border:`1px solid ${isToday?"#FBD9A0":"#E9EEED"}`, borderRadius:12, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-                    <div style={{ background: isToday?"#FFF7E8":"#F4F7F6", borderBottom:"1px solid #E9EEED", padding:"7px 6px", textAlign:"center" }}>
-                      <div style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textTransform:"uppercase" }}>{CAL_DOW[i]}</div>
-                      <div style={{ fontSize:16, fontWeight:800, color: isToday?AMBER:"#2c3c38" }}>{d.getDate()}</div>
-                    </div>
-                    <div style={{ padding:7, display:"flex", flexDirection:"column", gap:6, minHeight:90 }}>
-                      {surveysOn(d).map(en => <SurveyCard key={en.id} en={en} />)}
-                      {evs.map(j => <MoveCard key={j.id} j={j} />)}
-                    </div>
-                    {((data.vehicles||[]).length>0 || (data.staff||[]).filter(s=>s.active!==false).length>0) && (() => {
-                      const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
-                      const freeV = (data.vehicles||[]).filter(v=>!bv.has(v.id)).length;
-                      const freeS = (data.staff||[]).filter(s=>s.active!==false && !bs.has(s.name)).length;
-                      return <div style={{ borderTop:"1px solid #F2F5F4", padding:"6px 7px", fontSize:10.5, fontWeight:700, color: (freeV||freeS)?"#3f817a":"#C4D0CD", textAlign:"center" }}>{freeV} van{freeV!==1?"s":""} · {freeS} crew free</div>;
-                    })()}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
-
-      {mode==="day" && (() => {
-        const evs = jobsOn(anchor); const svs = surveysOn(anchor); const isToday = sameDay(anchor,today);
-        return (
-          <div>
-            <div style={{ background: isToday?"#FFF7E8":"#F4F7F6", border:"1px solid #E9EEED", borderRadius:12, padding:"10px 14px", marginBottom:12, fontSize:13, fontWeight:800, color:"#2c3c38" }}>
-              {evs.length} move{evs.length!==1?"s":""}{svs.length?` · ${svs.length} survey${svs.length!==1?"s":""}`:""} · {CAL_DOW[(anchor.getDay()+6)%7]} {anchor.getDate()} {CAL_MON[anchor.getMonth()]}
-            </div>
-            <AvailPanel d={anchor} />
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              {svs.map(en => <SurveyCard key={en.id} en={en} big />)}
-              {evs.map(j => <MoveCard key={j.id} j={j} big />)}
-              {evs.length===0 && svs.length===0 && <Empty icon="truck" text="Nothing booked this day" />}
-            </div>
-          </div>
-        );
-      })()}
-
-      {jobs.length===0 && !(data.enquiries||[]).some(e=>e.surveyDate) && <div style={{ marginTop:16 }}><Empty icon="truck" text="No moves or surveys booked yet" /></div>}
+      {mode === "month" && <MonthGrid />}
+      {mode === "day" && <DayView />}
+      {mode === "agenda" && <Agenda />}
     </div>
   );
 }
-const navBtn = { width:36, height:36, borderRadius:11, border:"1px solid #E3E9E8", background:"#fff", color:"#41514E", cursor:"pointer", fontSize:20, lineHeight:1, fontWeight:700 };
 
-// ── Device responsiveness ───────────────────────────────────────────────────
+// ── Responsive sizing ─────────────────────────────────────────────────────────
+// One app that adapts: phone (chunkier touch targets), tablet & desktop (roomier).
 function useDeviceType() {
   const get = () => {
     const w = typeof window !== "undefined" ? window.innerWidth : 520;
     if (w >= 1024) return "desktop";
-    if (w >= 768) return "tablet";
+    if (w >= 700)  return "tablet";
     return "phone";
   };
   const [device, setDevice] = useState(get);
@@ -1664,94 +1971,431 @@ function useDeviceType() {
   }, []);
   return device;
 }
+
+// Global CSS tuned per device — bigger inputs/buttons on phone, wider layout on tablet/desktop
 function ResponsiveStyles({ device }) {
-  const wide = device !== "phone";
-  const common = `
-    *{scrollbar-width:thin;scrollbar-color:#CBD6D3 transparent}
-    ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#CBD6D3;border-radius:9px}
-    .rm-btn:hover,.rm-btn-sm:hover{transform:translateY(-1px)}
-    @media (prefers-reduced-motion:reduce){*{transition:none!important}}
-  `;
-  const phone = `
-    input,select,textarea{font-size:16px!important;padding:14px 14px!important}
-    .rm-btn{padding:13px 18px!important;font-size:15px!important}.rm-btn-sm{padding:9px 13px!important;font-size:13.5px!important}
-    .rm-modal{border-radius:22px 22px 0 0!important}
-  `;
-  const wideCss = `
-    .rm-modal-overlay{align-items:center!important}
-    .rm-modal{max-width:560px!important;border-radius:20px!important;margin:0 16px;max-height:88vh!important}
-    .rm-company-grid{grid-template-columns:1fr 1fr!important;align-items:start}
-    input,select,textarea{font-size:15px!important}
-  `;
-  return <style>{common + (wide ? wideCss : phone)}</style>;
-}
-
-// ── Merge helper (newest-wins, tombstone-aware) ─────────────────────────────
-function mergeArrays(cloudArr, localArr, deleted) {
-  const byId = {};
-  (cloudArr || []).forEach(x => { if (!deleted.includes(x.id)) byId[x.id] = x; });
-  (localArr || []).forEach(x => {
-    if (deleted.includes(x.id)) return;
-    if (byId[x.id]) byId[x.id] = (x.updatedAt || 0) >= (byId[x.id].updatedAt || 0) ? x : byId[x.id];
-    else byId[x.id] = x; // local-only: keep (genuine deletes use tombstones)
-  });
-  return Object.values(byId);
-}
-function mergeAll(cloud, local) {
-  const deleted = getTombstones();
-  return {
-    customers: mergeArrays(cloud.customers, local.customers || [], deleted),
-    enquiries: mergeArrays(cloud.enquiries, local.enquiries || [], deleted),
-    jobs: mergeArrays(cloud.jobs, local.jobs || [], deleted),
-    vehicles: mergeArrays(cloud.vehicles, local.vehicles || [], deleted),
-    staff: mergeArrays(cloud.staff, local.staff || [], deleted),
+  const css = {
+    phone: `
+      .crm-shell { max-width: 100%; }
+      input, select, textarea { font-size: 16px !important; padding: 14px 14px !important; }
+      .crm-btn { padding: 14px 20px !important; font-size: 16px !important; }
+      .crm-btn-sm { padding: 10px 14px !important; font-size: 14px !important; }
+    `,
+    tablet: `
+      .crm-shell { max-width: 720px; }
+      input, select, textarea { font-size: 15px !important; padding: 12px 14px !important; }
+    `,
+    desktop: `
+      .crm-shell { max-width: 880px; }
+      input, select, textarea { font-size: 15px !important; padding: 11px 14px !important; }
+    `,
   };
+  return <style>{css[device] || ""}</style>;
 }
 
-// ── App ─────────────────────────────────────────────────────────────────────
-const SECTIONS = {
-  enquiries: { list: "enquiries", detail: "enquiryDetail", List: EnquiriesList, Detail: EnquiryDetail },
-  jobs:      { list: "jobs",      detail: "jobDetail",      List: JobsList,      Detail: JobDetail },
-  customers: { list: "customers", detail: "customerDetail", List: CustomersList, Detail: CustomerDetail },
-};
-function sectionFor(screen) {
-  if (["enquiries", "enquiryDetail", "newEnquiry"].includes(screen)) return "enquiries";
-  if (["jobs", "jobDetail"].includes(screen)) return "jobs";
-  if (["customers", "customerDetail"].includes(screen)) return "customers";
-  return null;
+// ── Reports ───────────────────────────────────────────────────────────────────
+function ReportsView({ data }) {
+  const now = new Date();
+  // Period mode: "rolling" (last 12 months), or a specific calendar/financial year
+  const [period, setPeriod] = useState("rolling");
+
+  // Build the list of selectable years from the data
+  const allDates = [
+    ...(data.invoices || []).map(i => i.createdAt),
+    ...(data.jobs || []).map(j => j.date),
+  ].filter(Boolean);
+  const yearsPresent = Array.from(new Set(allDates.map(d => parseInt(d.slice(0,4))))).filter(Boolean);
+  const thisYear = now.getFullYear();
+  if (!yearsPresent.includes(thisYear)) yearsPresent.push(thisYear);
+  yearsPresent.sort((a,b) => b - a);
+
+  // Work out the 12 months to show based on the selected period
+  let months = [];
+  if (period === "rolling") {
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label: d.toLocaleDateString("en-GB",{month:"short"}) });
+    }
+  } else if (period === "all") {
+    // From the earliest record's month to now
+    const earliest = allDates.length ? allDates.reduce((a,b) => a < b ? a : b) : `${now.getFullYear()}-01`;
+    const [ey, em] = earliest.slice(0,7).split("-").map(Number);
+    let d = new Date(ey, em-1, 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 1);
+    while (d <= end) {
+      months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label: d.toLocaleDateString("en-GB",{month:"short"}) + (d.getMonth()===0 ? " " + String(d.getFullYear()).slice(2) : "") });
+      d = new Date(d.getFullYear(), d.getMonth()+1, 1);
+    }
+  } else if (period.startsWith("cal-")) {
+    const y = parseInt(period.slice(4));
+    for (let m = 0; m < 12; m++) {
+      const d = new Date(y, m, 1);
+      months.push({ key: `${y}-${String(m+1).padStart(2,"0")}`, label: d.toLocaleDateString("en-GB",{month:"short"}) });
+    }
+  } else if (period.startsWith("fin-")) {
+    // Financial year April (start) to March (next year)
+    const y = parseInt(period.slice(4));
+    for (let m = 3; m < 12; m++) { // Apr..Dec of start year
+      const d = new Date(y, m, 1);
+      months.push({ key: `${y}-${String(m+1).padStart(2,"0")}`, label: d.toLocaleDateString("en-GB",{month:"short"}) });
+    }
+    for (let m = 0; m < 3; m++) { // Jan..Mar of next year
+      const d = new Date(y+1, m, 1);
+      months.push({ key: `${y+1}-${String(m+1).padStart(2,"0")}`, label: d.toLocaleDateString("en-GB",{month:"short"}) });
+    }
+  }
+
+  const billed = {}, received = {}, jobCount = {};
+  months.forEach(m => { billed[m.key]=0; received[m.key]=0; jobCount[m.key]=0; });
+
+  (data.invoices || []).forEach(inv => {
+    const amt = parseFloat(inv.total) || 0;
+    // Bucket "billed" by the JOB date (when work was done), falling back to invoice date
+    const job = (data.jobs || []).find(j => j.id === inv.jobId);
+    const billedDate = job?.date || inv.createdAt;
+    if (billedDate) { const k = billedDate.slice(0,7); if (k in billed) billed[k] += amt; }
+    // "Received" stays bucketed by the date it was actually paid
+    if (inv.paid && inv.paidDate) { const k = inv.paidDate.slice(0,7); if (k in received) received[k] += amt; }
+  });
+  (data.jobs || []).forEach(j => {
+    if (j.date) { const k = j.date.slice(0,7); if (k in jobCount) jobCount[k] += 1; }
+  });
+
+  const outstanding = (data.invoices || []).filter(i => !i.paid).reduce((s,i) => s+(parseFloat(i.total)||0), 0);
+  const receivedTotal = months.reduce((s,m) => s + received[m.key], 0);
+  const billedTotal   = months.reduce((s,m) => s + billed[m.key], 0);
+
+  const maxRev = Math.max(1, ...months.map(m => Math.max(billed[m.key], received[m.key])));
+  const maxJobs = Math.max(1, ...months.map(m => jobCount[m.key]));
+
+  const periodLabel = period === "rolling" ? "Last 12 months"
+    : period === "all" ? "All time"
+    : period.startsWith("cal-") ? `Year ${period.slice(4)}`
+    : `FY ${period.slice(4)}/${(parseInt(period.slice(4))+1).toString().slice(2)}`;
+
+  const Bar = ({ value, max, color }) => (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"flex-end", alignItems:"center", height:120 }}>
+      <div style={{ width:"70%", height:`${(value/max)*100}%`, background:color, borderRadius:"3px 3px 0 0", minHeight: value>0?2:0 }} />
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 style={{ margin:"0 0 12px", fontSize:20, fontWeight:800, color:"#1E3A5F" }}>Reports</h2>
+
+      {/* Period selector */}
+      <div style={{ marginBottom:16 }}>
+        <select value={period} onChange={e => setPeriod(e.target.value)}
+          style={{ width:"100%", padding:"12px 14px", borderRadius:8, border:"1.5px solid #E5E7EB", fontSize:15, fontFamily:"inherit", background:"#fff", appearance:"none" }}>
+          <option value="rolling">Last 12 months</option>
+          <option value="all">All time</option>
+          {yearsPresent.map(y => <option key={"cal"+y} value={`cal-${y}`}>Calendar year {y}</option>)}
+          {yearsPresent.map(y => <option key={"fin"+y} value={`fin-${y}`}>Financial year {y}/{(y+1).toString().slice(2)} (Apr–Mar)</option>)}
+        </select>
+      </div>
+
+      <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
+        <div style={{ flex:1, minWidth:100, background:"#EFF6FF", borderRadius:12, padding:14, border:"1px solid #BFDBFE" }}>
+          <div style={{ fontSize:22, fontWeight:800, color:"#1D4ED8" }}>£{billedTotal.toFixed(0)}</div>
+          <div style={{ fontSize:11, color:"#1D4ED8", fontWeight:600 }}>Billed</div>
+        </div>
+        <div style={{ flex:1, minWidth:100, background:"#FEF2F2", borderRadius:12, padding:14, border:"1px solid #FECACA" }}>
+          <div style={{ fontSize:22, fontWeight:800, color:"#DC2626" }}>£{outstanding.toFixed(0)}</div>
+          <div style={{ fontSize:11, color:"#DC2626", fontWeight:600 }}>Outstanding now</div>
+        </div>
+      </div>
+
+      <div style={{ background:"#fff", borderRadius:12, padding:16, border:"1px solid #F3F4F6", marginBottom:16 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+          <h3 style={{ margin:0, fontSize:14, fontWeight:700, color:"#374151" }}>Revenue · {periodLabel}</h3>
+          <span style={{ color:"#1D4ED8", fontWeight:600, fontSize:11 }}>■ Billed</span>
+        </div>
+        <div style={{ display:"flex", alignItems:"flex-end", gap:3, marginTop:10 }}>
+          {months.map(m => (
+            <div key={m.key} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
+              <Bar value={billed[m.key]} max={maxRev} color="#3B82F6" />
+              <div style={{ fontSize:9, color:"#9CA3AF", marginTop:4 }}>{m.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ background:"#fff", borderRadius:12, padding:16, border:"1px solid #F3F4F6" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+          <h3 style={{ margin:0, fontSize:14, fontWeight:700, color:"#374151" }}>Jobs · {periodLabel}</h3>
+          <span style={{ fontSize:13, fontWeight:800, color:"#F59E0B" }}>{months.reduce((s,m) => s + jobCount[m.key], 0)} total</span>
+        </div>
+        <div style={{ display:"flex", alignItems:"flex-end", gap:3 }}>
+          {months.map(m => (
+            <div key={m.key} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
+              <div style={{ fontSize:10, fontWeight:700, color:"#6B7280", marginBottom:2 }}>{jobCount[m.key] || ""}</div>
+              <div style={{ width:"60%", height:`${(jobCount[m.key]/maxJobs)*90}px`, background:"#F59E0B", borderRadius:"3px 3px 0 0", minHeight: jobCount[m.key]>0?2:0 }} />
+              <div style={{ fontSize:9, color:"#9CA3AF", marginTop:4 }}>{m.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Mileage Log ───────────────────────────────────────────────────────────────
+// Financial year (Apr–Mar) that a given YYYY-MM-DD date falls into; returns the start year
+function finYearOf(dateStr) {
+  const [y, m] = dateStr.split("-").map(Number);
+  return m >= 4 ? y : y - 1;
+}
+function MileageView({ data, setView }) {
+  const allEntries = [...(data.mileage || [])].sort((a,b) => b.date.localeCompare(a.date));
+  const [date, setDate] = useState(todayISO());
+  const [miles, setMiles] = useState("");
+  const [note, setNote] = useState("");
+  const [yearFilter, setYearFilter] = useState("all");
+
+  async function add() {
+    const m = parseFloat(miles);
+    if (!m || m <= 0) return;
+    const mileage = [...(data.mileage || []), { id: uid(), date, miles: m, note, createdAt: todayISO() }];
+    setMiles(""); setNote("");
+    await saveAndReload({ ...data, mileage });
+  }
+  async function remove(id) {
+    if (!window.confirm("Delete this mileage entry? This cannot be undone.")) return;
+    try { await deleteRecord("mileage", id); } catch (e) { alert("Delete failed: " + (e?.message || JSON.stringify(e))); return; }
+    addTombstone(id);
+    const mileage = (data.mileage || []).filter(e => e.id !== id);
+    await saveAndReload({ ...data, mileage });
+  }
+
+  // Totals by financial year
+  const byFinYear = {};
+  allEntries.forEach(e => { const fy = finYearOf(e.date); byFinYear[fy] = (byFinYear[fy] || 0) + e.miles; });
+  const finYears = Object.keys(byFinYear).map(Number).sort((a,b) => b - a);
+  const currentFY = finYearOf(todayISO());
+
+  // Entries shown depend on the selected year
+  const entries = yearFilter === "all" ? allEntries : allEntries.filter(e => finYearOf(e.date) === Number(yearFilter));
+
+  return (
+    <div>
+      <div style={{ marginBottom:16 }}>
+        <Btn variant="ghost" size="sm" onClick={() => setView({ screen:"dashboard" })}><Icon name="back" size={14} /> Back</Btn>
+      </div>
+      <h2 style={{ margin:"0 0 16px", fontSize:20, fontWeight:800, color:"#1E3A5F" }}>Mileage Log</h2>
+
+      <div style={{ display:"flex", gap:10, marginBottom:18, flexWrap:"wrap" }}>
+        {finYears.length === 0 && <div style={{ fontSize:14, color:"#9CA3AF" }}>No mileage logged yet.</div>}
+        {finYears.map(fy => (
+          <div key={fy} style={{ flex:1, minWidth:120, background: fy===currentFY ? "#EFF6FF" : "#F9FAFB", borderRadius:12, padding:14, border: fy===currentFY ? "1px solid #BFDBFE" : "1px solid #F3F4F6" }}>
+            <div style={{ fontSize:22, fontWeight:800, color:"#1E3A5F" }}>{byFinYear[fy].toLocaleString()}</div>
+            <div style={{ fontSize:11, color:"#6B7280", fontWeight:600 }}>miles · FY {fy}/{(fy+1).toString().slice(2)}{fy===currentFY ? " (current)" : ""}</div>
+          </div>
+        ))}
+      </div>
+
+      <Card>
+        <div style={{ fontSize:13, fontWeight:700, color:"#1E3A5F", marginBottom:10 }}>Add Mileage</div>
+        <Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field>
+        <Field label="Miles"><Input type="number" value={miles} onChange={setMiles} placeholder="e.g. 24" /></Field>
+        <Field label="Note (optional)"><Input value={note} onChange={setNote} placeholder="e.g. Bristol to Cheddar – job" /></Field>
+        <Btn onClick={add} style={{ width:"100%", justifyContent:"center" }} disabled={!miles}>Add</Btn>
+      </Card>
+      <p style={{ fontSize:12, color:"#9CA3AF", margin:"8px 2px 0" }}>Tip: to record last year's mileage, just set the date to a day in that year.</p>
+
+      <div style={{ marginTop:16 }}>
+        {allEntries.length > 0 && (
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <h3 style={{ fontSize:14, fontWeight:700, color:"#374151", margin:0, textTransform:"uppercase", letterSpacing:"0.05em" }}>History</h3>
+            <select value={yearFilter} onChange={e => setYearFilter(e.target.value)}
+              style={{ padding:"8px 12px", borderRadius:8, border:"1.5px solid #E5E7EB", fontSize:14, fontFamily:"inherit", background:"#fff" }}>
+              <option value="all">All years</option>
+              {finYears.map(fy => <option key={fy} value={fy}>FY {fy}/{(fy+1).toString().slice(2)}</option>)}
+            </select>
+          </div>
+        )}
+        {yearFilter !== "all" && (
+          <div style={{ fontSize:13, fontWeight:700, color:"#1E3A5F", marginBottom:10 }}>
+            {byFinYear[Number(yearFilter)]?.toLocaleString() || 0} miles total · FY {yearFilter}/{(Number(yearFilter)+1).toString().slice(2)}
+          </div>
+        )}
+        {entries.map(e => (
+          <Card key={e.id}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:15, color:"#1E3A5F" }}>{e.miles.toLocaleString()} miles</div>
+                <div style={{ fontSize:12, color:"#6B7280" }}>{fmtDate(e.date)}{e.note ? " · " + e.note : ""}</div>
+              </div>
+              <button onClick={() => remove(e.id)} style={{ background:"#FEE2E2", color:"#DC2626", border:"none", borderRadius:6, padding:"6px 12px", fontSize:13, fontWeight:600, cursor:"pointer" }}>Delete</button>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Settings / Company ────────────────────────────────────────────────────────
+function SettingsView({ data, setView }) {
+  const [startNum, setStartNum] = useState(loadSettings().custNumberStart || "1000");
+  const [saved, setSaved] = useState(false);
+  const unnumbered = (data.customers || []).filter(c => !c.custNumber).length;
+
+  function saveStart() {
+    const s = loadSettings();
+    s.custNumberStart = parseInt(startNum) || 1000;
+    saveSettings(s);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function numberExisting() {
+    if (!window.confirm(`Assign numbers to ${unnumbered} existing customer(s)? This is a one-time action.`)) return;
+    const start = parseInt(startNum) || 1000;
+    // Number existing customers in creation order, continuing from any already-numbered ones
+    const existingNums = data.customers.map(c => parseInt(c.custNumber)).filter(n => !isNaN(n));
+    let next = existingNums.length ? Math.max(...existingNums) + 1 : start;
+    const ordered = [...data.customers].sort((a,b) => (a.createdAt||"").localeCompare(b.createdAt||""));
+    const numberMap = {};
+    ordered.forEach(c => { if (!c.custNumber) { numberMap[c.id] = next; next++; } });
+    const customers = data.customers.map(c => numberMap[c.id] ? { ...c, custNumber: numberMap[c.id] } : c);
+    await saveAndReload({ ...data, customers });
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom:16 }}>
+        <Btn variant="ghost" size="sm" onClick={() => setView({ screen:"dashboard" })}><Icon name="back" size={14} /> Back</Btn>
+      </div>
+      <h2 style={{ margin:"0 0 16px", fontSize:20, fontWeight:800, color:"#1E3A5F" }}>Settings</h2>
+
+      <Card>
+        <div style={{ fontSize:13, fontWeight:700, color:"#1E3A5F", marginBottom:4 }}>Company</div>
+        <div style={{ fontSize:15, fontWeight:700, color:"#111827" }}>Windscreen Repairs (Bristol)</div>
+        <div style={{ fontSize:13, color:"#6B7280", marginTop:2 }}>3 Goosander Grove, Cheddar, BS27 3FY</div>
+        <div style={{ fontSize:13, color:"#6B7280" }}>07946 222246</div>
+        <div style={{ fontSize:13, color:"#6B7280" }}>info@windscreenrepairsbristol.co.uk</div>
+      </Card>
+
+      <Card>
+        <div style={{ fontSize:13, fontWeight:700, color:"#1E3A5F", marginBottom:8 }}>Customer Numbering</div>
+        <Field label="Starting customer number">
+          <Input type="number" value={startNum} onChange={setStartNum} placeholder="1000" />
+        </Field>
+        <p style={{ fontSize:12, color:"#9CA3AF", margin:"0 0 10px" }}>New customers are numbered automatically, counting up from the highest existing number. The starting number only applies before any customers are numbered.</p>
+        <Btn onClick={saveStart} style={{ width:"100%", justifyContent:"center" }}>{saved ? "✓ Saved" : "Save Starting Number"}</Btn>
+        {unnumbered > 0 && (
+          <div style={{ marginTop:10 }}>
+            <Btn variant="ghost" onClick={numberExisting} style={{ width:"100%", justifyContent:"center" }}>Assign numbers to {unnumbered} existing customer(s)</Btn>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
 }
 
 export default function App() {
-  const [data, setData] = useState(loadData);
-  const [view, setViewState] = useState({ screen: "dashboard" });
-  const [syncStatus, setSyncStatus] = useState("syncing");
+  const [data, setData]             = useState(() => { clearStorageBloat(); return loadData(); });
+  const [view, setViewState]        = useState({ screen:"dashboard" });
+  const [tab,  setTab]              = useState("dashboard");
   const device = useDeviceType();
-  const wide = device !== "phone";
+  const [notifStatus, setNotifStatus] = useState(
+    "Notification" in window ? Notification.permission : "unsupported"
+  );
+  const [syncStatus, setSyncStatus] = useState("syncing"); // syncing | synced | offline
 
+  // On first load, pull from cloud and merge with local
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const cloud = await pullFromCloud();
         if (cancelled) return;
-        const merged = mergeAll(cloud, loadData());
+        const local = loadData();
+        // Merge by id: whichever copy (cloud or local) has the newer updatedAt wins.
+        // This protects local edits made while the cloud still had the old version.
+        const merge = (cloudArr, localArr) => {
+          const deleted = getTombstones();
+          const now = Date.now();
+          const byId = {};
+          (cloudArr || []).forEach(x => { if (!deleted.includes(x.id)) byId[x.id] = x; });
+          (localArr || []).forEach(x => {
+            if (deleted.includes(x.id)) return;
+            if (byId[x.id]) {
+              const localTime = x.updatedAt || 0;
+              const cloudTime = byId[x.id].updatedAt || 0;
+              byId[x.id] = localTime >= cloudTime ? x : byId[x.id];
+            } else {
+              // local-only: keep only if recently created (not yet uploaded)
+              // local-only row: keep only if it was never uploaded (genuinely new).
+              // If it was uploaded before, its absence from cloud means it was deleted elsewhere.
+              // Local-only record: keep unless tombstoned (filtered above).
+              byId[x.id] = x;
+            }
+          });
+          return Object.values(byId);
+        };
+        const merged = {
+          customers:   merge(cloud.customers,   local.customers || []),
+          vehicles:    merge(cloud.vehicles,    local.vehicles || []),
+          jobs:        merge(cloud.jobs,        local.jobs || []),
+          invoices:    merge(cloud.invoices,    local.invoices || []),
+          technicians: local.technicians || [],
+        };
         localStorage.setItem(DB_KEY, JSON.stringify(merged));
         setData(merged);
-        pushChangedOnly(merged).catch(() => {});
+        // Push the merged result (including any local-newer records) back up
+        pushToCloud(merged).catch(() => {});
         setSyncStatus("synced");
-      } catch { if (!cancelled) setSyncStatus("offline"); }
+      } catch (e) {
+        if (!cancelled) setSyncStatus("offline");
+      }
     })();
     return () => { cancelled = true; };
   }, []);
 
+  // Live updates: when any device changes data, refresh from cloud automatically
   useEffect(() => {
     const channel = supabase
-      .channel("removals-changes")
+      .channel("crm-changes")
       .on("postgres_changes", { event: "*", schema: "public" }, async (payload) => {
-        if (SAVING_IN_PROGRESS) return;
+        if (SAVING_IN_PROGRESS) return; // don't interfere with an active save
         try {
-          if (payload?.eventType === "DELETE" && payload?.old?.id) addTombstone(payload.old.id);
-          const merged = mergeAll(await pullFromCloud(), loadData());
+          // If this is a DELETE event, tombstone that exact id so it's removed everywhere
+          if (payload?.eventType === "DELETE" && payload?.old?.id) {
+            addTombstone(payload.old.id);
+          }
+          const cloud = await pullFromCloud();
+          const local = loadData();
+          const deleted = getTombstones();
+          // Cloud is authoritative. A record is kept if it's in the cloud.
+          // Local-only records are kept ONLY if created in the last 60s (genuinely new,
+          // not yet uploaded) — otherwise they were deleted elsewhere and must go.
+          const now = Date.now();
+          const merge = (cloudArr, localArr) => {
+            const byId = {};
+            (cloudArr || []).forEach(x => { if (!deleted.includes(x.id)) byId[x.id] = x; });
+            (localArr || []).forEach(x => {
+              if (deleted.includes(x.id)) return;
+              if (byId[x.id]) {
+                // exists in cloud — newest wins
+                byId[x.id] = (x.updatedAt || 0) >= (byId[x.id].updatedAt || 0) ? x : byId[x.id];
+              } else {
+                // local-only: keep only if genuinely new (never uploaded)
+                // Local-only record: keep unless tombstoned (filtered above).
+                byId[x.id] = x;
+                // otherwise it was deleted on another device — drop it
+              }
+            });
+            return Object.values(byId);
+          };
+          const merged = {
+            customers: merge(cloud.customers, local.customers || []),
+            vehicles:  merge(cloud.vehicles,  local.vehicles || []),
+            jobs:      merge(cloud.jobs,      local.jobs || []),
+            invoices:  merge(cloud.invoices,  local.invoices || []),
+            mileage:   merge(cloud.mileage,   local.mileage || []),
+            technicians: local.technicians || [],
+          };
           localStorage.setItem(DB_KEY, JSON.stringify(merged));
           setData(merged);
         } catch {}
@@ -1760,147 +2404,207 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // Background photo uploader: finds photos saved offline (pending) and uploads
+  // them to storage when a connection is available, then swaps in the cloud URL.
   useEffect(() => {
-    const onOnline = () => pushChangedOnly(loadData()).catch(() => {});
-    window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
+    const uploadPending = async () => {
+      if (SAVING_IN_PROGRESS) return;
+      const d = loadData();
+      let changed = false;
+      for (const job of d.jobs || []) {
+        for (const key of ["photosBefore", "photosAfter"]) {
+          const arr = job[key] || [];
+          for (let i = 0; i < arr.length; i++) {
+            const p = arr[i];
+            if (p && p.pending && !p.url) {
+              try {
+                const { url, path } = await uploadPhoto(p.pending, job.id);
+                arr[i] = { id: p.id, url, path };
+                changed = true;
+              } catch {
+                // still no signal — leave as pending, try again next time
+              }
+            }
+          }
+        }
+      }
+      if (changed) {
+        localStorage.setItem(DB_KEY, JSON.stringify(d));
+        setData(d);
+        pushChangedOnly(d).catch(() => {});
+      }
+    };
+    uploadPending(); // run on load
+    const interval = setInterval(uploadPending, 30000); // and every 30s
+    return () => clearInterval(interval);
   }, []);
 
+  // When the connection comes back, immediately push any pending (offline-created) records
   useEffect(() => {
-    const iv = setInterval(async () => {
+    const onBackOnline = () => {
+      const d = loadData();
+      pushChangedOnly(d).catch(() => {});
+    };
+    window.addEventListener("online", onBackOnline);
+    return () => window.removeEventListener("online", onBackOnline);
+  }, []);
+
+  // Polling fallback: every 20s, re-check the cloud and drop anything deleted elsewhere.
+  // This catches deletes that realtime doesn't reliably broadcast.
+  useEffect(() => {
+    const interval = setInterval(async () => {
       if (SAVING_IN_PROGRESS) return;
       try {
-        const merged = mergeAll(await pullFromCloud(), loadData());
+        const cloud = await pullFromCloud();
+        const local = loadData();
+        const deleted = getTombstones();
+        const now = Date.now();
+        const merge = (cloudArr, localArr) => {
+          const byId = {};
+          (cloudArr || []).forEach(x => { if (!deleted.includes(x.id)) byId[x.id] = x; });
+          (localArr || []).forEach(x => {
+            if (deleted.includes(x.id)) return;
+            if (byId[x.id]) {
+              byId[x.id] = (x.updatedAt || 0) >= (byId[x.id].updatedAt || 0) ? x : byId[x.id];
+            } else {
+              // Local-only record: keep it. Genuine deletes are handled via tombstones
+              // (filtered above), so anything here is either new, pending upload, or
+              // briefly missing due to replication lag — never drop it on a poll.
+              byId[x.id] = x;
+            }
+          });
+          return Object.values(byId);
+        };
+        const merged = {
+          customers: merge(cloud.customers, local.customers || []),
+          vehicles:  merge(cloud.vehicles,  local.vehicles || []),
+          jobs:      merge(cloud.jobs,      local.jobs || []),
+          invoices:  merge(cloud.invoices,  local.invoices || []),
+          mileage:   merge(cloud.mileage,   local.mileage || []),
+          technicians: local.technicians || [],
+        };
+        const before = JSON.stringify(local.customers?.length) + local.jobs?.length + local.vehicles?.length + local.invoices?.length;
+        const after = merged.customers.length + merged.jobs.length + merged.vehicles.length + merged.invoices.length;
         localStorage.setItem(DB_KEY, JSON.stringify(merged));
+        // Push any local records that haven't been uploaded yet (e.g. created offline)
         pushChangedOnly(merged).catch(() => {});
+        // Only re-render if something actually changed, to avoid disrupting typing
         setData(prev => {
-          const count = a => (a.customers?.length || 0) + (a.enquiries?.length || 0) + (a.jobs?.length || 0);
-          return count(prev) !== count(merged) ? merged : prev;
+          const prevCount = (prev.customers?.length||0)+(prev.jobs?.length||0)+(prev.vehicles?.length||0)+(prev.invoices?.length||0);
+          if (prevCount !== after) return merged;
+          return prev;
         });
-        setSyncStatus("synced");
-      } catch { setSyncStatus("offline"); }
+      } catch {}
     }, 20000);
-    return () => clearInterval(iv);
+    return () => clearInterval(interval);
   }, []);
 
-  const setView = useCallback((v) => { setViewState(v); setData(loadData()); }, []);
+  const setView = useCallback((v) => {
+    setViewState(v);
+    if (["dashboard","customers","jobs","invoices","calendar"].includes(v.screen)) setTab(v.screen);
+    setData(loadData());
+  }, []);
 
-  const NAV = [
-    { id: "dashboard", icon: "dashboard", label: "Dashboard", phone: "Home" },
-    { id: "enquiries", icon: "enquiries", label: "Enquiries", phone: "Enquiries" },
-    { id: "calendar",  icon: "calendar",  label: "Calendar",  phone: "Calendar" },
-    { id: "jobs",      icon: "jobs",      label: "Moves",     phone: "Moves" },
-    { id: "customers", icon: "customers", label: "Customers", phone: "Customers" },
-    { id: "company",   icon: "company",   label: "Company",   phone: "Company" },
-  ];
-  const sectionKey = sectionFor(view.screen);
-  const activeTab = ["dashboard", "calendar", "company"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
+  useEffect(() => { setData(loadData()); }, [tab]);
 
-  const SyncDot = () => (
-    <span title={syncStatus} style={{ width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
-      background: syncStatus === "synced" ? "#22C55E" : syncStatus === "syncing" ? "#FBBF24" : "#9CA3AF",
-      boxShadow: syncStatus === "synced" ? "0 0 0 3px #22C55E22" : "none" }} />
-  );
+  // Schedule notifications whenever data changes
+  useEffect(() => {
+    if (notifStatus === "granted") scheduleNotifications(data);
+  }, [data, notifStatus]);
 
-  function fullScreen() {
-    if (view.screen === "dashboard") return <Dashboard data={data} setView={setView} />;
-    if (view.screen === "calendar") return <CalendarView data={data} setView={setView} />;
-    if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
-    return null;
-  }
+  // Re-schedule at midnight for the new day
+  useEffect(() => {
+    const now = new Date();
+    const midnight = new Date();
+    midnight.setHours(24, 0, 0, 0);
+    const msToMidnight = midnight - now;
+    const t = setTimeout(() => {
+      const fresh = loadData();
+      setData(fresh);
+    }, msToMidnight);
+    return () => clearTimeout(t);
+  }, []);
 
-  function content() {
-    const full = fullScreen();
-    if (full) return <div style={{ flex: 1, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: 1080, margin: "0 auto" }}>{full}</div></div>;
-    const sec = SECTIONS[sectionKey];
-    if (!sec) return null;
-    const { List, Detail } = sec;
-    const detailId = view.screen === sec.detail ? view.id : null;
-    if (wide) {
-      return (
-        <div style={{ flex: 1, display: "flex", minWidth: 0 }}>
-          <div style={{ width: 384, flexShrink: 0, borderRight: "1px solid #E9EEED", overflowY: "auto", padding: "18px 15px", background: "#fff" }}>
-            <List data={data} setView={setView} initialFilter={view.filter} />
-          </div>
-          <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px 40px" }}>
-            {detailId ? <Detail data={data} id={detailId} setView={setView} />
-              : <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><Empty icon={sec.list === "customers" ? "customers" : sec.list === "jobs" ? "truck" : "enquiries"} text="Select an item to view details" /></div>}
-          </div>
-        </div>
-      );
+  async function requestNotifications() {
+    if (!("Notification" in window)) return;
+    const result = await Notification.requestPermission();
+    setNotifStatus(result);
+    if (result === "granted") {
+      scheduleNotifications(data);
+      sendNotification("✅ Notifications enabled", "You'll get alerts for today's jobs");
     }
-    return <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 90px" }}>{detailId ? <Detail data={data} id={detailId} setView={setView} /> : <List data={data} setView={setView} initialFilter={view.filter} />}</div>;
   }
 
-  // ---- WIDE (iPad / desktop): sidebar + content ----
-  if (wide) {
-    return (
-      <div style={{ display: "flex", height: "100vh", maxWidth: 1360, margin: "0 auto", background: "#EEF3F2", boxShadow: "0 0 60px rgba(16,33,30,.06)" }}>
-        <ResponsiveStyles device={device} />
-        <aside style={{ width: 244, flexShrink: 0, background: "#fff", borderRight: "1px solid #E9EEED", display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "22px 18px 18px" }}>
-            <div style={{ width: 44, height: 44, borderRadius: 13, background: `linear-gradient(145deg, ${TEAL}, ${TEAL_D})`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 16px rgba(14,124,115,.32)" }}>
-              <Icon name="truck" size={25} color="#fff" />
-            </div>
-            <div>
-              <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: "-.02em", lineHeight: 1.1 }}>Removals CRM</div>
-              <div style={{ fontSize: 10, color: "#94A4A0", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".09em" }}>Enquiries &amp; moves</div>
-            </div>
-          </div>
-          <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-            {NAV.map(n => {
-              const on = activeTab === n.id;
-              return (
-                <button key={n.id} onClick={() => setView({ screen: n.id })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", borderRadius: 11, border: "none", cursor: "pointer", textAlign: "left", fontSize: 14.5, fontWeight: on ? 700 : 600, position: "relative",
-                  background: on ? "linear-gradient(90deg,#E6F3F1,#EDF6F5)" : "transparent", color: on ? TEAL_D : "#43534F" }}>
-                  {on && <span style={{ position: "absolute", left: -12, top: 9, bottom: 9, width: 3.5, borderRadius: "0 4px 4px 0", background: AMBER }} />}
-                  <Icon name={n.icon} size={20} color={on ? TEAL : "#7C8B87"} /> {n.label}
-                </button>
-              );
-            })}
-          </nav>
-          <div style={{ marginTop: "auto", padding: "14px 18px", borderTop: "1px solid #E9EEED", display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: "#6A7B77", fontWeight: 600 }}>
-            <SyncDot /> {syncStatus === "synced" ? "All changes synced" : syncStatus === "syncing" ? "Syncing…" : "Offline — saved on device"}
-          </div>
-        </aside>
-        <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
-          {content()}
-        </main>
-        {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} />}
-      </div>
-    );
-  }
+  const tabs = [
+    { id:"dashboard", icon:"dashboard", label:"Home" },
+    { id:"jobs",      icon:"jobs",      label:"Jobs" },
+    { id:"calendar",  icon:"calendar",  label:"Calendar" },
+    { id:"customers", icon:"customers", label:"Customers" },
+    { id:"invoices",  icon:"invoices",  label:"Invoices" },
+  ];
 
-  // ---- PHONE: header + content + bottom nav ----
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#EEF3F2" }}>
+    <div className="crm-shell" style={{ fontFamily:"'Inter',system-ui,sans-serif", background:"#F8FAFC", minHeight:"100vh", margin:"0 auto" }}>
       <ResponsiveStyles device={device} />
-      <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 11, background: "rgba(255,255,255,.16)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Icon name="truck" size={23} color="#fff" />
-          </div>
+      {/* Header */}
+      <div style={{ background:"#1E3A5F", padding: device==="phone" ? "14px 18px" : "12px 18px", position:"sticky", top:0, zIndex:50, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          {!["dashboard","customers","jobs","invoices","calendar"].includes(view.screen) && (
+            <button onClick={() => setView({ screen:tab })} style={{ background:"rgba(255,255,255,.15)", border:"none", borderRadius:8, padding:"8px 12px", color:"#fff", cursor:"pointer", fontSize:22 }}>‹</button>
+          )}
+          <img src="/logo.png" alt="Logo" style={{ height:44, width:44, objectFit:"contain", borderRadius:8, background:"#fff", padding:2 }} />
           <div>
-            <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", letterSpacing: "-.02em", lineHeight: 1.15 }}>Removals CRM</div>
-            <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>Enquiries &amp; moves</div>
+            <div style={{ fontSize: device==="phone" ? 17 : 16, fontWeight:800, color:"#fff", letterSpacing:"-0.02em", lineHeight:1.2 }}>Windscreen Repairs Bristol</div>
+            <div style={{ fontSize:11, color:"#93C5FD", fontWeight:500, letterSpacing:"0.06em", textTransform:"uppercase" }}>Job Management</div>
           </div>
         </div>
-        <SyncDot />
-      </header>
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>{content()}</div>
-      {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} />}
-      <nav style={{ background: "#fff", borderTop: "1px solid #E9EEED", display: "flex", flexShrink: 0 }}>
-        {NAV.map(n => {
-          const on = activeTab === n.id;
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          {notifStatus !== "unsupported" && (
+            <button onClick={notifStatus === "granted" ? undefined : requestNotifications}
+              title={notifStatus === "granted" ? "Notifications on" : "Tap to enable alerts"}
+              style={{ background:"rgba(255,255,255,.15)", border:"none", borderRadius:8, padding:"8px 11px", cursor: notifStatus === "granted" ? "default" : "pointer", fontSize:20, lineHeight:1 }}>
+              {notifStatus === "granted" ? "🔔" : "🔕"}
+            </button>
+          )}
+          <div style={{ width:10, height:10, borderRadius:"50%",
+            background: syncStatus === "synced" ? "#22C55E" : syncStatus === "syncing" ? "#F59E0B" : "#9CA3AF",
+            boxShadow: syncStatus === "synced" ? "0 0 6px #22C55E" : "none" }}
+            title={syncStatus === "synced" ? "Synced to cloud" : syncStatus === "syncing" ? "Syncing…" : "Offline — saved locally"} />
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ padding:"16px 16px 110px" }}>
+        {view.screen==="dashboard"      && <Dashboard      data={data} setView={setView} notifStatus={notifStatus} requestNotifications={requestNotifications} />}
+        {view.screen==="customers"      && <CustomersList  data={data} setView={setView} />}
+        {view.screen==="customerDetail" && <CustomerDetail data={data} id={view.id} setView={setView} />}
+        {view.screen==="vehicleDetail"  && <VehicleDetail  data={data} id={view.id} customerId={view.customerId} setView={setView} />}
+        {view.screen==="jobs"           && <JobsList       data={data} setView={setView} initialFilter={view.filter} />}
+        {view.screen==="calendar"       && <CalendarView   data={data} setView={setView} device={device} />}
+        {view.screen==="reports"        && <ReportsView    data={data} />}
+        {view.screen==="mileage"        && <MileageView    data={data} setView={setView} />}
+        {view.screen==="settings"       && <SettingsView   data={data} setView={setView} />}
+        {view.screen==="jobDetail"      && <JobDetail      data={data} id={view.id} setView={setView} />}
+        {view.screen==="newJob"         && <JobsList       data={data} setView={setView} />}
+        {view.screen==="invoices"       && <InvoicesList   data={data} setView={setView} initialFilter={view.filter} />}
+      </div>
+
+      {view.screen==="newJob" && <JobForm data={data} prefill={view.prefill} onClose={() => setView({ screen:"jobs" })} />}
+
+      {/* Bottom Nav */}
+      <div className="crm-shell" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", background:"#fff", borderTop:"1px solid #E5E7EB", display:"flex", zIndex:50 }}>
+        {tabs.map(t => {
+          const active = tab===t.id;
           return (
-            <button key={n.id} onClick={() => setView({ screen: n.id })} style={{ flex: 1, padding: "11px 0 16px", background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-              <Icon name={n.icon} size={24} color={on ? TEAL : "#9CA3AF"} />
-              <span style={{ fontSize: 10.5, fontWeight: 700, color: on ? TEAL : "#9CA3AF" }}>{n.phone}</span>
-              {on && <span style={{ width: 16, height: 2.5, borderRadius: 99, background: AMBER }} />}
+            <button key={t.id} onClick={() => { setTab(t.id); setView({ screen:t.id }); }}
+              style={{ flex:1, padding: device==="phone" ? "14px 0 18px" : "12px 0 14px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+              <Icon name={t.icon} size={device==="phone" ? 26 : 22} color={active?"#1E3A5F":"#9CA3AF"} />
+              <span style={{ fontSize: device==="phone" ? 12 : 11, fontWeight:600, color:active?"#1E3A5F":"#9CA3AF", letterSpacing:"0.04em" }}>{t.label}</span>
+              {active && <div style={{ width:18, height:2.5, borderRadius:99, background:"#F59E0B", marginTop:2 }} />}
             </button>
           );
         })}
-      </nav>
+      </div>
     </div>
   );
 }
