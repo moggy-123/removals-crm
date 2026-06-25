@@ -1750,6 +1750,9 @@ function ResponsiveStyles({ device }) {
     *{scrollbar-width:thin;scrollbar-color:#CBD6D3 transparent}
     ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#CBD6D3;border-radius:9px}
     .rm-btn:hover,.rm-btn-sm:hover{transform:translateY(-1px)}
+    input[type="date"],input[type="time"]{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%;box-sizing:border-box}
+    input::-webkit-date-and-time-value{text-align:left;margin:0;min-width:0}
+    input::-webkit-datetime-edit{padding:0}
     @media (prefers-reduced-motion:reduce){*{transition:none!important}}
   `;
   const phone = `
