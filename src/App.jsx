@@ -1895,25 +1895,25 @@ export default function App() {
 
   function content() {
     const full = fullScreen();
-    if (full) return <div style={{ flex: 1, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: 1080, margin: "0 auto" }}>{full}</div></div>;
+    if (full) return <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: 1080, margin: "0 auto" }}>{full}</div></div>;
     const sec = SECTIONS[sectionKey];
     if (!sec) return null;
     const { List, Detail } = sec;
     const detailId = view.screen === sec.detail ? view.id : null;
     if (wide) {
       return (
-        <div style={{ flex: 1, display: "flex", minWidth: 0 }}>
-          <div style={{ width: 384, flexShrink: 0, borderRight: "1px solid #E9EEED", overflowY: "auto", padding: "18px 15px", background: "#fff" }}>
+        <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0 }}>
+          <div style={{ width: 384, flexShrink: 0, borderRight: "1px solid #E9EEED", overflowY: "auto", minHeight: 0, padding: "18px 15px", background: "#fff" }}>
             <List data={data} setView={setView} initialFilter={view.filter} />
           </div>
-          <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px 40px" }}>
+          <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "24px 28px 40px" }}>
             {detailId ? <Detail data={data} id={detailId} setView={setView} />
               : <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><Empty icon={sec.list === "customers" ? "customers" : sec.list === "jobs" ? "truck" : "enquiries"} text="Select an item to view details" /></div>}
           </div>
         </div>
       );
     }
-    return <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 90px" }}>{detailId ? <Detail data={data} id={detailId} setView={setView} /> : <List data={data} setView={setView} initialFilter={view.filter} />}</div>;
+    return <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "16px 16px 90px" }}>{detailId ? <Detail data={data} id={detailId} setView={setView} /> : <List data={data} setView={setView} initialFilter={view.filter} />}</div>;
   }
 
   // ---- WIDE (iPad / desktop): sidebar + content ----
@@ -1947,7 +1947,7 @@ export default function App() {
             <SyncDot /> {syncStatus === "synced" ? "All changes synced" : syncStatus === "syncing" ? "Syncing…" : "Offline — saved on device"}
           </div>
         </aside>
-        <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
+        <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
           {content()}
         </main>
         {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} />}
@@ -1971,7 +1971,7 @@ export default function App() {
         </div>
         <SyncDot />
       </header>
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>{content()}</div>
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>{content()}</div>
       {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} />}
       <nav style={{ background: "#fff", borderTop: "1px solid #E9EEED", display: "flex", flexShrink: 0 }}>
         {NAV.map(n => {
