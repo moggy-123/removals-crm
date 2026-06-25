@@ -567,10 +567,8 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
 
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date"><Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} /></Field>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 150px", minWidth: 0 }}><Field label="Survey date" hint="Shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field></div>
-        <div style={{ flex: "1 1 110px", minWidth: 0 }}><Field label="Time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field></div>
-      </div>
+      <Field label="Survey date" hint="Shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field>
+      <Field label="Survey time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field>
       <Field label="Dates flexible?">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
           <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
@@ -1493,10 +1491,8 @@ function JobDetail({ data, id, setView }) {
               <div style={{ flex: 1 }}><Field label="Day"><Select value={st.type} onChange={v => setStage(idx, "type", v)} options={STAGE_TYPES} /></Field></div>
               {f.stages.length > 1 && <button onClick={() => removeStage(idx)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 9, width: 38, height: 38, cursor: "pointer", marginBottom: 14, flexShrink: 0 }}>×</button>}
             </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 150px", minWidth: 0 }}><Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field></div>
-              <div style={{ flex: "1 1 110px", minWidth: 0 }}><Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field></div>
-            </div>
+            <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
+            <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
             <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
             <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
             <Field label="Day notes"><Input value={st.notes} onChange={v => setStage(idx, "notes", v)} placeholder="(optional)" /></Field>
