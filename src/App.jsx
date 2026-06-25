@@ -5,8 +5,14 @@ import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
 const DB_KEY = "removals_data";
 const SIG_KEY = "removals_sigs";
 const TOMB_KEY = "removals_deleted";
+const REF_KEY = "removals_ref_start";
 const TABLES = ["customers", "enquiries", "jobs", "vehicles", "staff"];
 const EMPTY = { customers: [], enquiries: [], jobs: [], vehicles: [], staff: [] };
+
+function getRefStart() { const v = parseInt(localStorage.getItem(REF_KEY), 10); return Number.isFinite(v) ? v : 1000; }
+function setRefStart(n) { localStorage.setItem(REF_KEY, String(parseInt(n, 10) || 0)); }
+function maxCustomerRef(data) { return (data.customers || []).reduce((m, c) => Math.max(m, Number(c.ref) || 0), 0); }
+function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(data) + 1); }
 
 // Brand
 const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
@@ -532,7 +538,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
       cid = uid();
-      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, custType: "Private", createdAt: new Date().toISOString() };
+      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, custType: "Private", ref: nextCustomerRef(data2), createdAt: new Date().toISOString() };
       data2 = upsertLocal(data2, "customers", customer);
     }
     const rec = {
@@ -1039,15 +1045,53 @@ function EnquiryDetail({ data, id, setView }) {
 function CustomersList({ data, setView }) {
   const [q, setQ] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showRefPanel, setShowRefPanel] = useState(false);
+  const [startVal, setStartVal] = useState(String(getRefStart()));
+  const [busy, setBusy] = useState(false);
   const customers = [...(data.customers || [])]
-    .filter(c => !q || `${c.name} ${c.company} ${c.phone} ${c.town}`.toLowerCase().includes(q.toLowerCase()))
+    .filter(c => !q || `${c.name} ${c.company} ${c.phone} ${c.town} ${c.ref || ""}`.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const missing = (data.customers || []).filter(c => !c.ref).length;
+
+  function saveStart() { setRefStart(startVal); setShowRefPanel(false); }
+  async function assignExisting() {
+    if (!confirm(`Give a reference number to ${missing} customer${missing !== 1 ? "s" : ""} that don't have one yet?`)) return;
+    setBusy(true);
+    const ordered = [...(data.customers || [])].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    let counter = Math.max(getRefStart(), maxCustomerRef(data) + 1);
+    let d = data;
+    for (const c of ordered) {
+      if (c.ref) continue;
+      d = upsertLocal(d, "customers", { ...c, ref: counter });
+      counter++;
+    }
+    await saveAndReload(d);
+  }
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Customers</h2>
-        <Btn size="sm" onClick={() => setShowForm(true)}><Icon name="plus" size={14} /> New</Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn size="sm" variant="grey" onClick={() => { setStartVal(String(getRefStart())); setShowRefPanel(s => !s); }}>Ref #</Btn>
+          <Btn size="sm" onClick={() => setShowForm(true)}><Icon name="plus" size={14} /> New</Btn>
+        </div>
       </div>
+
+      {showRefPanel && (
+        <Card style={{ background: "#FAFCFB" }}>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Reference numbers</div>
+          <Field label="Start numbering from" hint="New customers count up from here">
+            <Input value={startVal} onChange={setStartVal} type="number" inputMode="numeric" />
+          </Field>
+          <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 10 }}>Next new customer will be <b>#{Math.max(parseInt(startVal, 10) || 0, maxCustomerRef(data) + 1)}</b>.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn size="sm" onClick={saveStart}>Save start number</Btn>
+            {missing > 0 && <Btn size="sm" variant="grey" disabled={busy} onClick={assignExisting}>{busy ? "Assigning…" : `Assign to ${missing} existing`}</Btn>}
+          </div>
+        </Card>
+      )}
+
       <div style={{ marginBottom: 12 }}><Input value={q} onChange={setQ} placeholder="🔍 Search customers…" /></div>
       {customers.length === 0 && <Empty icon="customers" text="No customers yet" />}
       {customers.map(c => {
@@ -1056,7 +1100,7 @@ function CustomersList({ data, setView }) {
           <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <div style={{ fontWeight: 700, color: "#111827" }}>{c.name}{c.company ? ` · ${c.company}` : ""}</div>
+                <div style={{ fontWeight: 700, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}{c.company ? ` · ${c.company}` : ""}</div>
                 <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{[c.phone, c.town].filter(Boolean).join(" · ") || "—"}</div>
               </div>
               <span style={{ fontSize: 12, color: "#9CA3AF" }}>{jobs} move{jobs !== 1 ? "s" : ""}</span>
@@ -1079,7 +1123,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
-    const rec = { id: c.id || uid(), ...f, createdAt: c.createdAt || new Date().toISOString() };
+    const rec = { id: c.id || uid(), ...f, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
   return (
@@ -1125,10 +1169,11 @@ function CustomerDetail({ data, id, setView }) {
     <div>
       <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "customers" })}><Icon name="back" size={14} /> Back</Btn>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{c.name}</h2>
+        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D }}>#{c.ref} </span> : ""}{c.name}</h2>
         <StatusBadge status={c.custType} />
       </div>
       <Card>
+        {c.ref && <Row label="Reference" value={`#${c.ref}`} />}
         <Row label="Phone" value={c.phone} />
         <Row label="Email" value={c.email} />
         {c.company && <Row label="Company" value={c.company} />}
