@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+jimport { useState, useEffect, useCallback } from "react";
 import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase } from "./supabase";
 import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
 
@@ -28,7 +28,7 @@ const STATUS_META = {
   Quoted:      { color: "#D97706", bg: "#FFFBEB" },
   Won:         { color: "#059669", bg: "#ECFDF5" },
   Lost:        { color: "#DC2626", bg: "#FEF2F2" },
-  Provisional: { color: "#D97706", bg: "#FFFBEB" },
+  Provisional: { color: "#CA8A04", bg: "#FEFCE8" },
   Confirmed:   { color: "#2563EB", bg: "#EFF6FF" },
   Booked:      { color: "#2563EB", bg: "#EFF6FF" },
   "In Progress": { color: "#2563EB", bg: "#EFF6FF" },
@@ -297,6 +297,17 @@ function custName(data, id) {
   const base = c.company ? `${c.name} (${c.company})` : c.name;
   return c.ref ? `#${c.ref} ${base}` : base;
 }
+function moveSeqOf(data, job) {
+  if (job.moveSeq) return job.moveSeq;
+  const sib = (data.jobs || []).filter(j => j.customerId === job.customerId).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+  const i = sib.findIndex(j => j.id === job.id);
+  return i >= 0 ? i + 1 : 1;
+}
+function moveRef(data, job) {
+  const c = (data.customers || []).find(x => x.id === job.customerId);
+  const seq = moveSeqOf(data, job);
+  return (c && c.ref) ? `#${c.ref}/${seq}` : `Move ${seq}`;
+}
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
 function Dashboard({ data, setView }) {
@@ -539,6 +550,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
   async function save() {
     let data2 = data;
     let cid = customerId;
+    if (!e.id && !f.surveyDate) { alert("Please set a survey date for this enquiry."); return; }
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
       cid = uid();
@@ -826,7 +838,7 @@ function QuoteModal({ data, enquiry, onClose }) {
       quoteLines: lines.filter(l => l.desc || l.amount),
       quoteVat: vat, quoteTotal: total,
       quoteStatus: status, quoteSentDate: sentDate ?? enquiry.quoteSentDate,
-      status: status === "Sent" ? "Quoted" : status === "Accepted" ? enquiry.status : enquiry.status,
+      status: ["Won", "Lost"].includes(enquiry.status) ? enquiry.status : (total > 0 ? "Quoted" : enquiry.status),
     };
   }
   async function saveDraft() {
@@ -918,9 +930,10 @@ function EnquiryDetail({ data, id, setView }) {
     await saveAndReload(upsertLocal(data, "enquiries", { ...e, status, ...extra }));
   }
   async function markWon() {
+    const seq = (data.jobs || []).filter(j => j.customerId === e.customerId).length + 1;
     const jid = uid();
     const job = {
-      id: jid, customerId: e.customerId, enquiryId: e.id,
+      id: jid, customerId: e.customerId, enquiryId: e.id, moveSeq: seq,
       moveDate: e.preferredDate || "", startTime: "",
       fromAddress1: e.fromAddress1, fromAddress2: e.fromAddress2, fromTown: e.fromTown, fromPostcode: e.fromPostcode, fromAccess: e.fromAccess,
       toAddress1: e.toAddress1, toAddress2: e.toAddress2, toTown: e.toTown, toPostcode: e.toPostcode, toAccess: e.toAccess,
@@ -928,7 +941,7 @@ function EnquiryDetail({ data, id, setView }) {
       stages: [{ id: uid(), type: "Move", date: e.preferredDate || "", time: "", vehicleIds: [], crew: [], notes: "" }],
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
-      status: "Confirmed", notes: "", createdAt: new Date().toISOString(),
+      status: "Provisional", notes: "", createdAt: new Date().toISOString(),
     };
     let d2 = upsertLocal(data, "jobs", job);
     d2 = upsertLocal(d2, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
@@ -937,6 +950,7 @@ function EnquiryDetail({ data, id, setView }) {
     localStorage.setItem(DB_KEY, JSON.stringify(stamped));
     try { await pushChangedOnly(stamped); } catch {}
     SAVING_IN_PROGRESS = false;
+    setView({ screen: "jobDetail", id: jid });
     window.location.reload();
   }
   async function markLost() {
@@ -1026,7 +1040,7 @@ function EnquiryDetail({ data, id, setView }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {!["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Mark Won → Book move</Btn>}
+        {!["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
         {e.status === "Won" && e.enquiryId !== false && <Btn variant="grey" style={{ flex: 1 }} onClick={() => { const j = (data.jobs || []).find(x => x.enquiryId === e.id); if (j) setView({ screen: "jobDetail", id: j.id }); }}>View booked move</Btn>}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
@@ -1236,7 +1250,8 @@ function JobsList({ data, setView }) {
         <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, j.customerId)}</div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: TEAL_D }}>{moveRef(data, j)}</div>
+              <div style={{ fontWeight: 700, color: "#111827", marginTop: 1 }}>{custName(data, j.customerId)}</div>
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{fmtDate(j.moveDate)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{j.vehicle || "—"} · {gbp(j.price)}{j.deposit ? ` · dep ${gbp(j.deposit)}${j.depositPaid ? " ✓" : ""}` : ""}</div>
             </div>
@@ -1450,6 +1465,12 @@ function JobDetail({ data, id, setView }) {
   }
   async function save() { await saveAndReload(upsertLocal(data, "jobs", buildRec())); }
   async function completeMove() { await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: "Completed", balancePaid: true }))); }
+  async function confirmMove() {
+    const price = Number(f.price) || 0;
+    const dep = Math.round(price * 0.6);
+    setF(p => ({ ...p, status: "Confirmed", deposit: dep, depositPaid: true }));
+    await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: "Confirmed", deposit: dep, depositPaid: true })));
+  }
   async function del() {
     if (!confirm("Delete this booked move?")) return;
     addTombstone(j.id);
@@ -1467,7 +1488,10 @@ function JobDetail({ data, id, setView }) {
     <div>
       <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "jobs" })}><Icon name="back" size={14} /> Back</Btn>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 8px" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, j.customerId)}</h2>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D, letterSpacing: ".02em" }}>{moveRef(data, j)}</div>
+          <h2 style={{ margin: "2px 0 0", fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, j.customerId)}</h2>
+        </div>
         <StatusBadge status={f.status} />
       </div>
       {customer && (
@@ -1528,7 +1552,12 @@ function JobDetail({ data, id, setView }) {
         <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>
         <Btn style={{ flex: 1 }} onClick={save}><Icon name="check" size={16} /> Save move</Btn>
       </div>
-      {f.status !== "Completed" && (
+      {f.status === "Provisional" && (
+        <Btn variant="primary" style={{ width: "100%", marginTop: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}>
+          <Icon name="check" size={16} /> Confirm move — take 60% deposit ({gbp(Math.round((Number(f.price) || 0) * 0.6))})
+        </Btn>
+      )}
+      {f.status === "Confirmed" && (
         <Btn variant="primary" style={{ width: "100%", marginTop: 10 }} onClick={completeMove}>
           <Icon name="check" size={16} /> Mark move complete
         </Btn>
