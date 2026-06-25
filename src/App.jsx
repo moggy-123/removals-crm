@@ -18,7 +18,7 @@ function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(d
 const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
 
 const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost"];
-const JOB_STATUSES = ["Booked", "In Progress", "Completed"];
+const JOB_STATUSES = ["Provisional", "Confirmed", "Completed"];
 const PROPERTY_TYPES = ["House", "Flat / Apartment", "Bungalow", "Maisonette", "Office", "Storage Unit", "Other"];
 const QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Declined"];
 
@@ -28,8 +28,10 @@ const STATUS_META = {
   Quoted:      { color: "#D97706", bg: "#FFFBEB" },
   Won:         { color: "#059669", bg: "#ECFDF5" },
   Lost:        { color: "#DC2626", bg: "#FEF2F2" },
+  Provisional: { color: "#D97706", bg: "#FFFBEB" },
+  Confirmed:   { color: "#2563EB", bg: "#EFF6FF" },
   Booked:      { color: "#2563EB", bg: "#EFF6FF" },
-  "In Progress": { color: "#D97706", bg: "#FFFBEB" },
+  "In Progress": { color: "#2563EB", bg: "#EFF6FF" },
   Completed:   { color: "#059669", bg: "#ECFDF5" },
 };
 
@@ -215,10 +217,11 @@ const Icon = ({ name, size = 18, color = "currentColor" }) => {
 
 // ── Shared UI ───────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
+  const label = (status === "Booked" || status === "In Progress") ? "Confirmed" : status;
   const m = STATUS_META[status] || { color: "#6B7280", bg: "#F3F4F6" };
   return (
     <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 10px", borderRadius: 99, fontSize: 12, fontWeight: 600, color: m.color, background: m.bg, border: `1px solid ${m.color}33` }}>
-      {status}
+      {label}
     </span>
   );
 }
@@ -925,7 +928,7 @@ function EnquiryDetail({ data, id, setView }) {
       stages: [{ id: uid(), type: "Move", date: e.preferredDate || "", time: "", vehicleIds: [], crew: [], notes: "" }],
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
-      status: "Booked", notes: "", createdAt: new Date().toISOString(),
+      status: "Confirmed", notes: "", createdAt: new Date().toISOString(),
     };
     let d2 = upsertLocal(data, "jobs", job);
     d2 = upsertLocal(d2, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
@@ -1214,11 +1217,12 @@ function CustomerDetail({ data, id, setView }) {
 
 // ── Jobs (booked moves) ─────────────────────────────────────────────────────
 function JobsList({ data, setView }) {
-  const [filter, setFilter] = useState("Active");
+  const [filter, setFilter] = useState("Confirmed");
+  const normStatus = s => (s === "Booked" || s === "In Progress") ? "Confirmed" : s;
   const jobs = (data.jobs || [])
-    .filter(j => filter === "All" ? true : filter === "Active" ? j.status !== "Completed" : j.status === filter)
+    .filter(j => filter === "All" ? true : normStatus(j.status) === filter)
     .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""));
-  const filters = ["Active", ...JOB_STATUSES, "All"];
+  const filters = ["Provisional", "Confirmed", "Completed", "All"];
   return (
     <div>
       <h2 style={{ margin: "0 0 12px", fontSize: 20, fontWeight: 800, color: "#111827" }}>Booked Moves</h2>
@@ -1408,7 +1412,7 @@ function JobDetail({ data, id, setView }) {
     stages: jobStages(j).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", vehicleIds: st.vehicleIds || [], crew: st.crew || [], notes: st.notes || "" })),
     price: j.price || 0, deposit: j.deposit || 0,
     depositPaid: j.depositPaid || false, balancePaid: j.balancePaid || false,
-    status: j.status || "Booked", notes: j.notes || "",
+    status: (j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : (j.status || "Confirmed"), notes: j.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const vehLabel = vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; };
