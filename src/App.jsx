@@ -1,4 +1,4 @@
-jimport { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase } from "./supabase";
 import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
 
