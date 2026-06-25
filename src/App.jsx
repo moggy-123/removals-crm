@@ -291,7 +291,8 @@ function Empty({ icon, text }) {
 function custName(data, id) {
   const c = (data.customers || []).find(x => x.id === id);
   if (!c) return "Unknown";
-  return c.company ? `${c.name} (${c.company})` : c.name;
+  const base = c.company ? `${c.name} (${c.company})` : c.name;
+  return c.ref ? `#${c.ref} ${base}` : base;
 }
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
