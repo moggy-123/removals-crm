@@ -328,6 +328,17 @@ function moveRef(data, job) {
   const seq = moveSeqOf(data, job);
   return (c && c.ref) ? `#${c.ref}/${seq}` : `Move ${seq}`;
 }
+function autoCompletePastMoves(d) {
+  const todayIso = todayISO();
+  let changed = false;
+  const jobs = (d.jobs || []).map(j => {
+    if (j.status === "Completed" || j.status === "Provisional") return j;
+    const dates = jobStages(j).map(s => s.date).filter(Boolean);
+    if (dates.length && dates.every(dt => dt < todayIso)) { changed = true; return { ...j, status: "Completed", balancePaid: true }; }
+    return j;
+  });
+  return changed ? { ...d, jobs } : d;
+}
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
 function Dashboard({ data, setView }) {
@@ -466,7 +477,7 @@ function SectionTitle({ children }) {
 
 // ── Enquiries list ──────────────────────────────────────────────────────────
 function EnquiriesList({ data, setView, initialFilter }) {
-  const [filter, setFilter] = useState(initialFilter || "Open");
+  const [filter, setFilter] = useState(initialFilter || "Surveyed");
   const enquiries = data.enquiries || [];
   const filters = [...ENQUIRY_STATUSES, "All"];
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
@@ -507,7 +518,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
                 {e.quoteTotal ? ` · ${gbp(e.quoteTotal)}` : ""}
               </div>
             </div>
-            <StatusBadge status={e.status} />
+            <StatusBadge status={(() => { const j = (data.jobs || []).find(x => x.enquiryId === e.id); return j ? j.status : e.status; })()} />
           </div>
         </Card>
       ))}
@@ -544,9 +555,10 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
 }
 
 // ── Enquiry form (create / edit) ────────────────────────────────────────────
-function EnquiryForm({ data, onClose, editEnquiry }) {
+function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
   const e = editEnquiry || {};
-  const [customerId, setCustomerId] = useState(e.customerId || "");
+  const [customerId, setCustomerId] = useState(e.customerId || initialCustomerId || "");
+  useEffect(() => { if (!e.id && initialCustomerId) selectCustomer(initialCustomerId); /* eslint-disable-next-line */ }, []);
   const [newCust, setNewCust] = useState({ name: "", phone: "", email: "" });
   const [f, setF] = useState({
     preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false, moveMonth: e.moveMonth || "",
@@ -596,6 +608,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
       createdAt: e.createdAt || new Date().toISOString(),
     };
     data2 = upsertLocal(data2, "enquiries", rec);
+    try { sessionStorage.setItem("removals_view", JSON.stringify(e.id ? { screen: "enquiryDetail", id: e.id } : { screen: "dashboard" })); } catch {}
     await saveAndReload(data2);
   }
 
@@ -608,7 +621,10 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
       )}
 
       <SectionTitle>Move details</SectionTitle>
-      <Field label="Preferred move date"><Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} /></Field>
+      <Field label="Preferred move date">
+        <Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} />
+        {(f.preferredDate || f.moveMonth) && <button onClick={() => setF(p => ({ ...p, preferredDate: "", moveMonth: "" }))} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: "4px 0 0" }}>Remove move date</button>}
+      </Field>
       <Field label="Or month of move" hint="If no exact date is known yet">
         <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={f.moveMonth || ""} onChange={ev => set("moveMonth", ev.target.value)}>
           <option value="">Select a month…</option>
@@ -619,7 +635,10 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
           })}
         </select>
       </Field>
-      <Field label="Survey date" hint="Shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field>
+      <Field label="Survey date" hint="Shows on the calendar">
+        <Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} />
+        {(f.surveyDate || f.surveyTime) && <button onClick={() => setF(p => ({ ...p, surveyDate: "", surveyTime: "" }))} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: "4px 0 0" }}>Remove survey date</button>}
+      </Field>
       <Field label="Survey time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field>
       <Field label="Dates flexible?">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
@@ -1138,6 +1157,20 @@ function MoveManageModal({ data, job, onClose }) {
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
   const reopenConfirmed = () => persist({ status: "Confirmed" });
   const revertProvisional = () => persist({ status: "Provisional" });
+  async function removeMove() {
+    if (!confirm("Remove this move and send the enquiry back to Quoted? Day assignments will be lost.")) return;
+    addTombstone(job.id);
+    SAVING_IN_PROGRESS = true; showSavingOverlay();
+    try { await deleteRecord("jobs", job.id); } catch {}
+    let d2 = { ...data, jobs: (data.jobs || []).filter(x => x.id !== job.id) };
+    const enq = (d2.enquiries || []).find(x => x.id === job.enquiryId);
+    if (enq) d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Quoted", quoteStatus: "Sent" });
+    const stamped = stampData(d2);
+    localStorage.setItem(DB_KEY, JSON.stringify(stamped));
+    try { await pushChangedOnly(stamped); } catch {}
+    SAVING_IN_PROGRESS = false;
+    window.location.reload();
+  }
   return (
     <Modal title={`Move ${moveRef(data, job)}`} onClose={onClose}>
       <div style={{ marginBottom: 12 }}><StatusBadge status={f.status} /></div>
@@ -1152,7 +1185,8 @@ function MoveManageModal({ data, job, onClose }) {
       {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
       {f.status !== "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
 
-      <Btn style={{ width: "100%" }} onClick={() => persist()}><Icon name="check" size={16} /> Save</Btn>
+      <Btn style={{ width: "100%", marginBottom: 10 }} onClick={() => persist()}><Icon name="check" size={16} /> Save</Btn>
+      <Btn variant="danger" style={{ width: "100%" }} onClick={removeMove}><Icon name="trash" size={14} /> Remove move — back to Quoted</Btn>
     </Modal>
   );
 }
@@ -1433,6 +1467,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
     const rec = { id: c.id || uid(), ...f, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
+    if (!c.id) { try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "newEnquiry", customerId: rec.id })); } catch {} }
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
   return (
@@ -1931,7 +1966,8 @@ function CalendarView({ data, setView, initialDate, initialMode }) {
   const [anchor, setAnchor] = useState(() => initialDate ? new Date(initialDate + "T00:00") : new Date());
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
-  const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
+  const hasStaff = st => !!(st.crew && st.crew.length);
+  const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso && hasStaff(st)) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
   const rawSurveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost").sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
   const jobsOn = d => showMoves ? rawJobsOn(d) : [];
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
@@ -2039,7 +2075,7 @@ function CalendarView({ data, setView, initialDate, initialMode }) {
       {mode==="agenda" && (() => {
         const startIso = isoOf(today);
         const items = [];
-        if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (st.date && st.date >= startIso) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
+        if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (st.date && st.date >= startIso && st.crew && st.crew.length) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
         if (showSurveys) (data.enquiries||[]).forEach(en => { if (en.surveyDate && en.surveyDate >= startIso && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
         if (!items.length) return <Empty icon="calendar" text="Nothing coming up" />;
@@ -2233,7 +2269,7 @@ export default function App() {
       try {
         const cloud = await pullFromCloud();
         if (cancelled) return;
-        const merged = mergeAll(cloud, loadData());
+        const merged = autoCompletePastMoves(mergeAll(cloud, loadData()));
         localStorage.setItem(DB_KEY, JSON.stringify(merged));
         setData(merged);
         pushChangedOnly(merged).catch(() => {});
@@ -2365,7 +2401,7 @@ export default function App() {
         <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
           {content()}
         </main>
-        {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} />}
+        {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} initialCustomerId={view.customerId} />}
       </div>
     );
   }
@@ -2387,7 +2423,7 @@ export default function App() {
         <SyncDot />
       </header>
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>{content()}</div>
-      {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} />}
+      {view.screen === "newEnquiry" && <EnquiryForm data={data} onClose={() => setView({ screen: "enquiries" })} initialCustomerId={view.customerId} />}
       <nav style={{ background: "#fff", borderTop: "1px solid #E9EEED", display: "flex", flexShrink: 0 }}>
         {NAV.map(n => {
           const on = activeTab === n.id;
