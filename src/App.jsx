@@ -558,9 +558,6 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
     notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  const addDay = () => setF(p => ({ ...p, stages: [...(p.stages || []), { id: uid(), type: "Move", date: "", staffCount: "", vehicleCount: "", notes: "" }] }));
-  const removeDay = (i) => setF(p => ({ ...p, stages: p.stages.filter((_, ix) => ix !== i) }));
-  const setDay = (i, k, v) => setF(p => ({ ...p, stages: p.stages.map((d, ix) => ix === i ? { ...d, [k]: v } : d) }));
 
   // When an existing customer is picked, prefill "moving from":
   // their last move's TO address if they've moved before, else their stored address.
@@ -612,7 +609,16 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
 
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date"><Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} /></Field>
-      <Field label="Or month of move" hint="If no exact date is known yet"><Input type="month" value={f.moveMonth} onChange={v => set("moveMonth", v)} /></Field>
+      <Field label="Or month of move" hint="If no exact date is known yet">
+        <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={f.moveMonth || ""} onChange={ev => set("moveMonth", ev.target.value)}>
+          <option value="">Select a month…</option>
+          {Array.from({ length: 18 }, (_, i) => {
+            const dt = new Date(new Date().getFullYear(), new Date().getMonth() + i, 1);
+            const ym = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+            return <option key={ym} value={ym}>{fmtMonth(ym)}</option>;
+          })}
+        </select>
+      </Field>
       <Field label="Survey date" hint="Shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field>
       <Field label="Survey time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field>
       <Field label="Dates flexible?">
@@ -620,25 +626,6 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
           <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
         </label>
       </Field>
-
-      <SectionTitle>Move plan</SectionTitle>
-      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>Scope the days for this move. These carry onto the move and the calendar.</div>
-      {(f.stages || []).map((d, i) => (
-        <Card key={d.id || i} style={{ background: "#FAFCFB" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D }}>Day {i + 1}</div>
-            <button onClick={() => removeDay(i)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 8, width: 30, height: 30, cursor: "pointer" }}>×</button>
-          </div>
-          <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
-          <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
-          <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1, minWidth: 0 }}><Field label="Staff"><Input type="number" inputMode="numeric" value={d.staffCount} onChange={v => setDay(i, "staffCount", v)} placeholder="e.g. 3" /></Field></div>
-            <div style={{ flex: 1, minWidth: 0 }}><Field label="Vehicles"><Input type="number" inputMode="numeric" value={d.vehicleCount} onChange={v => setDay(i, "vehicleCount", v)} placeholder="e.g. 2" /></Field></div>
-          </div>
-          <Field label="Notes"><Input value={d.notes} onChange={v => setDay(i, "notes", v)} placeholder="(optional)" /></Field>
-        </Card>
-      ))}
-      <Btn variant="grey" size="sm" onClick={addDay} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>
 
       <SectionTitle>Moving from</SectionTitle>
       {customerId && (f.fromAddress1 || f.fromTown || f.fromPostcode) && (
@@ -966,11 +953,67 @@ function Row({ label, value }) {
   );
 }
 
+function MovePlanModal({ data, enquiry, onClose }) {
+  const [days, setDays] = useState(Array.isArray(enquiry.stages) ? enquiry.stages.map(d => ({ ...d })) : []);
+  const addDay = () => setDays(d => [...d, { id: uid(), type: "Move", date: "", staffCount: "", vehTypes: {}, notes: "" }]);
+  const removeDay = (i) => setDays(d => d.filter((_, ix) => ix !== i));
+  const setDay = (i, k, v) => setDays(d => d.map((x, ix) => ix === i ? { ...x, [k]: v } : x));
+  const setVeh = (i, vt, n) => setDays(d => d.map((x, ix) => {
+    if (ix !== i) return x;
+    const m = { ...(x.vehTypes || {}) };
+    if (n > 0) m[vt] = n; else delete m[vt];
+    return { ...x, vehTypes: m };
+  }));
+  async function save() {
+    await saveAndReload(upsertLocal(data, "enquiries", { ...enquiry, stages: days }));
+    onClose();
+  }
+  const stepBtn = { width: 34, height: 34, borderRadius: 9, border: "1.5px solid #E3E9E8", background: "#F7FAF9", color: TEAL_D, fontSize: 18, fontWeight: 700, cursor: "pointer", lineHeight: 1 };
+  return (
+    <Modal title="Move plan" onClose={onClose}>
+      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>Scope the days for this move. These carry onto the move and the calendar.</div>
+      {days.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>No days yet — add the first one.</div>}
+      {days.map((d, i) => (
+        <Card key={d.id || i} style={{ background: "#FAFCFB" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D }}>Day {i + 1}</div>
+            <button onClick={() => removeDay(i)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 8, width: 30, height: 30, cursor: "pointer" }}>×</button>
+          </div>
+          <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
+          <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
+          <Field label="Staff"><Input type="number" inputMode="numeric" value={d.staffCount} onChange={v => setDay(i, "staffCount", v)} placeholder="e.g. 3" /></Field>
+          <Field label="Vehicles">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {PLAN_VEHICLE_TYPES.map(vt => {
+                const qty = (d.vehTypes && d.vehTypes[vt]) || 0;
+                return (
+                  <div key={vt} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", border: "1.5px solid #E3E9E8", borderRadius: 11, padding: "6px 12px" }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: qty ? "#10211E" : "#6B7280" }}>{vt}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <button onClick={() => setVeh(i, vt, Math.max(0, qty - 1))} style={stepBtn}>−</button>
+                      <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700, fontSize: 15 }}>{qty}</span>
+                      <button onClick={() => setVeh(i, vt, qty + 1)} style={stepBtn}>+</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Field>
+          <Field label="Notes"><Input value={d.notes} onChange={v => setDay(i, "notes", v)} placeholder="(optional)" /></Field>
+        </Card>
+      ))}
+      <Btn variant="grey" size="sm" onClick={addDay} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>
+      <Btn style={{ width: "100%" }} onClick={save}><Icon name="check" size={16} /> Save plan</Btn>
+    </Modal>
+  );
+}
 function EnquiryDetail({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
   const [showInv, setShowInv] = useState(false);
   const [showQuote, setShowQuote] = useState(false);
+  const [showPlan, setShowPlan] = useState(false);
+  const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name || "Vehicle";
   const customer = (data.customers || []).find(c => c.id === e?.customerId);
   if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
 
@@ -982,7 +1025,7 @@ function EnquiryDetail({ data, id, setView }) {
     const jid = uid();
     const planned = Array.isArray(e.stages) ? e.stages : [];
     const stages = planned.length
-      ? planned.map(d => ({ id: uid(), type: d.type || "Move", date: d.date || e.preferredDate || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehicleCount: d.vehicleCount || "", notes: d.notes || "" }))
+      ? planned.map(d => ({ id: uid(), type: d.type || "Move", date: d.date || e.preferredDate || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
       : [{ id: uid(), type: "Move", date: e.preferredDate || "", time: "", vehicleIds: [], crew: [], notes: "" }];
     const job = {
       id: jid, customerId: e.customerId, enquiryId: e.id, moveSeq: seq,
@@ -1055,25 +1098,6 @@ function EnquiryDetail({ data, id, setView }) {
         {e.notes && <Row label="Notes" value={e.notes} />}
       </Card>
 
-      {Array.isArray(e.stages) && e.stages.length > 0 && (
-        <Card>
-          <div style={{ fontWeight: 700, color: "#111827", marginBottom: 8 }}>Move plan</div>
-          {e.stages.map((d, i) => (
-            <div key={d.id || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: i ? "1px solid #F1F5F4" : "none" }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#10211E" }}>Day {i + 1}: {d.type || "—"}</div>
-                <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
-                  {d.date ? fmtDate(d.date) : "Date TBC"}
-                  {d.staffCount ? ` · ${d.staffCount} staff` : ""}
-                  {d.vehicleCount ? ` · ${d.vehicleCount} ${d.vehicleCount == 1 ? "vehicle" : "vehicles"}` : ""}
-                </div>
-                {d.notes && <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{d.notes}</div>}
-              </div>
-            </div>
-          ))}
-        </Card>
-      )}
-
       {/* Survey */}
       <Card style={{ background: e.volumeCuFt ? "#F0FDFA" : "#fff" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1086,6 +1110,29 @@ function EnquiryDetail({ data, id, setView }) {
             {e.volumeCuFt > 0 && <div style={{ fontSize: 13, color: TEAL, fontWeight: 600, marginTop: 2 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads}` : ""}</div>}
           </div>
           <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
+        </div>
+      </Card>
+
+      {/* Move plan */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, color: "#111827" }}>Move plan</div>
+            {(!e.stages || e.stages.length === 0) ? (
+              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>No days planned yet</div>
+            ) : (
+              <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                {e.stages.map((d, i) => (
+                  <div key={d.id || i} style={{ fontSize: 13, color: "#374151" }}>
+                    <b style={{ color: "#10211E" }}>Day {i + 1}:</b> {d.type || "—"} · {d.date ? fmtDate(d.date) : "Date TBC"}
+                    {d.staffCount ? ` · ${d.staffCount} staff` : ""}
+                    {vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : ""}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <Btn size="sm" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {(e.stages && e.stages.length) ? "Edit" : "Add"}</Btn>
         </div>
       </Card>
 
@@ -1124,6 +1171,7 @@ function EnquiryDetail({ data, id, setView }) {
       {showEdit && <EnquiryForm data={data} editEnquiry={e} onClose={() => setShowEdit(false)} />}
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
       {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
+      {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
     </div>
   );
 }
@@ -1478,6 +1526,11 @@ function StaffForm({ data, onClose, editStaff }) {
 }
 
 const DEFAULT_DAY_TYPES = ["Move", "Full Pack", "7 Hour Pack", "Load", "Unload", "Load Travel (Night Out)"];
+const PLAN_VEHICLE_TYPES = ["18t", "7.5t", "3.5t", "Van"];
+function vehTypesSummary(m) {
+  if (!m) return "";
+  return PLAN_VEHICLE_TYPES.filter(t => m[t]).map(t => `${m[t]}× ${t}`).join(", ");
+}
 const DAYTYPES_KEY = "removals_day_types";
 function getDayTypes() {
   try { const v = JSON.parse(localStorage.getItem(DAYTYPES_KEY)); if (Array.isArray(v) && v.length) return v; } catch {}
@@ -1614,11 +1667,11 @@ function JobDetail({ data, id, setView }) {
               <div style={{ flex: 1 }}><Field label="Day"><DayTypeSelect value={st.type} onChange={v => setStage(idx, "type", v)} /></Field></div>
               {f.stages.length > 1 && <button onClick={() => removeStage(idx)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 9, width: 38, height: 38, cursor: "pointer", marginBottom: 14, flexShrink: 0 }}>×</button>}
             </div>
-            {(st.staffCount || st.vehicleCount) && (
+            {(st.staffCount || vehTypesSummary(st.vehTypes)) ? (
               <div style={{ fontSize: 12, color: TEAL_D, background: "#EAF4F2", borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
-                Planned:{st.staffCount ? ` ${st.staffCount} staff` : ""}{st.staffCount && st.vehicleCount ? " ·" : ""}{st.vehicleCount ? ` ${st.vehicleCount} ${st.vehicleCount == 1 ? "vehicle" : "vehicles"}` : ""}
+                Planned:{st.staffCount ? ` ${st.staffCount} staff` : ""}{st.staffCount && vehTypesSummary(st.vehTypes) ? " ·" : ""}{vehTypesSummary(st.vehTypes) ? ` ${vehTypesSummary(st.vehTypes)}` : ""}
               </div>
-            )}
+            ) : null}
             <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
             <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
             <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
