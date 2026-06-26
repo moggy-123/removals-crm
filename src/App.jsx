@@ -700,6 +700,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   const [beds, setBeds] = useState(initialBedrooms);
   const [search, setSearch] = useState("");
   const [openSection, setOpenSection] = useState(ROOMS[0]);
+  const [customItems, setCustomItems] = useState(getCustomItems());
 
   const matches = txt => !search || (txt || "").toLowerCase().includes(search.toLowerCase());
 
@@ -713,15 +714,22 @@ function InventoryModal({ data, enquiry, onClose }) {
       return next;
     });
   }
-  function addCustom(label) {
+  function addCustom(label, catalogRoom) {
     const name = (prompt("Item name?") || "").trim();
     if (!name) return;
     const cuFt = parseFloat(prompt("Approx volume in cubic feet? (e.g. 20)") || "");
     if (!cuFt || cuFt <= 0) { alert("Please enter a number for cubic feet."); return; }
     const kg = parseFloat(prompt("Approx weight in kg? (optional, e.g. 30)") || "") || 0;
-    const slot = "c_" + uid();
-    setLines(p => ({ ...p, [slot]: { catalogId: null, room: label, name, cuFt: Math.round(cuFt * 100) / 100, m3: Math.round(cuFt * 0.0283168 * 1000) / 1000, kg: Math.round(kg), qty: 1 } }));
+    const id = "cust_" + uid();
+    const item = { id, room: catalogRoom || label, name, cuFt: Math.round(cuFt * 100) / 100, m3: Math.round(cuFt * 0.0283168 * 1000) / 1000, kg: Math.round(kg) };
+    setCustomItems(addCustomItemToCatalog(item));          // saved permanently to the list
+    const slot = `${label}::${id}`;
+    setLines(p => ({ ...p, [slot]: { catalogId: id, room: label, name: item.name, cuFt: item.cuFt, m3: item.m3, kg: item.kg, qty: 1 } }));
     setOpenSection(label);
+  }
+  function deleteCustomItem(id) {
+    if (!confirm("Remove this custom item from your saved list? (existing moves keep it)")) return;
+    setCustomItems(removeCustomItemFromCatalog(id));
   }
   function addBedroom() {
     const nums = beds.map(b => parseInt(b.replace(/\D/g, "")) || 0);
@@ -761,7 +769,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   });
 
   function Section({ label, catalogRoom, isBedroom }) {
-    const catItems = FURNITURE.filter(it => it.room === catalogRoom && matches(it.name));
+    const catItems = [...FURNITURE.filter(it => it.room === catalogRoom), ...customItems.filter(it => it.room === catalogRoom)].filter(it => matches(it.name));
     const customSlots = Object.entries(lines).filter(([, v]) => v.catalogId == null && v.room === label && matches(v.name));
     if (search && catItems.length === 0 && customSlots.length === 0) return null;
     const sectionQty = Object.values(lines).filter(v => v.room === label).reduce((s, v) => s + v.qty, 0);
@@ -790,11 +798,12 @@ function InventoryModal({ data, enquiry, onClose }) {
           <div style={{ padding: "4px 0" }}>
             {catItems.map(it => {
               const slot = `${label}::${it.id}`;
+              const isCustom = typeof it.id === "string" && it.id.startsWith("cust_");
               return (
                 <div key={slot} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{it.name}</div>
-                    <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg</div>
+                    <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{it.name}{isCustom && <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}> · custom</span>}</div>
+                    <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg{isCustom && <span onClick={() => deleteCustomItem(it.id)} style={{ color: "#DC2626", fontWeight: 600, marginLeft: 8, cursor: "pointer" }}>remove from list</span>}</div>
                   </div>
                   <Stepper slot={slot} meta={{ catalogId: it.id, room: label, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg }} />
                 </div>
@@ -810,7 +819,7 @@ function InventoryModal({ data, enquiry, onClose }) {
               </div>
             ))}
             <div style={{ padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
-              <button onClick={() => addCustom(label)} style={{ background: "transparent", border: "none", color: TEAL, fontWeight: 600, fontSize: 13, cursor: "pointer", padding: 0 }}>+ Add custom item</button>
+              <button onClick={() => addCustom(label, catalogRoom)} style={{ background: "transparent", border: "none", color: TEAL, fontWeight: 600, fontSize: 13, cursor: "pointer", padding: 0 }}>+ Add custom item</button>
             </div>
           </div>
         )}
@@ -1550,6 +1559,21 @@ function addDayType(t) {
   const list = getDayTypes();
   if (t && !list.includes(t)) { const nl = [...list, t]; localStorage.setItem(DAYTYPES_KEY, JSON.stringify(nl)); return nl; }
   return list;
+}
+const CUSTOM_ITEMS_KEY = "removals_custom_items";
+function getCustomItems() {
+  try { const v = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_KEY)); if (Array.isArray(v)) return v; } catch {}
+  return [];
+}
+function addCustomItemToCatalog(item) {
+  const nl = [...getCustomItems(), item];
+  localStorage.setItem(CUSTOM_ITEMS_KEY, JSON.stringify(nl));
+  return nl;
+}
+function removeCustomItemFromCatalog(id) {
+  const nl = getCustomItems().filter(x => x.id !== id);
+  localStorage.setItem(CUSTOM_ITEMS_KEY, JSON.stringify(nl));
+  return nl;
 }
 const STAGE_TYPES = DEFAULT_DAY_TYPES;
 // Returns a job's day-stages, synthesising one from legacy single-day fields if needed.
