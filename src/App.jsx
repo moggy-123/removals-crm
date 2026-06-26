@@ -1125,15 +1125,48 @@ function MessageModal({ customer, ctx, onClose }) {
     </Modal>
   );
 }
+function MoveManageModal({ data, job, onClose }) {
+  const [f, setF] = useState({ price: job.price ?? "", deposit: job.deposit ?? "", depositPaid: !!job.depositPaid, balancePaid: !!job.balancePaid, status: job.status || "Provisional" });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const price = Number(f.price) || 0;
+  const balanceDue = price - (Number(f.deposit) || 0);
+  async function persist(extra) {
+    await saveAndReload(upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: f.status, ...extra }));
+    onClose();
+  }
+  const confirmMove = () => persist({ status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true });
+  const completeMove = () => persist({ status: "Completed", balancePaid: true });
+  const reopenConfirmed = () => persist({ status: "Confirmed" });
+  const revertProvisional = () => persist({ status: "Provisional" });
+  return (
+    <Modal title={`Move ${moveRef(data, job)}`} onClose={onClose}>
+      <div style={{ marginBottom: 12 }}><StatusBadge status={f.status} /></div>
+      <Field label="Price (£)"><Input type="number" inputMode="decimal" value={f.price} onChange={v => set("price", v)} /></Field>
+      <Field label="Deposit (£)"><Input type="number" inputMode="decimal" value={f.deposit} onChange={v => set("deposit", v)} /></Field>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E", margin: "2px 0 12px" }}>Balance due: {gbp(balanceDue)}</div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 8 }}><input type="checkbox" checked={f.depositPaid} onChange={ev => set("depositPaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Deposit paid</label>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 16 }}><input type="checkbox" checked={f.balancePaid} onChange={ev => set("balancePaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Balance paid</label>
+
+      {f.status === "Provisional" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}><Icon name="check" size={16} /> Confirm — take 60% deposit ({gbp(Math.round(price * 0.6))})</Btn>}
+      {f.status === "Confirmed" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={completeMove}><Icon name="check" size={16} /> Mark move complete</Btn>}
+      {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
+      {f.status !== "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
+
+      <Btn style={{ width: "100%" }} onClick={() => persist()}><Icon name="check" size={16} /> Save</Btn>
+    </Modal>
+  );
+}
 function EnquiryDetail({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
   const [showInv, setShowInv] = useState(false);
   const [showQuote, setShowQuote] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
+  const [showMove, setShowMove] = useState(false);
   const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name || "Vehicle";
   const customer = (data.customers || []).find(c => c.id === e?.customerId);
   if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
+  const linkedJob = (data.jobs || []).find(j => j.enquiryId === e.id);
 
   async function setStatus(status, extra = {}) {
     await saveAndReload(upsertLocal(data, "enquiries", { ...e, status, ...extra }));
@@ -1164,7 +1197,8 @@ function EnquiryDetail({ data, id, setView }) {
     localStorage.setItem(DB_KEY, JSON.stringify(stamped));
     try { await pushChangedOnly(stamped); } catch {}
     SAVING_IN_PROGRESS = false;
-    setView({ screen: "jobDetail", id: jid });
+    const firstDate = stages.map(s => s.date).filter(Boolean).sort()[0] || e.preferredDate || "";
+    setView({ screen: "calendar", date: firstDate || undefined, calMode: "day" });
     window.location.reload();
   }
   async function markLost() {
@@ -1255,6 +1289,23 @@ function EnquiryDetail({ data, id, setView }) {
         </div>
       </Card>
 
+      {linkedJob && (
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 700, color: "#111827" }}>Move {moveRef(data, linkedJob)}</div>
+                <StatusBadge status={linkedJob.status} />
+              </div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3 }}>
+                {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}
+              </div>
+            </div>
+            <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> Manage</Btn>
+          </div>
+        </Card>
+      )}
+
       {/* Quote */}
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1278,7 +1329,7 @@ function EnquiryDetail({ data, id, setView }) {
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         {!["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
-        {e.status === "Won" && e.enquiryId !== false && <Btn variant="grey" style={{ flex: 1 }} onClick={() => { const j = (data.jobs || []).find(x => x.enquiryId === e.id); if (j) setView({ screen: "jobDetail", id: j.id }); }}>View booked move</Btn>}
+        {e.status === "Won" && linkedJob && <Btn variant="grey" style={{ flex: 1 }} onClick={() => setShowMove(true)}>Manage move</Btn>}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
         <Btn variant="grey" size="sm" onClick={() => setShowEdit(true)}><Icon name="edit" size={14} /> Edit</Btn>
@@ -1291,6 +1342,7 @@ function EnquiryDetail({ data, id, setView }) {
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
       {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
       {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
+      {showMove && linkedJob && <MoveManageModal data={data} job={linkedJob} onClose={() => setShowMove(false)} />}
     </div>
   );
 }
@@ -1868,12 +1920,12 @@ function startOfWeek(d){ const x=new Date(d); const wd=(x.getDay()+6)%7; return 
 function parseTime(t){ if(!t) return null; const m=String(t).match(/(\d{1,2}):(\d{2})/); return m ? (+m[1])+(+m[2])/60 : null; }
 function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"am":"pm"; let H=hh%12; if(H===0)H=12; return mm?`${H}:${String(mm).padStart(2,"0")}${ap}`:`${H}${ap}`; }
 
-function CalendarView({ data, setView }) {
-  const [mode, setMode] = useState("week");
+function CalendarView({ data, setView, initialDate, initialMode }) {
+  const [mode, setMode] = useState(initialMode || "week");
   const [show, setShow] = useState("all");
   const showMoves = show !== "surveys";
   const showSurveys = show !== "moves";
-  const [anchor, setAnchor] = useState(() => new Date());
+  const [anchor, setAnchor] = useState(() => initialDate ? new Date(initialDate + "T00:00") : new Date());
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
   const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
@@ -1896,7 +1948,7 @@ function CalendarView({ data, setView }) {
     const j = m.job, st = m.stage;
     const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
     return (
-    <div onClick={() => setView({ screen:"jobDetail", id:j.id })}
+    <div onClick={() => setView(j.enquiryId ? { screen:"enquiryDetail", id:j.enquiryId } : { screen:"jobDetail", id:j.id })}
       style={{ background:"#fff", border:"1px solid #E9EEED", borderLeft:`4px solid ${colorOf(m)}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
         <span style={{ flex:1, minWidth:0, fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</span>
@@ -2248,7 +2300,7 @@ export default function App() {
 
   function fullScreen() {
     if (view.screen === "dashboard") return <Dashboard data={data} setView={setView} />;
-    if (view.screen === "calendar") return <CalendarView data={data} setView={setView} />;
+    if (view.screen === "calendar") return <CalendarView data={data} setView={setView} initialDate={view.date} initialMode={view.calMode} />;
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
     return null;
   }
