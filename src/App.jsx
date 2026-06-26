@@ -1161,6 +1161,115 @@ function MessageModal({ customer, ctx, onClose }) {
     </Modal>
   );
 }
+function fmtUK(iso) { if (!iso) return ""; const d = new Date(iso + (iso.length === 10 ? "T00:00" : "")); if (isNaN(d)) return iso; return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`; }
+function QuotePdfView({ data, id, setView }) {
+  const e = (data.enquiries || []).find(x => x.id === id);
+  const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
+  const [surveyor, setSurveyor] = useState(localStorage.getItem("removals_surveyor") || "");
+  if (!e) return <div style={{ padding: 20 }}>Quote not found.</div>;
+  const lines = (e.quoteLines || []).filter(l => l.desc || l.amount);
+  const subtotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const vatAmt = e.quoteVat ? Math.round(subtotal * 0.2 * 100) / 100 : 0;
+  const total = subtotal + vatAmt;
+  const ref = c?.ref || "";
+  const fromAddr = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join("  ");
+  const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join("  ");
+  const surveyWhen = e.surveyDate ? `${fmtUK(e.surveyDate)}${e.surveyTime ? " " + e.surveyTime : ""}` : "";
+  const moveWhen = e.preferredDate ? fmtUK(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
+  const saveSurveyor = v => { setSurveyor(v); localStorage.setItem("removals_surveyor", v); };
+
+  const NAVY2 = "#16365C", RED = "#C8102E";
+  const box = { border: "1px solid #222", borderCollapse: "collapse" };
+  const th = { background: "#F0F0F0", fontWeight: 700, fontSize: 11, padding: "3px 6px", border: "1px solid #777", textAlign: "left", verticalAlign: "top" };
+  const td = { fontSize: 11, padding: "3px 6px", border: "1px solid #777", verticalAlign: "top" };
+
+  return (
+    <div>
+      <style>{`@media print { .no-print { display:none !important; } body * { visibility:hidden; } .quote-sheet, .quote-sheet * { visibility:visible; } .quote-sheet { position:absolute; left:0; top:0; width:100%; margin:0; box-shadow:none; } @page { size:A4; margin:10mm; } }`}</style>
+
+      <div className="no-print" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+        <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiryDetail", id: e.id })}><Icon name="back" size={14} /> Back</Btn>
+        <div style={{ flex: 1, minWidth: 160 }}><Field label="Surveyor"><Input value={surveyor} onChange={saveSurveyor} placeholder="e.g. Matt Williams" /></Field></div>
+        <Btn onClick={() => window.print()}><Icon name="check" size={16} /> Print / Save PDF</Btn>
+      </div>
+
+      <div className="quote-sheet" style={{ background: "#fff", color: "#111", maxWidth: 800, margin: "0 auto", padding: 16, fontFamily: "Arial, sans-serif", lineHeight: 1.25 }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontWeight: 800, fontSize: 20, color: NAVY2, lineHeight: 1 }}>R&amp;J<span style={{ color: RED }}> REMOVALS</span><div style={{ fontSize: 10, letterSpacing: 3, color: "#444" }}>&amp; STORAGE</div></div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>Quotation</div>
+          <div style={{ textAlign: "right", fontSize: 12, color: NAVY2, fontWeight: 700 }}>Ref<br /><span style={{ fontSize: 18, color: RED }}>{ref}</span></div>
+        </div>
+
+        {/* Info table */}
+        <table style={{ ...box, width: "100%", marginBottom: 8 }} cellSpacing="0">
+          <tbody>
+            <tr><td style={th}>Surveyor</td><td style={td}>{surveyor}</td><td style={th}>Survey Date</td><td style={td}>{surveyWhen}</td><td style={th}>Customer #</td><td style={{ ...td, color: RED, fontWeight: 700 }}>{ref}</td></tr>
+            <tr><td style={th}>Customer</td><td style={td}>{c?.name || ""}</td><td style={th}>Home Phone</td><td style={td}></td><td style={th}>Mobile Phone</td><td style={td}>{c?.phone || ""}</td></tr>
+            <tr><td style={th}>E-mail</td><td style={td}>{c?.email || ""}</td><td style={th}>Move Date</td><td style={td}>{moveWhen}</td><td style={th}>Exchanged</td><td style={td}></td></tr>
+            <tr><td style={th}>Home</td><td style={td} colSpan="5">{fromAddr}</td></tr>
+            <tr><td style={th}>Store</td><td style={td} colSpan="5"></td></tr>
+            <tr><td style={th}>To</td><td style={td} colSpan="5">{toAddr}</td></tr>
+          </tbody>
+        </table>
+
+        {/* Services / notes */}
+        <table style={{ ...box, width: "100%", marginBottom: 8 }} cellSpacing="0">
+          <tbody>
+            <tr>
+              <td style={{ ...td, width: "42%", padding: 0 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}><tbody>
+                  <tr><td style={{ ...td, fontWeight: 700, color: NAVY2 }} colSpan="2">Please tick the services required</td></tr>
+                  {(lines.length ? lines : [{ desc: "Removal service", amount: "" }]).map((l, i) => (
+                    <tr key={i}><td style={td}>{l.desc}</td><td style={{ ...td, textAlign: "right", fontWeight: 700, width: 80 }}>{l.amount ? gbp(l.amount) : ""}</td></tr>
+                  ))}
+                  <tr><td style={{ ...td, fontWeight: 700 }}>Vat @ 20%</td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{e.quoteVat ? gbp(vatAmt) : "—"}</td></tr>
+                  <tr><td style={{ ...td, fontWeight: 800 }}>Total</td><td style={{ ...td, textAlign: "right", fontWeight: 800 }}>{gbp(total)}</td></tr>
+                  <tr><td style={td}>Late Key Waiver</td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>FREE</td></tr>
+                </tbody></table>
+              </td>
+              <td style={{ ...td, width: "20%", verticalAlign: "top" }}>
+                <div style={{ fontWeight: 700, textAlign: "center", marginBottom: 4 }}>STORAGE</div>
+                <div style={{ fontSize: 10, color: "#444" }}>Storage Charges (per container weekly)</div>
+                <div style={{ height: 22 }} /><div style={{ fontSize: 10 }}>Vat @ 20%</div>
+                <div style={{ height: 22 }} /><div style={{ fontSize: 10 }}>Total</div>
+                <div style={{ height: 22 }} /><div style={{ fontSize: 10 }}>Containers Required</div>
+              </td>
+              <td style={{ ...td, width: "38%", fontSize: 10, verticalAlign: "top" }}>
+                <b>PLEASE NOTE:</b>
+                <ol style={{ margin: "2px 0 6px 14px", padding: 0 }}>
+                  <li>All work is carried out subject to our terms and conditions attached.</li>
+                  <li>Our quotation unless previously stated assumes access to your property no later than 2.00pm. Further delays may result in additional charges to cover overtime payments.</li>
+                  <li>Any item stored must be accompanied with a care of address / contact numbers and paid in advance by 4 weeks.</li>
+                </ol>
+                <b style={{ color: RED }}>Late Key Waiver:</b> Late key waiver protects you against charges if your keys are released later than 2.00pm until 5.00pm or charges of £35.00+vat per person per hour will apply from 2.00pm until we have access. If we do not have access by 5.00pm we may have to store your goods and deliver them at the next available date (extra charges will apply).
+                <div style={{ marginTop: 4 }}><b style={{ color: RED }}>Payments:</b> Preferred payment method is by electronic banking. Online payments can be made to HSBC <b>R J Removals Ltd</b> Account Number <b>91611836</b> Sort Code <b>40 14 18</b>. Please use this reference number <b>{ref} {c?.name || ""}</b>.</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Notes */}
+        <table style={{ ...box, width: "100%", marginBottom: 8 }} cellSpacing="0"><tbody>
+          <tr><td style={{ ...td, color: RED, fontWeight: 700 }}>Notes:</td></tr>
+          <tr><td style={{ ...td, height: 50, verticalAlign: "top" }}>{e.notes || ""}</td></tr>
+        </tbody></table>
+
+        {/* Contract terms */}
+        <div style={{ fontSize: 9.5, color: "#222", marginBottom: 8 }}>
+          Our Contract Prices are based on the information provided by You and are subject to the services being carried out under the enclosed Terms and Conditions. Our Quotation is valid for <b>28 days</b> from the quotation date stated above. Under Our standard terms, We accept liability for loss or damage to Your Property caused by Our negligence only up to a maximum of £40 per Item. Please ensure that You carefully read Our Terms and Conditions and MoveProtect Addendum. <b>You must always return a signed Acceptance of Quotation to Us in advance of Our services commencing, whether or not You opt for MoveProtect.</b>
+        </div>
+
+        {/* Footer */}
+        <div style={{ fontSize: 10, borderTop: "2px solid #222", paddingTop: 6 }}>
+          <b>Head Office (by appointment only)</b> 28 Northfield Road, St George, Bristol, BS5 8PB<br />
+          <b>Tel: Bristol</b> 0117 9611112 &nbsp; <b>Yate</b> 01454 550873 &nbsp; <b>Email:</b> info@rjremovals.co.uk &nbsp; <b>Web:</b> www.rjremovals.co.uk<br />
+          <b>Company Number</b> 5195967 &nbsp; <b>VAT Number</b> GB 543232864
+        </div>
+      </div>
+    </div>
+  );
+}
 function MoveManageModal({ data, job, onClose }) {
   const [f, setF] = useState({ price: job.price ?? "", deposit: job.deposit ?? "", depositPaid: !!job.depositPaid, balancePaid: !!job.balancePaid, status: job.status || "Provisional" });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -1372,6 +1481,7 @@ function EnquiryDetail({ data, id, setView }) {
           </div>
           <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {e.quoteTotal ? "Edit" : "Build"}</Btn>
         </div>
+        {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
       </Card>
 
       {e.followUpDate && (
@@ -2357,6 +2467,7 @@ export default function App() {
   function fullScreen() {
     if (view.screen === "dashboard") return <Dashboard data={data} setView={setView} />;
     if (view.screen === "calendar") return <CalendarView data={data} setView={setView} initialDate={view.date} initialMode={view.calMode} />;
+    if (view.screen === "quotePdf") return <QuotePdfView data={data} id={view.id} setView={setView} />;
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
     return null;
   }
