@@ -1163,6 +1163,9 @@ function EnquiryDetail({ data, id, setView }) {
   const [showQuote, setShowQuote] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [showMove, setShowMove] = useState(false);
+  useEffect(() => {
+    try { if (sessionStorage.getItem("removals_open_plan") === id) { sessionStorage.removeItem("removals_open_plan"); setShowPlan(true); } } catch {}
+  }, [id]);
   const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name || "Vehicle";
   const customer = (data.customers || []).find(c => c.id === e?.customerId);
   if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
@@ -1197,8 +1200,8 @@ function EnquiryDetail({ data, id, setView }) {
     localStorage.setItem(DB_KEY, JSON.stringify(stamped));
     try { await pushChangedOnly(stamped); } catch {}
     SAVING_IN_PROGRESS = false;
-    const firstDate = stages.map(s => s.date).filter(Boolean).sort()[0] || e.preferredDate || "";
-    setView({ screen: "calendar", date: firstDate || undefined, calMode: "day" });
+    try { sessionStorage.setItem("removals_open_plan", e.id); } catch {}
+    setView({ screen: "enquiryDetail", id: e.id });
     window.location.reload();
   }
   async function markLost() {
