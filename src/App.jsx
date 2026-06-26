@@ -964,8 +964,17 @@ function MovePlanModal({ data, enquiry, onClose }) {
     if (n > 0) m[vt] = n; else delete m[vt];
     return { ...x, vehTypes: m };
   }));
+  const linkedJob = (data.jobs || []).find(j => j.enquiryId === enquiry.id);
   async function save() {
-    await saveAndReload(upsertLocal(data, "enquiries", { ...enquiry, stages: days }));
+    let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days });
+    if (linkedJob) {
+      const newStages = days.map((day, i) => {
+        const ex = (linkedJob.stages || [])[i] || {};
+        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || ex.date || linkedJob.moveDate || "", time: ex.time || "", vehicleIds: ex.vehicleIds || [], crew: ex.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "" };
+      });
+      d = upsertLocal(d, "jobs", { ...linkedJob, stages: newStages, moveDate: newStages[0]?.date || linkedJob.moveDate || "" });
+    }
+    await saveAndReload(d);
     onClose();
   }
   const stepBtn = { width: 34, height: 34, borderRadius: 9, border: "1.5px solid #E3E9E8", background: "#F7FAF9", color: TEAL_D, fontSize: 18, fontWeight: 700, cursor: "pointer", lineHeight: 1 };
@@ -1002,8 +1011,9 @@ function MovePlanModal({ data, enquiry, onClose }) {
           <Field label="Notes"><Input value={d.notes} onChange={v => setDay(i, "notes", v)} placeholder="(optional)" /></Field>
         </Card>
       ))}
+      {linkedJob && <div style={{ fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 9, padding: "8px 11px", marginBottom: 12 }}>This enquiry already has a move. Saving will update that move and the calendar (your assigned vans & crew per day are kept).</div>}
       <Btn variant="grey" size="sm" onClick={addDay} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>
-      <Btn style={{ width: "100%" }} onClick={save}><Icon name="check" size={16} /> Save plan</Btn>
+      <Btn style={{ width: "100%" }} onClick={save}><Icon name="check" size={16} /> {linkedJob ? "Save & update move" : "Save plan"}</Btn>
     </Modal>
   );
 }
