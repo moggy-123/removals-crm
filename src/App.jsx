@@ -223,7 +223,7 @@ const Icon = ({ name, size = 18, color = "currentColor" }) => {
 
 // ── Shared UI ───────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
-  const label = (status === "Booked" || status === "In Progress") ? "Confirmed" : status;
+  const label = status === "Won" ? "Booked" : (status === "Booked" || status === "In Progress") ? "Confirmed" : status;
   const m = STATUS_META[status] || { color: "#6B7280", bg: "#F3F4F6" };
   return (
     <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 10px", borderRadius: 99, fontSize: 12, fontWeight: 600, color: m.color, background: m.bg, border: `1px solid ${m.color}33` }}>
@@ -380,7 +380,7 @@ function Dashboard({ data, setView }) {
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
         <Stat label="Booked moves" value={jobs.filter(j => j.status !== "Completed").length} color="#2563EB" onClick={() => setView({ screen: "jobs" })} />
-        <Stat label="Won this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" />
+        <Stat label="Booked this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" />
       </div>
 
       <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
@@ -490,7 +490,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
               fontSize: 13, fontWeight: 600,
               background: active ? (alert ? "#DC2626" : TEAL) : (alert ? "#FEE2E2" : "#F3F4F6"),
               color: active ? "#fff" : (alert ? "#DC2626" : "#6B7280"),
-            }}>{f}{alert ? ` ${surveyedCount}` : ""}</button>
+            }}>{f === "Won" ? "Booked" : f}{alert ? ` ${surveyedCount}` : ""}</button>
           );
         })}
       </div>
@@ -963,8 +963,15 @@ function Row({ label, value }) {
 }
 
 function MovePlanModal({ data, enquiry, onClose }) {
-  const [days, setDays] = useState(Array.isArray(enquiry.stages) ? enquiry.stages.map(d => ({ ...d })) : []);
-  const addDay = () => setDays(d => [...d, { id: uid(), type: "Move", date: "", staffCount: "", vehTypes: {}, notes: "" }]);
+  const linkedJob = (data.jobs || []).find(j => j.enquiryId === enquiry.id);
+  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: v.name }));
+  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
+  const vname = id => ((data.vehicles || []).find(v => v.id === id) || {}).name;
+  const [days, setDays] = useState(() => (Array.isArray(enquiry.stages) ? enquiry.stages : []).map((d, i) => {
+    const js = linkedJob ? (linkedJob.stages || [])[i] : null;
+    return { ...d, crew: (d.crew && d.crew.length ? d.crew : (js?.crew || [])), vehicleIds: (d.vehicleIds && d.vehicleIds.length ? d.vehicleIds : (js?.vehicleIds || [])) };
+  }));
+  const addDay = () => setDays(d => [...d, { id: uid(), type: "Move", date: "", staffCount: "", vehTypes: {}, crew: [], vehicleIds: [], notes: "" }]);
   const removeDay = (i) => setDays(d => d.filter((_, ix) => ix !== i));
   const setDay = (i, k, v) => setDays(d => d.map((x, ix) => ix === i ? { ...x, [k]: v } : x));
   const setVeh = (i, vt, n) => setDays(d => d.map((x, ix) => {
@@ -973,15 +980,18 @@ function MovePlanModal({ data, enquiry, onClose }) {
     if (n > 0) m[vt] = n; else delete m[vt];
     return { ...x, vehTypes: m };
   }));
-  const linkedJob = (data.jobs || []).find(j => j.enquiryId === enquiry.id);
+  const toggleVehId = (i, vid) => setDays(d => d.map((x, ix) => ix === i ? { ...x, vehicleIds: (x.vehicleIds || []).includes(vid) ? x.vehicleIds.filter(z => z !== vid) : [...(x.vehicleIds || []), vid] } : x));
+  const toggleCrew = (i, name) => setDays(d => d.map((x, ix) => ix === i ? { ...x, crew: (x.crew || []).includes(name) ? x.crew.filter(z => z !== name) : [...(x.crew || []), name] } : x));
   async function save() {
     let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days });
     if (linkedJob) {
       const newStages = days.map((day, i) => {
         const ex = (linkedJob.stages || [])[i] || {};
-        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || ex.date || linkedJob.moveDate || "", time: ex.time || "", vehicleIds: ex.vehicleIds || [], crew: ex.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "" };
+        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || ex.date || linkedJob.moveDate || "", time: ex.time || "", vehicleIds: day.vehicleIds || [], crew: day.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "" };
       });
-      d = upsertLocal(d, "jobs", { ...linkedJob, stages: newStages, moveDate: newStages[0]?.date || linkedJob.moveDate || "" });
+      const allVeh = [...new Set(newStages.flatMap(s => s.vehicleIds || []))];
+      const allCrew = [...new Set(newStages.flatMap(s => s.crew || []))];
+      d = upsertLocal(d, "jobs", { ...linkedJob, stages: newStages, moveDate: newStages[0]?.date || linkedJob.moveDate || "", vehicleIds: allVeh, vehicle: allVeh.map(vname).filter(Boolean).join(", "), crew: allCrew });
     }
     await saveAndReload(d);
     onClose();
@@ -989,7 +999,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
   const stepBtn = { width: 34, height: 34, borderRadius: 9, border: "1.5px solid #E3E9E8", background: "#F7FAF9", color: TEAL_D, fontSize: 18, fontWeight: 700, cursor: "pointer", lineHeight: 1 };
   return (
     <Modal title="Move plan" onClose={onClose}>
-      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>Scope the days for this move. These carry onto the move and the calendar.</div>
+      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>{linkedJob ? "Assign the staff and vehicles for each day. Saving updates the move and the calendar." : "Scope the days for this move. These carry onto the move when you create it."}</div>
       {days.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>No days yet — add the first one.</div>}
       {days.map((d, i) => (
         <Card key={d.id || i} style={{ background: "#FAFCFB" }}>
@@ -999,28 +1009,37 @@ function MovePlanModal({ data, enquiry, onClose }) {
           </div>
           <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
           <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
-          <Field label="Staff"><Input type="number" inputMode="numeric" value={d.staffCount} onChange={v => setDay(i, "staffCount", v)} placeholder="e.g. 3" /></Field>
-          <Field label="Vehicles">
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {PLAN_VEHICLE_TYPES.map(vt => {
-                const qty = (d.vehTypes && d.vehTypes[vt]) || 0;
-                return (
-                  <div key={vt} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", border: "1.5px solid #E3E9E8", borderRadius: 11, padding: "6px 12px" }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: qty ? "#10211E" : "#6B7280" }}>{vt}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <button onClick={() => setVeh(i, vt, Math.max(0, qty - 1))} style={stepBtn}>−</button>
-                      <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700, fontSize: 15 }}>{qty}</span>
-                      <button onClick={() => setVeh(i, vt, qty + 1)} style={stepBtn}>+</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Field>
+          {linkedJob ? (
+            <>
+              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew || []} takenIds={[]} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
+              <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds || []} takenIds={[]} onToggle={vid => toggleVehId(i, vid)} empty="No vehicles — add under Company." /></Field>
+            </>
+          ) : (
+            <>
+              <Field label="Staff"><Input type="number" inputMode="numeric" value={d.staffCount} onChange={v => setDay(i, "staffCount", v)} placeholder="e.g. 3" /></Field>
+              <Field label="Vehicles">
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {PLAN_VEHICLE_TYPES.map(vt => {
+                    const qty = (d.vehTypes && d.vehTypes[vt]) || 0;
+                    return (
+                      <div key={vt} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", border: "1.5px solid #E3E9E8", borderRadius: 11, padding: "6px 12px" }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: qty ? "#10211E" : "#6B7280" }}>{vt}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <button onClick={() => setVeh(i, vt, Math.max(0, qty - 1))} style={stepBtn}>−</button>
+                          <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700, fontSize: 15 }}>{qty}</span>
+                          <button onClick={() => setVeh(i, vt, qty + 1)} style={stepBtn}>+</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Field>
+            </>
+          )}
           <Field label="Notes"><Input value={d.notes} onChange={v => setDay(i, "notes", v)} placeholder="(optional)" /></Field>
         </Card>
       ))}
-      {linkedJob && <div style={{ fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 9, padding: "8px 11px", marginBottom: 12 }}>This enquiry already has a move. Saving will update that move and the calendar (your assigned vans & crew per day are kept).</div>}
+      {linkedJob && <div style={{ fontSize: 12, color: "#0F766E", background: "#F0FDFA", border: "1px solid #CCFBF1", borderRadius: 9, padding: "8px 11px", marginBottom: 12 }}>This move is on the calendar. Saving updates its days, staff and vehicles.</div>}
       <Btn variant="grey" size="sm" onClick={addDay} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>
       <Btn style={{ width: "100%" }} onClick={save}><Icon name="check" size={16} /> {linkedJob ? "Save & update move" : "Save plan"}</Btn>
     </Modal>
@@ -1217,8 +1236,8 @@ function EnquiryDetail({ data, id, setView }) {
                 {e.stages.map((d, i) => (
                   <div key={d.id || i} style={{ fontSize: 13, color: "#374151" }}>
                     <b style={{ color: "#10211E" }}>Day {i + 1}:</b> {d.type || "—"} · {d.date ? fmtDate(d.date) : "Date TBC"}
-                    {d.staffCount ? ` · ${d.staffCount} staff` : ""}
-                    {vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : ""}
+                    {(d.crew && d.crew.length) ? ` · ${d.crew.length} crew` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
+                    {(d.vehicleIds && d.vehicleIds.length) ? ` · ${d.vehicleIds.map(vname).filter(Boolean).join(", ")}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
                   </div>
                 ))}
               </div>
@@ -1907,6 +1926,7 @@ function CalendarView({ data, setView }) {
     </span>
   );
   const AvailPanel = ({ d }) => {
+    if (!showMoves) return null;
     const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
     const vehicles = data.vehicles || [];
     const staffActive = (data.staff || []).filter(s => s.active !== false);
@@ -2021,7 +2041,7 @@ function CalendarView({ data, setView }) {
                       {surveysOn(d).map(en => <SurveyCard key={en.id} en={en} />)}
                       {evs.map((m,ix) => <MoveCard key={m.job.id+'-'+ix} m={m} />)}
                     </div>
-                    {((data.vehicles||[]).length>0 || (data.staff||[]).filter(s=>s.active!==false).length>0) && (() => {
+                    {showMoves && ((data.vehicles||[]).length>0 || (data.staff||[]).filter(s=>s.active!==false).length>0) && (() => {
                       const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
                       const freeV = (data.vehicles||[]).filter(v=>!bv.has(v.id)).length;
                       const freeS = (data.staff||[]).filter(s=>s.active!==false && !bs.has(s.name)).length;
