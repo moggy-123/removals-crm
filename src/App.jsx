@@ -1026,6 +1026,11 @@ function MovePlanModal({ data, enquiry, onClose }) {
   return (
     <Modal title="Move plan" onClose={onClose}>
       <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>{linkedJob ? "Assign the staff and vehicles for each day. Saving updates the move and the calendar." : "Scope the days for this move. These carry onto the move when you create it."}</div>
+      {linkedJob && days.length > 0 && (
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#10211E", background: "#F1F5F4", borderRadius: 9, padding: "8px 11px", marginBottom: 12 }}>
+          You booked: {days.length} day{days.length !== 1 ? "s" : ""} · planned {days.reduce((n, d) => n + (Number(d.staffCount) || 0), 0)} staff{(() => { const tot = {}; days.forEach(d => Object.entries(d.vehTypes || {}).forEach(([k, v]) => tot[k] = (tot[k] || 0) + (Number(v) || 0))); const s = vehTypesSummary(tot); return s ? ` · ${s}` : ""; })()}
+        </div>
+      )}
       {days.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>No days yet — add the first one.</div>}
       {days.map((d, i) => (
         <Card key={d.id || i} style={{ background: "#FAFCFB" }}>
@@ -1037,6 +1042,18 @@ function MovePlanModal({ data, enquiry, onClose }) {
           <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
           {linkedJob ? (
             <>
+              <div style={{ fontSize: 12, background: "#EAF4F2", borderRadius: 9, padding: "7px 11px", marginBottom: 10 }}>
+                <span style={{ color: TEAL_D, fontWeight: 700 }}>Planned:</span> <span style={{ color: "#10211E" }}>{d.staffCount ? `${d.staffCount} staff` : "staff —"}{vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : ""}</span>
+                {(() => {
+                  const plannedStaff = Number(d.staffCount) || 0;
+                  const asgStaff = (d.crew || []).length;
+                  const plannedVeh = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+                  const asgVeh = (d.vehicleIds || []).length;
+                  const sc = plannedStaff ? (asgStaff >= plannedStaff ? "#059669" : "#D97706") : "#6B7280";
+                  const vc = plannedVeh ? (asgVeh >= plannedVeh ? "#059669" : "#D97706") : "#6B7280";
+                  return <span style={{ color: "#6B7280", display: "block", marginTop: 2 }}>Assigned: <b style={{ color: sc }}>{asgStaff}{plannedStaff ? `/${plannedStaff}` : ""} staff</b> · <b style={{ color: vc }}>{asgVeh}{plannedVeh ? `/${plannedVeh}` : ""} vehicle{asgVeh !== 1 ? "s" : ""}</b></span>;
+                })()}
+              </div>
               <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew || []} takenIds={bookedOn(d.date, i).crew} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
               <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds || []} takenIds={bookedOn(d.date, i).veh} onToggle={vid => toggleVehId(i, vid)} empty="No vehicles — add under Company." /></Field>
               {!d.date && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: -6, marginBottom: 8 }}>Set a date to see what's already booked that day.</div>}
