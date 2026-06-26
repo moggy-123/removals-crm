@@ -50,6 +50,12 @@ function fmtDateShort(iso) {
   if (isNaN(d)) return iso;
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
+function fmtMonth(ym) {
+  if (!ym) return "";
+  const [y, m] = String(ym).split("-");
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  return `${months[(+m) - 1] || ""} ${y}`.trim();
+}
 function gbp(n) { return "£" + (Number(n) || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
 
 // Compute inventory totals from a list of {cuFt,m3,kg,qty}
@@ -448,7 +454,8 @@ function SectionTitle({ children }) {
 function EnquiriesList({ data, setView, initialFilter }) {
   const [filter, setFilter] = useState(initialFilter || "Open");
   const enquiries = data.enquiries || [];
-  const filters = ["Open", ...ENQUIRY_STATUSES, "All"];
+  const filters = [...ENQUIRY_STATUSES, "All"];
+  const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
   const shown = enquiries
     .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : e.status === filter)
     .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -460,12 +467,18 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <Btn size="sm" onClick={() => setView({ screen: "newEnquiry" })}><Icon name="plus" size={14} /> New</Btn>
       </div>
       <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 6 }}>
-        {filters.map(f => (
-          <button key={f} onClick={() => setFilter(f)} style={{
-            padding: "6px 14px", borderRadius: 99, border: "none", whiteSpace: "nowrap", cursor: "pointer",
-            fontSize: 13, fontWeight: 600, background: filter === f ? TEAL : "#F3F4F6", color: filter === f ? "#fff" : "#6B7280",
-          }}>{f}</button>
-        ))}
+        {filters.map(f => {
+          const active = filter === f;
+          const alert = f === "Surveyed" && surveyedCount > 0;
+          return (
+            <button key={f} onClick={() => setFilter(f)} style={{
+              padding: "6px 14px", borderRadius: 99, border: "none", whiteSpace: "nowrap", cursor: "pointer",
+              fontSize: 13, fontWeight: 600,
+              background: active ? (alert ? "#DC2626" : TEAL) : (alert ? "#FEE2E2" : "#F3F4F6"),
+              color: active ? "#fff" : (alert ? "#DC2626" : "#6B7280"),
+            }}>{f}{alert ? ` ${surveyedCount}` : ""}</button>
+          );
+        })}
       </div>
       {shown.length === 0 && <Empty icon="enquiries" text="No enquiries here" />}
       {shown.map(e => (
@@ -522,13 +535,13 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
   const [customerId, setCustomerId] = useState(e.customerId || "");
   const [newCust, setNewCust] = useState({ name: "", phone: "", email: "" });
   const [f, setF] = useState({
-    preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false,
+    preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false, moveMonth: e.moveMonth || "",
     surveyDate: e.surveyDate || "", surveyTime: e.surveyTime || "",
     fromAddress1: e.fromAddress1 || "", fromAddress2: e.fromAddress2 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
     fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
     toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
     toPropertyType: e.toPropertyType || "", toFloor: e.toFloor || "", toAccess: e.toAccess || "",
-    distanceMiles: e.distanceMiles || "", notes: e.notes || "",
+    notes: e.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
 
@@ -582,6 +595,7 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
 
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date"><Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} /></Field>
+      <Field label="Or month of move" hint="If no exact date is known yet"><Input type="month" value={f.moveMonth} onChange={v => set("moveMonth", v)} /></Field>
       <Field label="Survey date" hint="Shows on the calendar"><Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} /></Field>
       <Field label="Survey time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field>
       <Field label="Dates flexible?">
@@ -589,7 +603,6 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
           <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
         </label>
       </Field>
-      <Field label="Distance (miles)" hint="Used to help price the quote"><Input type="number" value={f.distanceMiles} onChange={v => set("distanceMiles", v)} placeholder="e.g. 12" /></Field>
 
       <SectionTitle>Moving from</SectionTitle>
       {customerId && (f.fromAddress1 || f.fromTown || f.fromPostcode) && (
@@ -869,7 +882,6 @@ function QuoteModal({ data, enquiry, onClose }) {
       {enquiry.volumeCuFt > 0 && (
         <div style={{ background: "#F0FDFA", border: "1px solid #CCFBF1", borderRadius: 10, padding: "10px 12px", marginBottom: 14, fontSize: 13, color: "#0F766E" }}>
           Survey: <b>{enquiry.volumeCuFt} cu ft</b> · {recommendVehicle(enquiry.volumeCuFt).vehicle}
-          {enquiry.distanceMiles ? ` · ${enquiry.distanceMiles} miles` : ""}
         </div>
       )}
 
@@ -992,8 +1004,7 @@ function EnquiryDetail({ data, id, setView }) {
       )}
 
       <Card>
-        <Row label="Move date" value={e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : "TBC"} />
-        <Row label="Distance" value={e.distanceMiles ? `${e.distanceMiles} miles` : ""} />
+        <Row label="Move date" value={e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : (e.moveMonth ? fmtMonth(e.moveMonth) + " (month)" : "TBC")} />
         <Row label="From" value={[e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join(", ")} />
         <Row label="From property" value={[e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.fromFloor].filter(Boolean).join(" · ")} />
         {e.fromAccess && <Row label="From access" value={e.fromAccess} />}
@@ -1215,15 +1226,29 @@ function CustomerDetail({ data, id, setView }) {
       ))}
 
       <SectionTitle>Booked moves</SectionTitle>
-      {jobs.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>None yet.</div>}
-      {jobs.map(j => (
+      {jobs.filter(j => j.status !== "Completed").length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>None yet.</div>}
+      {jobs.filter(j => j.status !== "Completed").sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || "")).map(j => (
         <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 14, color: "#111827" }}>{fmtDate(j.moveDate)} · {gbp(j.price)}</div>
+            <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} · {gbp(j.price)}</div>
             <StatusBadge status={j.status} />
           </div>
         </Card>
       ))}
+
+      {jobs.some(j => j.status === "Completed") && (
+        <>
+          <SectionTitle>Completed moves</SectionTitle>
+          {jobs.filter(j => j.status === "Completed").sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || "")).map(j => (
+            <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} · {gbp(j.price)}</div>
+                <StatusBadge status={j.status} />
+              </div>
+            </Card>
+          ))}
+        </>
+      )}
       {showEdit && <CustomerForm data={data} editCustomer={c} onClose={() => setShowEdit(false)} />}
     </div>
   );
@@ -1231,12 +1256,11 @@ function CustomerDetail({ data, id, setView }) {
 
 // ── Jobs (booked moves) ─────────────────────────────────────────────────────
 function JobsList({ data, setView }) {
-  const [filter, setFilter] = useState("Confirmed");
-  const normStatus = s => (s === "Booked" || s === "In Progress") ? "Confirmed" : s;
+  const [filter, setFilter] = useState("Booked");
   const jobs = (data.jobs || [])
-    .filter(j => filter === "All" ? true : normStatus(j.status) === filter)
+    .filter(j => filter === "All" ? true : filter === "Completed" ? j.status === "Completed" : j.status !== "Completed")
     .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""));
-  const filters = ["Provisional", "Confirmed", "Completed", "All"];
+  const filters = ["Booked", "Completed", "All"];
   return (
     <div>
       <h2 style={{ margin: "0 0 12px", fontSize: 20, fontWeight: 800, color: "#111827" }}>Booked Moves</h2>
@@ -1593,7 +1617,8 @@ function CalendarView({ data, setView }) {
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
   let rangeLabel = "";
-  if (mode==="month") rangeLabel = `${CAL_MON[anchor.getMonth()]} ${anchor.getFullYear()}`;
+  if (mode==="agenda") rangeLabel = "Upcoming";
+  else if (mode==="month") rangeLabel = `${CAL_MON[anchor.getMonth()]} ${anchor.getFullYear()}`;
   else if (mode==="week") { const s=startOfWeek(anchor), e=addDays(s,6); rangeLabel = `${s.getDate()} ${CAL_MON[s.getMonth()].slice(0,3)} – ${e.getDate()} ${CAL_MON[e.getMonth()].slice(0,3)}`; }
   else rangeLabel = `${CAL_DOW[(anchor.getDay()+6)%7]} ${anchor.getDate()} ${CAL_MON[anchor.getMonth()]}`;
 
@@ -1670,7 +1695,7 @@ function CalendarView({ data, setView }) {
           <span style={{ fontSize:17, fontWeight:800, letterSpacing:"-.01em", color:"#10211E" }}>{rangeLabel}</span>
         </div>
         <div style={{ display:"inline-flex", background:"#EEF3F2", borderRadius:11, padding:3, gap:2 }}>
-          {["day","week","month"].map(m => (
+          {["agenda","day","week","month"].map(m => (
             <button key={m} onClick={()=>setMode(m)} style={{ border:"none", background: mode===m?TEAL:"transparent", color: mode===m?"#fff":"#5b6a66", fontWeight:700, fontSize:13, padding:"7px 15px", borderRadius:9, cursor:"pointer", textTransform:"capitalize" }}>{m}</button>
           ))}
         </div>
@@ -1678,6 +1703,29 @@ function CalendarView({ data, setView }) {
 
       {/* Availability chips component (used in Day + Week) */}
 
+
+      {mode==="agenda" && (() => {
+        const startIso = isoOf(today);
+        const items = [];
+        jobs.forEach(j => jobStages(j).forEach(st => { if (st.date && st.date >= startIso) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
+        (data.enquiries||[]).forEach(en => { if (en.surveyDate && en.surveyDate >= startIso && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
+        items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
+        if (!items.length) return <Empty icon="calendar" text="Nothing coming up" />;
+        const groups = [];
+        items.forEach(it => { const g = groups[groups.length-1]; if (g && g.date===it.date) g.items.push(it); else groups.push({ date:it.date, items:[it] }); });
+        return (
+          <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+            {groups.map(g => (
+              <div key={g.date}>
+                <div style={{ fontSize:13, fontWeight:800, color: sameDay(new Date(g.date+"T00:00"),today)?AMBER:"#10211E", marginBottom:8, textTransform:"uppercase", letterSpacing:".04em" }}>{fmtDate(g.date)}{sameDay(new Date(g.date+"T00:00"),today)?" · Today":""}</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {g.items.map((it,ix) => it.type==="survey" ? <SurveyCard key={ix} en={it.en} big /> : <MoveCard key={ix} m={{ job:it.job, stage:it.stage }} big />)}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {mode==="month" && (() => {
         const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
