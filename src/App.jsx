@@ -1026,6 +1026,78 @@ function MovePlanModal({ data, enquiry, onClose }) {
     </Modal>
   );
 }
+const MSG_TPL_KEY = "removals_msg_templates";
+const DEFAULT_TEMPLATES = [
+  { id: "t1", title: "Survey confirmation", body: "Hi {firstname}, confirming our home survey on {survey_date} at {survey_time}. Any problems just reply. Thanks, {company}" },
+  { id: "t2", title: "Quote follow-up", body: "Hi {firstname}, just checking you received our removals quote. Happy to answer any questions or adjust anything. Thanks, {company}" },
+  { id: "t3", title: "Booking confirmation", body: "Hi {firstname}, your move {ref} is booked for {date}. We'll confirm timings nearer the day. Thanks, {company}" },
+  { id: "t4", title: "Deposit request", body: "Hi {firstname}, to secure your move on {date} we take a {deposit} deposit. Let me know and I'll send payment details. Thanks, {company}" },
+  { id: "t5", title: "Day-before reminder", body: "Hi {firstname}, looking forward to your move tomorrow ({date}). Our crew will aim to arrive around {time}. Please have everything ready to go. Thanks, {company}" },
+  { id: "t6", title: "Thank you / review", body: "Hi {firstname}, thanks for choosing {company}! If you have a moment, a quick Google review would mean a lot. Best wishes." },
+];
+function getTemplates() { try { const v = JSON.parse(localStorage.getItem(MSG_TPL_KEY)); if (Array.isArray(v) && v.length) return v; } catch {} return DEFAULT_TEMPLATES; }
+function saveTemplates(list) { localStorage.setItem(MSG_TPL_KEY, JSON.stringify(list)); }
+function getBusinessName() { return localStorage.getItem("removals_business_name") || ""; }
+function fillTemplate(body, ctx) { return (body || "").replace(/\{(\w+)\}/g, (_, k) => (ctx[k] != null && ctx[k] !== "") ? ctx[k] : ""); }
+function waNumber(phone) { let d = (phone || "").replace(/[^\d]/g, ""); if (d.startsWith("0")) d = "44" + d.slice(1); return d; }
+
+function MessageButton({ customer, ctx }) {
+  const [open, setOpen] = useState(false);
+  if (!customer) return null;
+  return (<>
+    <Btn size="sm" variant="grey" onClick={() => setOpen(true)}>💬 Message</Btn>
+    {open && <MessageModal customer={customer} ctx={ctx || {}} onClose={() => setOpen(false)} />}
+  </>);
+}
+function MessageModal({ customer, ctx, onClose }) {
+  const [tpls, setTpls] = useState(getTemplates());
+  const fullCtx = { ...ctx, company: getBusinessName(), name: customer.name || "", firstname: (customer.name || "").trim().split(" ")[0] || "there" };
+  const [sel, setSel] = useState(tpls[0]?.title || "");
+  const cur = tpls.find(t => t.title === sel) || tpls[0];
+  const [text, setText] = useState(cur ? fillTemplate(cur.body, fullCtx) : "");
+  function pick(title) { setSel(title); const t = tpls.find(x => x.title === title); setText(t ? fillTemplate(t.body, fullCtx) : ""); }
+  const enc = encodeURIComponent(text);
+  const phone = customer.phone || "";
+  const email = customer.email || "";
+  function go(u) { window.location.href = u; }
+  function addTpl() {
+    const title = (prompt("Template name?") || "").trim(); if (!title) return;
+    const body = (prompt("Message text. You can use {firstname} {name} {ref} {date} {time} {deposit} {balance} {price} {survey_date} {survey_time} {company}") || "").trim(); if (!body) return;
+    const nl = [...tpls, { id: "t" + uid(), title, body }]; saveTemplates(nl); setTpls(nl); pick(title);
+  }
+  function editTpl() {
+    if (!cur) return;
+    const body = (prompt("Edit message text:", cur.body) || "").trim(); if (!body) return;
+    const nl = tpls.map(t => t.title === cur.title ? { ...t, body } : t); saveTemplates(nl); setTpls(nl); setText(fillTemplate(body, fullCtx));
+  }
+  function delTpl() {
+    if (!cur || !confirm(`Delete template "${cur.title}"?`)) return;
+    const nl = tpls.filter(t => t.title !== cur.title); saveTemplates(nl); setTpls(nl);
+    const first = nl[0]; setSel(first?.title || ""); setText(first ? fillTemplate(first.body, fullCtx) : "");
+  }
+  function setBiz() { const v = (prompt("Your business name (used in messages):", getBusinessName()) || "").trim(); localStorage.setItem("removals_business_name", v); pick(sel); }
+  const linkBtn = { background: "transparent", border: "none", color: TEAL, fontWeight: 600, fontSize: 13, cursor: "pointer", padding: 0 };
+  return (
+    <Modal title={`Message ${customer.name || ""}`} onClose={onClose}>
+      <Field label="Template"><Select value={sel} onChange={pick} options={tpls.map(t => t.title)} placeholder="Choose a message…" /></Field>
+      <Field label="Message">
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={6} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.4 }} />
+      </Field>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+        {phone && <Btn style={{ flex: 1, background: "#25D366", boxShadow: "none" }} onClick={() => go(`https://wa.me/${waNumber(phone)}?text=${enc}`)}>WhatsApp</Btn>}
+        {phone && <Btn style={{ flex: 1 }} variant="grey" onClick={() => go(`sms:${phone}&body=${enc}`)}>Text</Btn>}
+        {email && <Btn style={{ flex: 1 }} variant="grey" onClick={() => go(`mailto:${email}?subject=${encodeURIComponent(cur?.title || "")}&body=${enc}`)}>Email</Btn>}
+      </div>
+      {!phone && !email && <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 6 }}>No phone or email on this customer.</div>}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 4 }}>
+        <button onClick={addTpl} style={linkBtn}>+ New template</button>
+        <button onClick={editTpl} style={linkBtn}>Edit</button>
+        <button onClick={delTpl} style={{ ...linkBtn, color: "#DC2626" }}>Delete</button>
+        <button onClick={setBiz} style={linkBtn}>Business name</button>
+      </div>
+    </Modal>
+  );
+}
 function EnquiryDetail({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
@@ -1100,9 +1172,10 @@ function EnquiryDetail({ data, id, setView }) {
         <StatusBadge status={e.status} />
       </div>
       {customer && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
           {customer.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
           {customer.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
+          <MessageButton customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />
         </div>
       )}
 
@@ -1334,9 +1407,10 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
-      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         {c.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${c.phone}`}>📞 Call</Btn>}
         {c.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${c.email}`}>✉️ Email</Btn>}
+        <MessageButton customer={c} ctx={{}} />
         <Btn size="sm" variant="grey" onClick={() => setShowEdit(true)}><Icon name="edit" size={14} /> Edit</Btn>
         <Btn size="sm" variant="danger" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
       </div>
@@ -1680,6 +1754,7 @@ function JobDetail({ data, id, setView }) {
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
           {customer.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
           {customer.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
+          <MessageButton customer={customer} ctx={{ ref: moveRef(data, j), date: j.moveDate ? fmtDate(j.moveDate) : "", time: (jobStages(j)[0]?.time) || j.startTime || "", price: gbp(j.price), deposit: gbp(j.deposit), balance: gbp((Number(j.price) || 0) - (Number(j.deposit) || 0)) }} />
           {j.enquiryId && <Btn size="sm" variant="grey" onClick={() => setView({ screen: "enquiryDetail", id: j.enquiryId })}>View enquiry</Btn>}
         </div>
       )}
@@ -1768,14 +1843,19 @@ function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"a
 
 function CalendarView({ data, setView }) {
   const [mode, setMode] = useState("week");
+  const [show, setShow] = useState("all");
+  const showMoves = show !== "surveys";
+  const showSurveys = show !== "moves";
   const [anchor, setAnchor] = useState(() => new Date());
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
-  const jobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
-  const surveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost").sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
+  const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
+  const rawSurveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost").sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
+  const jobsOn = d => showMoves ? rawJobsOn(d) : [];
+  const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
-  const bookedVehiclesOn = d => new Set(jobsOn(d).flatMap(m => m.stage.vehicleIds || []));
-  const bookedStaffOn = d => new Set(jobsOn(d).flatMap(m => m.stage.crew || []));
+  const bookedVehiclesOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.vehicleIds || []));
+  const bookedStaffOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.crew || []));
 
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
@@ -1864,14 +1944,20 @@ function CalendarView({ data, setView }) {
         </div>
       </div>
 
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        {[["all","All"],["moves","Moves"],["surveys","Surveys"]].map(([v,label]) => (
+          <button key={v} onClick={()=>setShow(v)} style={{ border:"none", borderRadius:99, padding:"6px 16px", fontSize:13, fontWeight:700, cursor:"pointer", background: show===v?NAVY:"#F1F5F4", color: show===v?"#fff":"#5b6a66" }}>{label}</button>
+        ))}
+      </div>
+
       {/* Availability chips component (used in Day + Week) */}
 
 
       {mode==="agenda" && (() => {
         const startIso = isoOf(today);
         const items = [];
-        jobs.forEach(j => jobStages(j).forEach(st => { if (st.date && st.date >= startIso) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
-        (data.enquiries||[]).forEach(en => { if (en.surveyDate && en.surveyDate >= startIso && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
+        if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (st.date && st.date >= startIso) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
+        if (showSurveys) (data.enquiries||[]).forEach(en => { if (en.surveyDate && en.surveyDate >= startIso && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
         if (!items.length) return <Empty icon="calendar" text="Nothing coming up" />;
         const groups = [];
@@ -2050,7 +2136,10 @@ function sectionFor(screen) {
 
 export default function App() {
   const [data, setData] = useState(loadData);
-  const [view, setViewState] = useState({ screen: "dashboard" });
+  const [view, setViewState] = useState(() => {
+    try { const v = JSON.parse(sessionStorage.getItem("removals_view")); if (v && v.screen) return v; } catch {}
+    return { screen: "dashboard" };
+  });
   const [syncStatus, setSyncStatus] = useState("syncing");
   const device = useDeviceType();
   const wide = device !== "phone";
@@ -2110,7 +2199,7 @@ export default function App() {
     return () => clearInterval(iv);
   }, []);
 
-  const setView = useCallback((v) => { setViewState(v); setData(loadData()); }, []);
+  const setView = useCallback((v) => { try { sessionStorage.setItem("removals_view", JSON.stringify(v)); } catch {} setViewState(v); setData(loadData()); }, []);
 
   const NAV = [
     { id: "dashboard", icon: "dashboard", label: "Dashboard", phone: "Home" },
