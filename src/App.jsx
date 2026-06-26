@@ -480,8 +480,10 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const [filter, setFilter] = useState(initialFilter || "Surveyed");
   const enquiries = data.enquiries || [];
   const filters = [...ENQUIRY_STATUSES, "All"];
+  const moveCompleted = e => (data.jobs || []).some(j => j.enquiryId === e.id && j.status === "Completed");
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
   const shown = enquiries
+    .filter(e => !moveCompleted(e))
     .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : e.status === filter)
     .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 
