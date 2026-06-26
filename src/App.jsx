@@ -1011,8 +1011,8 @@ function MovePlanModal({ data, enquiry, onClose }) {
           <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
           {linkedJob ? (
             <>
-              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew || []} takenIds={[]} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
-              <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds || []} takenIds={[]} onToggle={vid => toggleVehId(i, vid)} empty="No vehicles — add under Company." /></Field>
+              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew || []} takenIds={new Set()} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
+              <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds || []} takenIds={new Set()} onToggle={vid => toggleVehId(i, vid)} empty="No vehicles — add under Company." /></Field>
             </>
           ) : (
             <>
