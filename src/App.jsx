@@ -257,6 +257,20 @@ function Select({ value, onChange, options, placeholder }) {
     </select>
   );
 }
+function DayTypeSelect({ value, onChange }) {
+  const [, force] = useState(0);
+  const opts = Array.from(new Set([...getDayTypes(), ...(value ? [value] : [])]));
+  function addNew() {
+    const t = (window.prompt("New day type (saved to your list for next time):") || "").trim();
+    if (t) { addDayType(t); onChange(t); force(x => x + 1); }
+  }
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+      <div style={{ flex: 1, minWidth: 0 }}><Select value={value} onChange={onChange} options={opts} placeholder="Select day type…" /></div>
+      <button onClick={addNew} title="Add a new day type" style={{ flexShrink: 0, width: 44, borderRadius: 11, border: "1.5px solid #E3E9E8", background: "#F7FAF9", color: TEAL_D, fontSize: 22, fontWeight: 700, cursor: "pointer", lineHeight: 1 }}>+</button>
+    </div>
+  );
+}
 function Btn({ children, onClick, variant = "primary", size = "md", disabled, style: extra, type = "button" }) {
   const base = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 11, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer", border: "none", fontFamily: "inherit", transition: "transform .15s, opacity .15s" };
   const v = {
@@ -541,9 +555,12 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
     fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
     toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
     toPropertyType: e.toPropertyType || "", toFloor: e.toFloor || "", toAccess: e.toAccess || "",
-    notes: e.notes || "",
+    notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const addDay = () => setF(p => ({ ...p, stages: [...(p.stages || []), { id: uid(), type: "Move", date: "", staffCount: "", vehicleCount: "", notes: "" }] }));
+  const removeDay = (i) => setF(p => ({ ...p, stages: p.stages.filter((_, ix) => ix !== i) }));
+  const setDay = (i, k, v) => setF(p => ({ ...p, stages: p.stages.map((d, ix) => ix === i ? { ...d, [k]: v } : d) }));
 
   // When an existing customer is picked, prefill "moving from":
   // their last move's TO address if they've moved before, else their stored address.
@@ -603,6 +620,25 @@ function EnquiryForm({ data, onClose, editEnquiry }) {
           <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
         </label>
       </Field>
+
+      <SectionTitle>Move plan</SectionTitle>
+      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>Scope the days for this move. These carry onto the move and the calendar.</div>
+      {(f.stages || []).map((d, i) => (
+        <Card key={d.id || i} style={{ background: "#FAFCFB" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D }}>Day {i + 1}</div>
+            <button onClick={() => removeDay(i)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 8, width: 30, height: 30, cursor: "pointer" }}>×</button>
+          </div>
+          <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
+          <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}><Field label="Staff"><Input type="number" inputMode="numeric" value={d.staffCount} onChange={v => setDay(i, "staffCount", v)} placeholder="e.g. 3" /></Field></div>
+            <div style={{ flex: 1, minWidth: 0 }}><Field label="Vehicles"><Input type="number" inputMode="numeric" value={d.vehicleCount} onChange={v => setDay(i, "vehicleCount", v)} placeholder="e.g. 2" /></Field></div>
+          </div>
+          <Field label="Notes"><Input value={d.notes} onChange={v => setDay(i, "notes", v)} placeholder="(optional)" /></Field>
+        </Card>
+      ))}
+      <Btn variant="grey" size="sm" onClick={addDay} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>
 
       <SectionTitle>Moving from</SectionTitle>
       {customerId && (f.fromAddress1 || f.fromTown || f.fromPostcode) && (
@@ -944,13 +980,18 @@ function EnquiryDetail({ data, id, setView }) {
   async function markWon() {
     const seq = (data.jobs || []).filter(j => j.customerId === e.customerId).length + 1;
     const jid = uid();
+    const planned = Array.isArray(e.stages) ? e.stages : [];
+    const stages = planned.length
+      ? planned.map(d => ({ id: uid(), type: d.type || "Move", date: d.date || e.preferredDate || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehicleCount: d.vehicleCount || "", notes: d.notes || "" }))
+      : [{ id: uid(), type: "Move", date: e.preferredDate || "", time: "", vehicleIds: [], crew: [], notes: "" }];
     const job = {
       id: jid, customerId: e.customerId, enquiryId: e.id, moveSeq: seq,
-      moveDate: e.preferredDate || "", startTime: "",
+      startTime: "",
       fromAddress1: e.fromAddress1, fromAddress2: e.fromAddress2, fromTown: e.fromTown, fromPostcode: e.fromPostcode, fromAccess: e.fromAccess,
       toAddress1: e.toAddress1, toAddress2: e.toAddress2, toTown: e.toTown, toPostcode: e.toPostcode, toAccess: e.toAccess,
       crew: [], vehicle: "", vehicleIds: [],
-      stages: [{ id: uid(), type: "Move", date: e.preferredDate || "", time: "", vehicleIds: [], crew: [], notes: "" }],
+      stages,
+      moveDate: stages[0]?.date || e.preferredDate || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
       status: "Provisional", notes: "", createdAt: new Date().toISOString(),
@@ -1013,6 +1054,25 @@ function EnquiryDetail({ data, id, setView }) {
         {e.toAccess && <Row label="To access" value={e.toAccess} />}
         {e.notes && <Row label="Notes" value={e.notes} />}
       </Card>
+
+      {Array.isArray(e.stages) && e.stages.length > 0 && (
+        <Card>
+          <div style={{ fontWeight: 700, color: "#111827", marginBottom: 8 }}>Move plan</div>
+          {e.stages.map((d, i) => (
+            <div key={d.id || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: i ? "1px solid #F1F5F4" : "none" }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#10211E" }}>Day {i + 1}: {d.type || "—"}</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                  {d.date ? fmtDate(d.date) : "Date TBC"}
+                  {d.staffCount ? ` · ${d.staffCount} staff` : ""}
+                  {d.vehicleCount ? ` · ${d.vehicleCount} ${d.vehicleCount == 1 ? "vehicle" : "vehicles"}` : ""}
+                </div>
+                {d.notes && <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{d.notes}</div>}
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
 
       {/* Survey */}
       <Card style={{ background: e.volumeCuFt ? "#F0FDFA" : "#fff" }}>
@@ -1417,7 +1477,18 @@ function StaffForm({ data, onClose, editStaff }) {
   );
 }
 
-const STAGE_TYPES = ["Pack", "Load", "Move", "Delivery", "Collection", "Storage", "Other"];
+const DEFAULT_DAY_TYPES = ["Move", "Full Pack", "7 Hour Pack", "Load", "Unload", "Load Travel (Night Out)"];
+const DAYTYPES_KEY = "removals_day_types";
+function getDayTypes() {
+  try { const v = JSON.parse(localStorage.getItem(DAYTYPES_KEY)); if (Array.isArray(v) && v.length) return v; } catch {}
+  return DEFAULT_DAY_TYPES;
+}
+function addDayType(t) {
+  const list = getDayTypes();
+  if (t && !list.includes(t)) { const nl = [...list, t]; localStorage.setItem(DAYTYPES_KEY, JSON.stringify(nl)); return nl; }
+  return list;
+}
+const STAGE_TYPES = DEFAULT_DAY_TYPES;
 // Returns a job's day-stages, synthesising one from legacy single-day fields if needed.
 function jobStages(j) {
   if (Array.isArray(j.stages) && j.stages.length) return j.stages;
@@ -1540,9 +1611,14 @@ function JobDetail({ data, id, setView }) {
         return (
           <Card key={st.id} style={{ background: "#FAFCFB" }}>
             <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 10 }}>
-              <div style={{ flex: 1 }}><Field label="Day"><Select value={st.type} onChange={v => setStage(idx, "type", v)} options={STAGE_TYPES} /></Field></div>
+              <div style={{ flex: 1 }}><Field label="Day"><DayTypeSelect value={st.type} onChange={v => setStage(idx, "type", v)} /></Field></div>
               {f.stages.length > 1 && <button onClick={() => removeStage(idx)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 9, width: 38, height: 38, cursor: "pointer", marginBottom: 14, flexShrink: 0 }}>×</button>}
             </div>
+            {(st.staffCount || st.vehicleCount) && (
+              <div style={{ fontSize: 12, color: TEAL_D, background: "#EAF4F2", borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+                Planned:{st.staffCount ? ` ${st.staffCount} staff` : ""}{st.staffCount && st.vehicleCount ? " ·" : ""}{st.vehicleCount ? ` ${st.vehicleCount} ${st.vehicleCount == 1 ? "vehicle" : "vehicles"}` : ""}
+              </div>
+            )}
             <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
             <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
             <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
