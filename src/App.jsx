@@ -982,6 +982,13 @@ function MovePlanModal({ data, enquiry, onClose }) {
   }));
   const toggleVehId = (i, vid) => setDays(d => d.map((x, ix) => ix === i ? { ...x, vehicleIds: (x.vehicleIds || []).includes(vid) ? x.vehicleIds.filter(z => z !== vid) : [...(x.vehicleIds || []), vid] } : x));
   const toggleCrew = (i, name) => setDays(d => d.map((x, ix) => ix === i ? { ...x, crew: (x.crew || []).includes(name) ? x.crew.filter(z => z !== name) : [...(x.crew || []), name] } : x));
+  function bookedOn(date, exceptIdx) {
+    const veh = new Set(), crew = new Set();
+    if (!date) return { veh, crew };
+    (data.jobs || []).filter(x => !linkedJob || x.id !== linkedJob.id).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    days.forEach((st, ix) => { if (ix !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
+    return { veh, crew };
+  }
   async function save() {
     let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days });
     if (linkedJob) {
@@ -1011,8 +1018,9 @@ function MovePlanModal({ data, enquiry, onClose }) {
           <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
           {linkedJob ? (
             <>
-              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew || []} takenIds={new Set()} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
-              <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds || []} takenIds={new Set()} onToggle={vid => toggleVehId(i, vid)} empty="No vehicles — add under Company." /></Field>
+              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew || []} takenIds={bookedOn(d.date, i).crew} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
+              <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds || []} takenIds={bookedOn(d.date, i).veh} onToggle={vid => toggleVehId(i, vid)} empty="No vehicles — add under Company." /></Field>
+              {!d.date && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: -6, marginBottom: 8 }}>Set a date to see what's already booked that day.</div>}
             </>
           ) : (
             <>
