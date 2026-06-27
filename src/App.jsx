@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase } from "./supabase";
 import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 const DB_KEY = "removals_data";
 const SIG_KEY = "removals_sigs";
@@ -891,6 +892,8 @@ function QuoteModal({ data, enquiry, onClose }) {
     return [{ desc: "Removal service", amount: "" }];
   });
   const [vat, setVat] = useState(enquiry.quoteVat || false);
+  const [extra, setExtra] = useState(enquiry.quoteExtra || {});
+  const setEx = (k, v) => setExtra(p => ({ ...p, [k]: v }));
   const total = quoteTotal(lines, vat);
   const customer = (data.customers || []).find(c => c.id === enquiry.customerId);
 
@@ -903,6 +906,7 @@ function QuoteModal({ data, enquiry, onClose }) {
       ...enquiry,
       quoteLines: lines.filter(l => l.desc || l.amount),
       quoteVat: vat, quoteTotal: total,
+      quoteExtra: extra,
       quoteStatus: status, quoteSentDate: sentDate ?? enquiry.quoteSentDate,
       status: ["Won", "Lost"].includes(enquiry.status) ? enquiry.status : (total > 0 ? "Quoted" : enquiry.status),
     };
@@ -963,6 +967,20 @@ function QuoteModal({ data, enquiry, onClose }) {
       <div style={{ background: NAVY, color: "#fff", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0 14px" }}>
         <span style={{ fontSize: 14, opacity: .85 }}>{vat ? "Total (inc. VAT)" : "Total"}</span>
         <span style={{ fontSize: 22, fontWeight: 800 }}>{gbp(total)}</span>
+      </div>
+
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", margin: "4px 0 8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>MoveProtect & storage (optional — appear on the PDF)</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>MoveProtect charge (not in total)</span>
+        <input style={{ ...inputStyle, width: 100 }} type="number" value={extra.moveProtect || ""} onChange={ev => setEx("moveProtect", ev.target.value)} placeholder="£" />
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>Storage £/container/week (ex VAT)</span>
+        <input style={{ ...inputStyle, width: 100 }} type="number" value={extra.storageWeekly || ""} onChange={ev => setEx("storageWeekly", ev.target.value)} placeholder="£" />
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+        <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>Containers required</span>
+        <input style={{ ...inputStyle, width: 100 }} type="number" value={extra.storageContainers || ""} onChange={ev => setEx("storageContainers", ev.target.value)} placeholder="0" />
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
@@ -1164,127 +1182,96 @@ function MessageModal({ customer, ctx, onClose }) {
   );
 }
 function fmtUK(iso) { if (!iso) return ""; const d = new Date(iso + (iso.length === 10 ? "T00:00" : "")); if (isNaN(d)) return iso; return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`; }
-function QuotePdfView({ data, id, setView }) {
-  const e = (data.enquiries || []).find(x => x.id === id);
-  const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
-  const [surveyor, setSurveyor] = useState(localStorage.getItem("removals_surveyor") || "");
-  if (!e) return <div style={{ padding: 20 }}>Quote not found.</div>;
+function fmtLong(iso) { if (!iso) return ""; const d = new Date(iso + (iso.length === 10 ? "T00:00" : "")); if (isNaN(d)) return iso; return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }); }
+function gbpPlain(n) { return "£" + Number(n || 0).toFixed(2); }
+
+async function buildQuotePdf(e, c) {
+  const surveyor = localStorage.getItem("removals_surveyor") || "";
   const lines = (e.quoteLines || []).filter(l => l.desc || l.amount);
   const subtotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const vatAmt = e.quoteVat ? Math.round(subtotal * 0.2 * 100) / 100 : 0;
   const total = subtotal + vatAmt;
-  const ref = c?.ref || "";
+  const ref = c?.ref ? String(c.ref) : "";
   const fromAddr = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join("  ");
   const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join("  ");
   const surveyWhen = e.surveyDate ? `${fmtUK(e.surveyDate)}${e.surveyTime ? " " + e.surveyTime : ""}` : "";
   const moveWhen = e.preferredDate ? fmtUK(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
+
+  const res = await fetch("/quote-template.pdf");
+  if (!res.ok) throw new Error("Template not found — upload quote-template.pdf to the public folder on GitHub.");
+  const bytes = await res.arrayBuffer();
+  const pdf = await PDFDocument.load(bytes);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const H = 842, black = rgb(0, 0, 0), red = rgb(0.8, 0, 0.05);
+  const p1 = pdf.getPage(0);
+  const L = (x, base, t, s = 9, f = font, col = black) => { if (t == null || t === "") return; p1.drawText(String(t), { x, y: H - base, size: s, font: f, color: col }); };
+  const R = (xr, base, t, s = 9, f = bold) => { if (t == null || t === "") return; const w = f.widthOfTextAtSize(String(t), s); p1.drawText(String(t), { x: xr - w, y: H - base, size: s, font: f, color: black }); };
+
+  L(92, 92.5, surveyor); L(304, 92.5, surveyWhen); L(472, 93, ref, 12, bold, red);
+  L(92, 109, c?.name); L(470, 109, c?.phone);
+  L(92, 126, c?.email); L(304, 126, moveWhen);
+  L(92, 144, fromAddr); L(92, 180, toAddr);
+  const ytops = [212.5, 240.5, 268.5, 296.5];
+  lines.slice(0, 4).forEach((l, i) => { L(33, ytops[i] + 18, l.desc); if (l.amount) R(225, ytops[i] + 18, gbpPlain(l.amount)); });
+  R(225, 343, e.quoteVat ? gbpPlain(vatAmt) : ""); R(225, 371, gbpPlain(total), 9, bold); R(225, 399, "FREE");
+  L(381, 435, `${ref} ${c?.name || ""}`.trim(), 8, bold, red);
+
+  const ex = e.quoteExtra || {};
+  if (Number(ex.moveProtect) > 0) R(225, 427, gbpPlain(ex.moveProtect));
+  if (Number(ex.storageWeekly) > 0) {
+    const sw = Number(ex.storageWeekly), sVat = Math.round(sw * 0.2 * 100) / 100;
+    R(410, 231, gbpPlain(sw)); R(410, 258, gbpPlain(sVat)); R(410, 285, gbpPlain(sw + sVat));
+  }
+  if (Number(ex.storageContainers) > 0) R(410, 312, String(ex.storageContainers));
+
+  if (pdf.getPageCount() > 2) {
+    const p3 = pdf.getPage(2);
+    if (c?.name) p3.drawText(String(c.name), { x: 114, y: H - 84, size: 10, font });
+    if (e.surveyDate) p3.drawText(fmtLong(e.surveyDate), { x: 114, y: H - 131, size: 9, font });
+    if (ref) p3.drawText(ref, { x: 384, y: H - 132, size: 11, font: bold, color: red });
+  }
+
+  const out = await pdf.save();
+  return { bytes: out, ref };
+}
+
+function QuotePdfView({ data, id, setView }) {
+  const e = (data.enquiries || []).find(x => x.id === id);
+  const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
+  const [surveyor, setSurveyor] = useState(localStorage.getItem("removals_surveyor") || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!e) return <div style={{ padding: 20 }}>Quote not found.</div>;
   const saveSurveyor = v => { setSurveyor(v); localStorage.setItem("removals_surveyor", v); };
 
-  const NAVY2 = "#16365C", RED = "#C8102E";
-  const box = { border: "1px solid #222", borderCollapse: "collapse" };
-  const th = { background: "#F0F0F0", fontWeight: 700, fontSize: 11, padding: "3px 6px", border: "1px solid #777", textAlign: "left", verticalAlign: "top" };
-  const td = { fontSize: 11, padding: "3px 6px", border: "1px solid #777", verticalAlign: "top" };
+  const generate = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const { bytes, ref } = await buildQuotePdf(e, c);
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Quote-${ref || "RJ"}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (ex) { setErr(ex.message || "Could not build the PDF."); }
+    setBusy(false);
+  };
 
   return (
-    <div>
-      <style>{`@media print { .no-print { display:none !important; } body * { visibility:hidden; } .quote-sheet, .quote-sheet * { visibility:visible; } .quote-sheet { position:absolute; left:0; top:0; width:100%; margin:0; box-shadow:none; } @page { size:A4; margin:10mm; } }`}</style>
-
-      <div className="no-print" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+    <div style={{ maxWidth: 560, margin: "0 auto" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
         <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiryDetail", id: e.id })}><Icon name="back" size={14} /> Back</Btn>
-        <div style={{ flex: 1, minWidth: 160 }}><Field label="Surveyor"><Input value={surveyor} onChange={saveSurveyor} placeholder="e.g. Matt Williams" /></Field></div>
-        <Btn onClick={() => window.print()}><Icon name="check" size={16} /> Print / Save PDF</Btn>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Quote PDF</div>
       </div>
-
-      <div className="quote-sheet" style={{ background: "#fff", color: "#111", maxWidth: 800, margin: "0 auto", padding: 16, fontFamily: "Arial, sans-serif", lineHeight: 1.25 }}>
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <div style={{ fontWeight: 800, fontSize: 20, color: NAVY2, lineHeight: 1 }}>R&amp;J<span style={{ color: RED }}> REMOVALS</span><div style={{ fontSize: 10, letterSpacing: 3, color: "#444" }}>&amp; STORAGE</div></div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>Quotation</div>
-          <div style={{ textAlign: "right", fontSize: 12, color: NAVY2, fontWeight: 700 }}>Ref<br /><span style={{ fontSize: 18, color: RED }}>{ref}</span></div>
-        </div>
-
-        {/* Info table */}
-        <table style={{ ...box, width: "100%", marginBottom: 8 }} cellSpacing="0">
-          <tbody>
-            <tr><td style={th}>Surveyor</td><td style={td}>{surveyor}</td><td style={th}>Survey Date</td><td style={td}>{surveyWhen}</td><td style={th}>Customer #</td><td style={{ ...td, color: RED, fontWeight: 700 }}>{ref}</td></tr>
-            <tr><td style={th}>Customer</td><td style={td}>{c?.name || ""}</td><td style={th}>Home Phone</td><td style={td}></td><td style={th}>Mobile Phone</td><td style={td}>{c?.phone || ""}</td></tr>
-            <tr><td style={th}>E-mail</td><td style={td}>{c?.email || ""}</td><td style={th}>Move Date</td><td style={td}>{moveWhen}</td><td style={th}>Exchanged</td><td style={td}></td></tr>
-            <tr><td style={th}>Home</td><td style={td} colSpan="5">{fromAddr}</td></tr>
-            <tr><td style={th}>Store</td><td style={td} colSpan="5"></td></tr>
-            <tr><td style={th}>To</td><td style={td} colSpan="5">{toAddr}</td></tr>
-          </tbody>
-        </table>
-
-        {/* Services / notes */}
-        <table style={{ ...box, width: "100%", marginBottom: 8 }} cellSpacing="0">
-          <tbody>
-            <tr>
-              <td style={{ ...td, width: "42%", padding: 0 }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}><tbody>
-                  <tr>
-                    <td style={{ ...td, color: RED, fontWeight: 700, width: "52%" }}>Please tick the services required</td>
-                    <td style={{ ...td, textAlign: "center", width: 22, fontSize: 14, fontWeight: 800 }}>√</td>
-                    <td style={{ ...td, fontWeight: 800 }}>MOVING</td>
-                  </tr>
-                  {(lines.length ? lines : [{ desc: "Removal service", amount: "" }]).map((l, i) => (
-                    <tr key={i}><td style={td}>{l.desc}</td><td style={td}></td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{l.amount ? gbp(l.amount) : ""}</td></tr>
-                  ))}
-                  <tr><td style={{ ...td, fontWeight: 700 }}>Vat @ 20%</td><td style={td}></td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{e.quoteVat ? gbp(vatAmt) : "—"}</td></tr>
-                  <tr><td style={{ ...td, fontWeight: 800 }}>Total</td><td style={td}></td><td style={{ ...td, textAlign: "right", fontWeight: 800 }}>{gbp(total)}</td></tr>
-                  <tr><td style={td}>Late Key Waiver</td><td style={td}></td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>FREE</td></tr>
-                  <tr><td style={td}>MoveProtect <span style={{ fontSize: 9, color: "#555" }}>(not included in total)</span></td><td style={td}></td><td style={{ ...td, textAlign: "right" }}></td></tr>
-                </tbody></table>
-              </td>
-              <td style={{ ...td, width: "20%", verticalAlign: "top" }}>
-                <div style={{ fontWeight: 700, textAlign: "center", marginBottom: 4 }}>STORAGE</div>
-                <div style={{ fontSize: 10, color: "#444" }}>Storage Charges (per container weekly)</div>
-                <div style={{ height: 22 }} /><div style={{ fontSize: 10 }}>Vat @ 20%</div>
-                <div style={{ height: 22 }} /><div style={{ fontSize: 10 }}>Total</div>
-                <div style={{ height: 22 }} /><div style={{ fontSize: 10 }}>Containers Required</div>
-              </td>
-              <td style={{ ...td, width: "38%", fontSize: 10, verticalAlign: "top" }}>
-                <b>PLEASE NOTE:</b>
-                <ol style={{ margin: "2px 0 6px 14px", padding: 0 }}>
-                  <li>All work is carried out subject to our terms and conditions attached.</li>
-                  <li>Our quotation unless previously stated assumes access to your property no later than 2.00pm. Further delays may result in additional charges to cover overtime payments.</li>
-                  <li>Any item stored must be accompanied with a care of address / contact numbers and paid in advance by 4 weeks.</li>
-                </ol>
-                <b style={{ color: RED }}>Late Key Waiver:</b> Late key waiver protects you against charges if your keys are released later than 2.00pm until 5.00pm or charges of £35.00+vat per person per hour will apply from 2.00pm until we have access. If we do not have access by 5.00pm we may have to store your goods and deliver them at the next available date (extra charges will apply).
-                <div style={{ marginTop: 4 }}><b style={{ color: RED }}>Payments:</b> Preferred payment method is by electronic banking. Online payments can be made to HSBC <b>R J Removals Ltd</b> Account Number <b>91611836</b> Sort Code <b>40 14 18</b>. Please use this reference number <b>{ref} {c?.name || ""}</b>.</div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        {/* Notes */}
-        <table style={{ ...box, width: "100%", marginBottom: 8 }} cellSpacing="0"><tbody>
-          <tr><td style={{ ...td, color: RED, fontWeight: 700 }}>Notes:</td></tr>
-          <tr><td style={{ ...td, height: 50, verticalAlign: "top" }}>{e.notes || "Above Cost Includes R&J Dismantle & Reassemble"}</td></tr>
-        </tbody></table>
-
-        {/* Contract terms */}
-        <div style={{ fontSize: 9.5, color: "#222", marginBottom: 8 }}>
-          Our Contract Prices are based on the information provided by You and are subject to the services being carried out under the enclosed Terms and Conditions. Our Quotation is valid for <b>28 days</b> from the quotation date stated above. Under Our standard terms, We accept liability for loss or damage to Your Property caused by Our negligence only up to a maximum of £40 per Item. Please ensure that You carefully read Our Terms and Conditions and MoveProtect Addendum. <b>You must always return a signed Acceptance of Quotation to Us in advance of Our services commencing, whether or not You opt for MoveProtect.</b>
-        </div>
-
-        {/* MoveProtect */}
-        <div style={{ background: "#333", color: "#fff", fontWeight: 700, textAlign: "center", padding: "3px 0", fontSize: 12, marginBottom: 6 }}>MoveProtect</div>
-        <div style={{ fontSize: 9.5, marginBottom: 6 }}>
-          You may request for Us to accept an enhanced liability for Your Property up to Your stated Maximum Replacement Value under MoveProtect, subject to Your agreement to pay additional charges (MoveProtect Charges). Further details can be found in the MoveProtect Addendum. <b>The Example MoveProtect Charges shown below are based on an Estimated Maximum Replacement Value of £25,000. The actual charges are subject to change depending on the actual Maximum Replacement Value You provide on Your Acceptance of Quotation.</b>
-        </div>
-        <table style={{ ...box, width: "100%", marginBottom: 4 }} cellSpacing="0"><tbody>
-          <tr><td style={th}>Example of Move Protect Storage Charges</td><td style={{ ...th, textAlign: "center", width: 110 }}>Rate</td><td style={{ ...th, textAlign: "center", width: 150 }}>Cost plus VAT @ 20%</td></tr>
-          <tr><td style={td}>Storage per week or part thereof based on £25,000 cover</td><td style={{ ...td, textAlign: "center", fontWeight: 700 }}>0.10%</td><td style={{ ...td, textAlign: "center", fontWeight: 700 }}>£25.00</td></tr>
-        </tbody></table>
-        <div style={{ fontSize: 9.5, fontWeight: 700, textAlign: "center", marginBottom: 8 }}>Please refer to paragraph 28 of the enclosed Terms and Conditions for details of Our Cooling-off Period.</div>
-
-        {/* Footer */}
-        <div style={{ fontSize: 10, borderTop: "2px solid #222", paddingTop: 6 }}>
-          <b>Head Office (by appointment only)</b> 28 Northfield Road, St George, Bristol, BS5 8PB<br />
-          <b>Tel: Bristol</b> 0117 9611112 &nbsp; <b>Yate</b> 01454 550873 &nbsp; <b>Email:</b> info@rjremovals.co.uk &nbsp; <b>Web:</b> www.rjremovals.co.uk<br />
-          <b>Company Number</b> 5195967 &nbsp; <b>VAT Number</b> GB 543232864
-        </div>
-      </div>
+      <Card>
+        <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>This fills your R&J quotation template with {c?.name || "the customer"}'s details and quote, then downloads it ready to save or email.</div>
+        <Field label="Surveyor"><Input value={surveyor} onChange={saveSurveyor} placeholder="e.g. Matt Williams" /></Field>
+        <Btn style={{ marginTop: 12 }} disabled={busy} onClick={generate}><Icon name="quote" size={16} /> {busy ? "Building…" : "Create PDF quote"}</Btn>
+        {err ? <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div> : null}
+        <div style={{ marginTop: 14, fontSize: 11.5, color: "#6B7280" }}>On iPad the PDF opens in a preview — use the Share button to Save to Files or email it.</div>
+      </Card>
     </div>
   );
 }
