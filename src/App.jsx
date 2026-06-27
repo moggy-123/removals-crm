@@ -388,10 +388,10 @@ function Dashboard({ data, setView }) {
     <div>
       <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
         <Stat label="Open enquiries" value={open.length} color={TEAL} onClick={() => setView({ screen: "enquiries", filter: "Open" })} />
-        <Stat label="Quotes out" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
+        <Stat label="Quoted" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-        <Stat label="Booked moves" value={jobs.filter(j => j.status !== "Completed").length} color="#2563EB" onClick={() => setView({ screen: "jobs" })} />
+        <Stat label="Booked moves" value={jobs.filter(j => j.status !== "Completed").length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
         <Stat label="Booked this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" />
       </div>
 
@@ -459,7 +459,7 @@ function Dashboard({ data, setView }) {
       <SectionTitle>Upcoming moves</SectionTitle>
       {upcoming.length === 0 && <Empty icon="truck" text="No moves coming up" />}
       {upcoming.map(j => (
-        <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
+        <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
@@ -482,11 +482,15 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const enquiries = data.enquiries || [];
   const filters = [...ENQUIRY_STATUSES, "All"];
   const moveCompleted = e => (data.jobs || []).some(j => j.enquiryId === e.id && j.status === "Completed");
+  const moveOf = e => (data.jobs || []).find(j => j.enquiryId === e.id);
+  const moveDateOf = e => { const j = moveOf(e); return j ? (j.moveDate || (j.stages && j.stages[0] && j.stages[0].date) || "9999-99") : "9999-99"; };
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
   const shown = enquiries
     .filter(e => !moveCompleted(e))
     .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : e.status === filter)
-    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    .sort((a, b) => filter === "Won"
+      ? moveDateOf(a).localeCompare(moveDateOf(b))
+      : (b.createdAt || "").localeCompare(a.createdAt || ""));
 
   return (
     <div>
@@ -516,7 +520,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
               <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, e.customerId)}</div>
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
-                {e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"}
+                {(() => { const j = moveOf(e); const md = j && (j.moveDate || (j.stages && j.stages[0] && j.stages[0].date)); return md ? "Move " + fmtDate(md) : (e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"); })()}
                 {e.volumeCuFt ? ` · ${e.volumeCuFt} cu ft` : ""}
                 {e.quoteTotal ? ` · ${gbp(e.quoteTotal)}` : ""}
               </div>
@@ -1677,7 +1681,7 @@ function CustomerDetail({ data, id, setView }) {
       <SectionTitle>Booked moves</SectionTitle>
       {jobs.filter(j => j.status !== "Completed").length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>None yet.</div>}
       {jobs.filter(j => j.status !== "Completed").sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || "")).map(j => (
-        <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
+        <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} · {gbp(j.price)}</div>
             <StatusBadge status={j.status} />
@@ -1689,7 +1693,7 @@ function CustomerDetail({ data, id, setView }) {
         <>
           <SectionTitle>Completed moves</SectionTitle>
           {jobs.filter(j => j.status === "Completed").sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || "")).map(j => (
-            <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
+            <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} · {gbp(j.price)}</div>
                 <StatusBadge status={j.status} />
@@ -1720,7 +1724,7 @@ function JobsList({ data, setView }) {
       </div>
       {jobs.length === 0 && <Empty icon="truck" text="No moves here" />}
       {jobs.map(j => (
-        <Card key={j.id} onClick={() => setView({ screen: "jobDetail", id: j.id })}>
+        <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontSize: 12, fontWeight: 800, color: TEAL_D }}>{moveRef(data, j)}</div>
@@ -1982,7 +1986,7 @@ function JobDetail({ data, id, setView }) {
     try { await deleteRecord("jobs", j.id); } catch {}
     const d2 = { ...data, jobs: (data.jobs || []).filter(x => x.id !== j.id) };
     localStorage.setItem(DB_KEY, JSON.stringify(d2));
-    SAVING_IN_PROGRESS = false; setView({ screen: "jobs" }); window.location.reload();
+    SAVING_IN_PROGRESS = false; setView({ screen: "enquiries", filter: "Won" }); window.location.reload();
   }
   const balance = (Number(f.price) || 0) - (Number(f.deposit) || 0);
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: v.name }));
@@ -1990,7 +1994,7 @@ function JobDetail({ data, id, setView }) {
 
   return (
     <div>
-      <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "jobs" })}><Icon name="back" size={14} /> Back</Btn>
+      <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiries", filter: "Won" })}><Icon name="back" size={14} /> Back</Btn>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 8px" }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D, letterSpacing: ".02em" }}>{moveRef(data, j)}</div>
@@ -2387,7 +2391,7 @@ function sectionFor(screen) {
 export default function App() {
   const [data, setData] = useState(loadData);
   const [view, setViewState] = useState(() => {
-    try { const v = JSON.parse(sessionStorage.getItem("removals_view")); if (v && v.screen) return v; } catch {}
+    try { const v = JSON.parse(sessionStorage.getItem("removals_view")); if (v && v.screen) { if (v.screen === "jobs" || v.screen === "jobDetail") return { screen: "enquiries", filter: "Won" }; return v; } } catch {}
     return { screen: "dashboard" };
   });
   const [syncStatus, setSyncStatus] = useState("syncing");
@@ -2455,7 +2459,6 @@ export default function App() {
     { id: "dashboard", icon: "dashboard", label: "Dashboard", phone: "Home" },
     { id: "enquiries", icon: "enquiries", label: "Enquiries", phone: "Enquiries" },
     { id: "calendar",  icon: "calendar",  label: "Calendar",  phone: "Calendar" },
-    { id: "jobs",      icon: "jobs",      label: "Moves",     phone: "Moves" },
     { id: "customers", icon: "customers", label: "Customers", phone: "Customers" },
     { id: "company",   icon: "company",   label: "Company",   phone: "Company" },
   ];
