@@ -1249,18 +1249,39 @@ function QuotePdfView({ data, id, setView }) {
   if (!e) return <div style={{ padding: 20 }}>Quote not found.</div>;
   const saveSurveyor = v => { setSurveyor(v); localStorage.setItem("removals_surveyor", v); };
 
-  const generate = async () => {
+  const firstName = (() => { const n = (c?.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim(); return (n.split(/\s+/)[0] || "there"); })();
+  const makeFile = async () => {
+    const { bytes, ref } = await buildQuotePdf(e, c);
+    return { file: new File([bytes], `Quote-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref };
+  };
+  const downloadFile = file => {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a"); a.href = url; a.download = file.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+  const share = async () => {
     setErr(""); setBusy(true);
     try {
-      const { bytes, ref } = await buildQuotePdf(e, c);
-      const blob = new Blob([bytes], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `Quote-${ref || "RJ"}.pdf`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (ex) { setErr(ex.message || "Could not build the PDF."); }
+      const { file, ref } = await makeFile();
+      const text = `Hi ${firstName}, please find your removals quotation attached${ref ? ` (ref ${ref})` : ""}. Any questions just let us know.\n\nR&J Removals & Storage`;
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `Quotation${ref ? " " + ref : ""}`, text });
+      } else { downloadFile(file); }
+    } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
     setBusy(false);
+  };
+  const download = async () => {
+    setErr(""); setBusy(true);
+    try { const { file } = await makeFile(); downloadFile(file); }
+    catch (ex) { setErr(ex.message || "Could not build the PDF."); }
+    setBusy(false);
+  };
+  const emailCustomer = () => {
+    const ref = c?.ref ? String(c.ref) : "";
+    const subject = `Your removals quotation${ref ? ` – ref ${ref}` : ""}`;
+    const body = `Hi ${firstName},\n\nPlease find your removals quotation attached${ref ? ` (ref ${ref})` : ""}. Any questions just let us know.\n\nR&J Removals & Storage`;
+    window.location.href = `mailto:${encodeURIComponent(c?.email || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
   return (
@@ -1270,11 +1291,13 @@ function QuotePdfView({ data, id, setView }) {
         <div style={{ fontWeight: 800, fontSize: 18 }}>Quote PDF</div>
       </div>
       <Card>
-        <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>This fills your R&J quotation template with {c?.name || "the customer"}'s details and quote, then downloads it ready to save or email.</div>
+        <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>This fills your R&J quotation template with {c?.name || "the customer"}'s details and quote, ready to send.</div>
         <Field label="Surveyor"><Input value={surveyor} onChange={saveSurveyor} placeholder="e.g. Matt Williams" /></Field>
-        <Btn style={{ marginTop: 12 }} disabled={busy} onClick={generate}><Icon name="quote" size={16} /> {busy ? "Building…" : "Create PDF quote"}</Btn>
+        <Btn style={{ marginTop: 12 }} disabled={busy} onClick={share}><Icon name="quote" size={16} /> {busy ? "Building…" : "Create & send quote"}</Btn>
+        <Btn variant="grey" style={{ marginTop: 8 }} disabled={busy} onClick={download}><Icon name="quote" size={14} /> Download PDF only</Btn>
+        {c?.email ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> Email {firstName} (pre-addressed)</Btn> : null}
         {err ? <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div> : null}
-        <div style={{ marginTop: 14, fontSize: 11.5, color: "#6B7280" }}>On iPad the PDF opens in a preview — use the Share button to Save to Files or email it.</div>
+        <div style={{ marginTop: 14, fontSize: 11.5, color: "#6B7280" }}>"Create &amp; send" opens the share menu with the PDF attached — pick Mail, Messages or WhatsApp. "Email {firstName}" opens a ready-addressed email; download first, then attach it.</div>
       </Card>
     </div>
   );
