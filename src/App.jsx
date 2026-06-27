@@ -497,7 +497,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
         <Btn size="sm" onClick={() => setView({ screen: "newEnquiry" })}><Icon name="plus" size={14} /> New</Btn>
       </div>
-      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
         {filters.map(f => {
           const active = filter === f;
           const alert = f === "Surveyed" && surveyedCount > 0;
