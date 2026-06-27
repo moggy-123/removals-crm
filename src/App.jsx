@@ -1221,13 +1221,18 @@ function QuotePdfView({ data, id, setView }) {
             <tr>
               <td style={{ ...td, width: "42%", padding: 0 }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}><tbody>
-                  <tr><td style={{ ...td, fontWeight: 700, color: NAVY2 }} colSpan="2">Please tick the services required</td></tr>
+                  <tr>
+                    <td style={{ ...td, color: RED, fontWeight: 700, width: "52%" }}>Please tick the services required</td>
+                    <td style={{ ...td, textAlign: "center", width: 22, fontSize: 14, fontWeight: 800 }}>√</td>
+                    <td style={{ ...td, fontWeight: 800 }}>MOVING</td>
+                  </tr>
                   {(lines.length ? lines : [{ desc: "Removal service", amount: "" }]).map((l, i) => (
-                    <tr key={i}><td style={td}>{l.desc}</td><td style={{ ...td, textAlign: "right", fontWeight: 700, width: 80 }}>{l.amount ? gbp(l.amount) : ""}</td></tr>
+                    <tr key={i}><td style={td}>{l.desc}</td><td style={td}></td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{l.amount ? gbp(l.amount) : ""}</td></tr>
                   ))}
-                  <tr><td style={{ ...td, fontWeight: 700 }}>Vat @ 20%</td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{e.quoteVat ? gbp(vatAmt) : "—"}</td></tr>
-                  <tr><td style={{ ...td, fontWeight: 800 }}>Total</td><td style={{ ...td, textAlign: "right", fontWeight: 800 }}>{gbp(total)}</td></tr>
-                  <tr><td style={td}>Late Key Waiver</td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>FREE</td></tr>
+                  <tr><td style={{ ...td, fontWeight: 700 }}>Vat @ 20%</td><td style={td}></td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{e.quoteVat ? gbp(vatAmt) : "—"}</td></tr>
+                  <tr><td style={{ ...td, fontWeight: 800 }}>Total</td><td style={td}></td><td style={{ ...td, textAlign: "right", fontWeight: 800 }}>{gbp(total)}</td></tr>
+                  <tr><td style={td}>Late Key Waiver</td><td style={td}></td><td style={{ ...td, textAlign: "right", fontWeight: 700 }}>FREE</td></tr>
+                  <tr><td style={td}>MoveProtect <span style={{ fontSize: 9, color: "#555" }}>(not included in total)</span></td><td style={td}></td><td style={{ ...td, textAlign: "right" }}></td></tr>
                 </tbody></table>
               </td>
               <td style={{ ...td, width: "20%", verticalAlign: "top" }}>
@@ -1254,13 +1259,24 @@ function QuotePdfView({ data, id, setView }) {
         {/* Notes */}
         <table style={{ ...box, width: "100%", marginBottom: 8 }} cellSpacing="0"><tbody>
           <tr><td style={{ ...td, color: RED, fontWeight: 700 }}>Notes:</td></tr>
-          <tr><td style={{ ...td, height: 50, verticalAlign: "top" }}>{e.notes || ""}</td></tr>
+          <tr><td style={{ ...td, height: 50, verticalAlign: "top" }}>{e.notes || "Above Cost Includes R&J Dismantle & Reassemble"}</td></tr>
         </tbody></table>
 
         {/* Contract terms */}
         <div style={{ fontSize: 9.5, color: "#222", marginBottom: 8 }}>
           Our Contract Prices are based on the information provided by You and are subject to the services being carried out under the enclosed Terms and Conditions. Our Quotation is valid for <b>28 days</b> from the quotation date stated above. Under Our standard terms, We accept liability for loss or damage to Your Property caused by Our negligence only up to a maximum of £40 per Item. Please ensure that You carefully read Our Terms and Conditions and MoveProtect Addendum. <b>You must always return a signed Acceptance of Quotation to Us in advance of Our services commencing, whether or not You opt for MoveProtect.</b>
         </div>
+
+        {/* MoveProtect */}
+        <div style={{ background: "#333", color: "#fff", fontWeight: 700, textAlign: "center", padding: "3px 0", fontSize: 12, marginBottom: 6 }}>MoveProtect</div>
+        <div style={{ fontSize: 9.5, marginBottom: 6 }}>
+          You may request for Us to accept an enhanced liability for Your Property up to Your stated Maximum Replacement Value under MoveProtect, subject to Your agreement to pay additional charges (MoveProtect Charges). Further details can be found in the MoveProtect Addendum. <b>The Example MoveProtect Charges shown below are based on an Estimated Maximum Replacement Value of £25,000. The actual charges are subject to change depending on the actual Maximum Replacement Value You provide on Your Acceptance of Quotation.</b>
+        </div>
+        <table style={{ ...box, width: "100%", marginBottom: 4 }} cellSpacing="0"><tbody>
+          <tr><td style={th}>Example of Move Protect Storage Charges</td><td style={{ ...th, textAlign: "center", width: 110 }}>Rate</td><td style={{ ...th, textAlign: "center", width: 150 }}>Cost plus VAT @ 20%</td></tr>
+          <tr><td style={td}>Storage per week or part thereof based on £25,000 cover</td><td style={{ ...td, textAlign: "center", fontWeight: 700 }}>0.10%</td><td style={{ ...td, textAlign: "center", fontWeight: 700 }}>£25.00</td></tr>
+        </tbody></table>
+        <div style={{ fontSize: 9.5, fontWeight: 700, textAlign: "center", marginBottom: 8 }}>Please refer to paragraph 28 of the enclosed Terms and Conditions for details of Our Cooling-off Period.</div>
 
         {/* Footer */}
         <div style={{ fontSize: 10, borderTop: "2px solid #222", paddingTop: 6 }}>
