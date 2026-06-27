@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase } from "./supabase";
 import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 const DB_KEY = "removals_data";
 const SIG_KEY = "removals_sigs";
@@ -1190,6 +1189,8 @@ function fmtLong(iso) { if (!iso) return ""; const d = new Date(iso + (iso.lengt
 function gbpPlain(n) { return "£" + Number(n || 0).toFixed(2); }
 
 async function buildQuotePdf(e, c) {
+  const PDFLIB_URL = "https://esm.sh/pdf-lib@1.17.1";
+  const { PDFDocument, StandardFonts, rgb } = await import(/* @vite-ignore */ PDFLIB_URL);
   const surveyor = localStorage.getItem("removals_surveyor") || "";
   const lines = (e.quoteLines || []).filter(l => l.desc || l.amount);
   const subtotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
