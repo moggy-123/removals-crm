@@ -1212,18 +1212,17 @@ async function buildQuotePdf(e, c) {
   L(92, 109, c?.name); L(470, 109, c?.phone);
   L(92, 126, c?.email); L(304, 126, moveWhen);
   L(92, 144, fromAddr); L(92, 180, toAddr);
-  const ytops = [212.5, 240.5, 268.5, 296.5];
-  lines.slice(0, 4).forEach((l, i) => { L(33, ytops[i] + 18, l.desc); if (l.amount) R(225, ytops[i] + 18, gbpPlain(l.amount)); });
-  R(225, 343, e.quoteVat ? gbpPlain(vatAmt) : ""); R(225, 371, gbpPlain(total), 9, bold); R(225, 399, "FREE");
-  L(381, 435, `${ref} ${c?.name || ""}`.trim(), 8, bold, red);
-
+  const ytops = [204, 220, 236, 252];
+  lines.slice(0, 4).forEach((l, i) => { L(30, ytops[i] + 11.5, l.desc); if (l.amount) R(290, ytops[i] + 11.5, gbpPlain(l.amount)); });
+  R(290, 279.5, e.quoteVat ? gbpPlain(vatAmt) : ""); R(290, 295.5, gbpPlain(total), 9, bold); R(290, 311.5, "FREE");
   const ex = e.quoteExtra || {};
-  if (Number(ex.moveProtect) > 0) R(225, 427, gbpPlain(ex.moveProtect));
+  if (Number(ex.moveProtect) > 0) R(290, 327.5, gbpPlain(ex.moveProtect));
   if (Number(ex.storageWeekly) > 0) {
     const sw = Number(ex.storageWeekly), sVat = Math.round(sw * 0.2 * 100) / 100;
-    R(410, 231, gbpPlain(sw)); R(410, 258, gbpPlain(sVat)); R(410, 285, gbpPlain(sw + sVat));
+    R(565, 215.5, gbpPlain(sw)); R(565, 279.5, gbpPlain(sVat)); R(565, 295.5, gbpPlain(sw + sVat), 9, bold);
   }
-  if (Number(ex.storageContainers) > 0) R(410, 312, String(ex.storageContainers));
+  if (Number(ex.storageContainers) > 0) R(565, 311.5, String(ex.storageContainers));
+  L(398, 393, `${ref}${c?.name ? " " + c.name.split(" ").slice(-1)[0] : ""}`, 7, bold, red);
 
   if (pdf.getPageCount() > 2) {
     const p3 = pdf.getPage(2);
