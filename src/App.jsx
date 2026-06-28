@@ -812,6 +812,16 @@ function InventoryModal({ data, enquiry, onClose }) {
   const [search, setSearch] = useState("");
   const [openSection, setOpenSection] = useState(ROOMS[0]);
   const [customItems, setCustomItems] = useState(getCustomItems());
+  const [fhName, setFhName] = useState("");
+  const [fhVol, setFhVol] = useState("");
+  function addFreehand() {
+    const name = fhName.trim();
+    if (!name) return;
+    const cuFt = Math.max(0, parseFloat(fhVol) || 0);
+    const slot = "free_" + uid();
+    setLines(p => ({ ...p, [slot]: { catalogId: null, room: "Free-hand", name, cuFt: Math.round(cuFt * 100) / 100, m3: Math.round(cuFt * 0.0283168 * 1000) / 1000, kg: 0, qty: 1 } }));
+    setFhName(""); setFhVol("");
+  }
 
   const matches = txt => !search || (txt || "").toLowerCase().includes(search.toLowerCase());
 
@@ -946,6 +956,37 @@ function InventoryModal({ data, enquiry, onClose }) {
         ? (!search && <button key="addbed" onClick={addBedroom} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another bedroom</button>)
         : <Section key={s.label} {...s} />
       )}
+
+      {!search && (() => {
+        const freehandLines = Object.entries(lines).filter(([s]) => s.startsWith("free_"));
+        return (
+          <div style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ padding: "12px 14px", background: "#F9FAFB", fontSize: 14, fontWeight: 700, color: "#111827" }}>
+              Free-hand items <span style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 600 }}>· just for this quote</span>
+            </div>
+            <div style={{ padding: "4px 0" }}>
+              {freehandLines.map(([slot, v]) => (
+                <div key={slot} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{v.name}</div>
+                    <div style={{ fontSize: 11, color: "#9CA3AF" }}>{v.cuFt ? `${v.cuFt} cu ft` : "no volume"}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button onClick={() => bump(slot, v, -1)} style={stepBtn(v.qty > 0)}>−</button>
+                    <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700, color: "#111827" }}>{v.qty}</span>
+                    <button onClick={() => bump(slot, v, 1)} style={stepBtn(true)}>+</button>
+                  </div>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: "1px solid #F9FAFB", alignItems: "center" }}>
+                <input style={{ ...inputStyle, flex: 1 }} value={fhName} onChange={ev => setFhName(ev.target.value)} placeholder="Item name" onKeyDown={ev => { if (ev.key === "Enter") addFreehand(); }} />
+                <input style={{ ...inputStyle, width: 78 }} type="number" value={fhVol} onChange={ev => setFhVol(ev.target.value)} placeholder="cu ft" />
+                <button onClick={addFreehand} style={{ background: TEAL, color: "#fff", border: "none", borderRadius: 8, padding: "0 14px", height: 40, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Add</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* sticky totals */}
       <div style={{ position: "sticky", bottom: 0, background: "#fff", paddingTop: 12, marginTop: 8, borderTop: "2px solid #F3F4F6" }}>
