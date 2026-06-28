@@ -352,8 +352,8 @@ function Dashboard({ data, setView }) {
   const wonThisMonth = thisMonthEnq.filter(e => e.status === "Won").length;
   const convRate = thisMonthEnq.length ? Math.round((wonThisMonth / thisMonthEnq.length) * 100) : 0;
   const upcoming = jobs
-    .filter(j => j.status !== "Completed" && j.moveDate && j.moveDate > todayISO())
-    .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""))
+    .filter(j => j.status !== "Completed" && jobMoveDate(j) && jobMoveDate(j) > todayISO())
+    .sort((a, b) => jobMoveDate(a).localeCompare(jobMoveDate(b)))
     .slice(0, 6);
   const followUps = enquiries
     .filter(e => e.followUpDate && !["Won", "Lost"].includes(e.status))
@@ -486,7 +486,7 @@ function Dashboard({ data, setView }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(j.moveDate)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
+              <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(jobMoveDate(j))} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
             </div>
             <StatusBadge status={j.status} />
           </div>
@@ -506,7 +506,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const filters = [...ENQUIRY_STATUSES, "All"];
   const moveCompleted = e => (data.jobs || []).some(j => j.enquiryId === e.id && j.status === "Completed");
   const moveOf = e => (data.jobs || []).find(j => j.enquiryId === e.id);
-  const moveDateOf = e => { const j = moveOf(e); return j ? (j.moveDate || (j.stages && j.stages[0] && j.stages[0].date) || "9999-99") : "9999-99"; };
+  const moveDateOf = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || "9999-99"; };
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
   const shown = enquiries
     .filter(e => !moveCompleted(e))
@@ -548,7 +548,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
               <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, e.customerId)}</div>
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
-                {(() => { const j = moveOf(e); const md = j && (j.moveDate || (j.stages && j.stages[0] && j.stages[0].date)); return md ? "Move " + fmtDate(md) : (e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"); })()}
+                {(() => { const j = moveOf(e); const md = j && jobMoveDate(j); return md ? "Move " + fmtDate(md) : (e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"); })()}
                 {e.volumeCuFt ? ` · ${e.volumeCuFt} cu ft` : ""}
                 {e.quoteTotal ? ` · ${gbp(e.quoteTotal)}` : ""}
               </div>
@@ -2079,6 +2079,12 @@ function jobStages(j) {
   if (Array.isArray(j.stages) && j.stages.length) return j.stages;
   if (j.moveDate) return [{ id: "legacy", type: "Move", date: j.moveDate, time: j.startTime || "", vehicleIds: (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []), crew: j.crew || [], notes: "" }];
   return [];
+}
+// Removal date = earliest day in the move plan (falls back to moveDate if no plan)
+function jobMoveDate(j) {
+  if (!j) return "";
+  const ds = jobStages(j).map(s => s.date).filter(Boolean).sort();
+  return ds[0] || j.moveDate || "";
 }
 // Generic selectable chip row (vehicles or crew). options: [{id,label}]
 function PickChips({ options, selectedIds, takenIds, onToggle, empty }) {
