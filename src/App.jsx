@@ -365,6 +365,9 @@ function Dashboard({ data, setView }) {
   // Availability today
   const todayIso = todayISO();
   const todayStages = jobs.flatMap(j => jobStages(j).filter(st => st.date === todayIso));
+  const todaysMoves = jobs
+    .filter(j => j.status !== "Completed" && (j.moveDate === todayIso || jobStages(j).some(st => st.date === todayIso)))
+    .sort((a, b) => ((jobStages(a).find(st => st.date === todayIso) || {}).time || "").localeCompare((jobStages(b).find(st => st.date === todayIso) || {}).time || ""));
   const bookedVehToday = new Set(todayStages.flatMap(st => st.vehicleIds || []));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
   const vehicles = data.vehicles || [];
@@ -413,6 +416,27 @@ function Dashboard({ data, setView }) {
               </div>
             </Card>
           ))}
+        </>
+      )}
+
+      {todaysMoves.length > 0 && (
+        <>
+          <SectionTitle>Today's moves</SectionTitle>
+          {todaysMoves.map(j => {
+            const stg = jobStages(j).find(st => st.date === todayIso) || {};
+            return (
+              <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{stg.type || "Move"}{stg.time ? ` · ${stg.time}` : ""}</div>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
+                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}</div>
+                  </div>
+                  <StatusBadge status={j.status} />
+                </div>
+              </Card>
+            );
+          })}
         </>
       )}
 
