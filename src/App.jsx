@@ -352,7 +352,7 @@ function Dashboard({ data, setView }) {
   const wonThisMonth = thisMonthEnq.filter(e => e.status === "Won").length;
   const convRate = thisMonthEnq.length ? Math.round((wonThisMonth / thisMonthEnq.length) * 100) : 0;
   const upcoming = jobs
-    .filter(j => j.status !== "Completed" && j.moveDate && j.moveDate >= todayISO())
+    .filter(j => j.status !== "Completed" && j.moveDate && j.moveDate > todayISO())
     .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""))
     .slice(0, 6);
   const followUps = enquiries
