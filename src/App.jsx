@@ -1133,8 +1133,8 @@ function MovePlanModal({ data, enquiry, onClose }) {
   }
   async function save() {
     if (linkedJob) {
-      const incomplete = days.some(d => !(d.crew && d.crew.length) || !(d.vehicleIds && d.vehicleIds.length));
-      if (incomplete && !confirm("Some days don't have staff or a vehicle assigned yet. Save the move plan anyway?")) return;
+      const badDays = days.map((d, i) => (!(d.crew && d.crew.length) || !(d.vehicleIds && d.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+      if (badDays.length) { alert(`Please assign at least one staff member and one vehicle to every day before saving. Still needed on day ${badDays.join(", ")}.`); return; }
     }
     let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days });
     if (linkedJob) {
