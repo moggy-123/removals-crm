@@ -1265,8 +1265,12 @@ async function buildQuotePdf(e, c) {
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const H = 842, black = rgb(0, 0, 0), red = rgb(0.8, 0, 0.05);
   const p1 = pdf.getPage(0);
-  const L = (x, base, t, s = 9, f = font, col = black) => { if (t == null || t === "") return; p1.drawText(String(t), { x, y: H - base, size: s, font: f, color: col }); };
-  const R = (xr, base, t, s = 9, f = bold) => { if (t == null || t === "") return; const w = f.widthOfTextAtSize(String(t), s); p1.drawText(String(t), { x: xr - w, y: H - base, size: s, font: f, color: black }); };
+  const clean = s => String(s == null ? "" : s)
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/[\u2013\u2014\u2212]/g, "-").replace(/\u2026/g, "...").replace(/\u00A0/g, " ")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
+  const L = (x, base, t, s = 9, f = font, col = black) => { const tt = clean(t); if (!tt) return; p1.drawText(tt, { x, y: H - base, size: s, font: f, color: col }); };
+  const R = (xr, base, t, s = 9, f = bold) => { const tt = clean(t); if (!tt) return; const w = f.widthOfTextAtSize(tt, s); p1.drawText(tt, { x: xr - w, y: H - base, size: s, font: f, color: black }); };
 
   L(92, 92.5, surveyor); L(304, 92.5, surveyWhen); L(472, 93, ref, 12, bold, red);
   L(92, 109, c?.name); L(470, 109, c?.phone);
@@ -1288,7 +1292,6 @@ async function buildQuotePdf(e, c) {
     for (let i = 1; i <= rows; i++) hline(x0, x1, 204 + i * rowH);
     vline(x0, 188, bottom); vline(x1, 188, bottom); vline(ax, 204, bottom);
     const mw = bold.widthOfTextAtSize("MOVING", 10);
-    p1.drawText("\u221A", { x: 32, y: yT(200.5), size: 11, font: bold, color: BLACK });
     p1.drawText("MOVING", { x: (x0 + x1) / 2 - mw / 2, y: yT(200.5), size: 10, font: bold, color: BLACK });
     const fs = rowH >= 15 ? 9 : 8;
     const base = t => t + rowH - 4.8;
@@ -1314,9 +1317,9 @@ async function buildQuotePdf(e, c) {
 
   if (pdf.getPageCount() > 2) {
     const p3 = pdf.getPage(2);
-    if (c?.name) p3.drawText(String(c.name), { x: 114, y: H - 84, size: 10, font });
-    if (e.surveyDate) p3.drawText(fmtLong(e.surveyDate), { x: 114, y: H - 131, size: 9, font });
-    if (ref) p3.drawText(ref, { x: 384, y: H - 132, size: 11, font: bold, color: red });
+    if (c?.name) p3.drawText(clean(c.name), { x: 114, y: H - 84, size: 10, font });
+    if (e.surveyDate) p3.drawText(clean(fmtLong(e.surveyDate)), { x: 114, y: H - 131, size: 9, font });
+    if (ref) p3.drawText(clean(ref), { x: 384, y: H - 132, size: 11, font: bold, color: red });
   }
 
   const out = await pdf.save();
