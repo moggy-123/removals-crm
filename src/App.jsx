@@ -352,8 +352,9 @@ function Dashboard({ data, setView }) {
   const wonThisMonth = thisMonthEnq.filter(e => e.status === "Won").length;
   const convRate = thisMonthEnq.length ? Math.round((wonThisMonth / thisMonthEnq.length) * 100) : 0;
   const upcoming = jobs
-    .filter(j => j.status !== "Completed" && jobMoveDate(j) && jobMoveDate(j) > todayISO())
-    .sort((a, b) => jobMoveDate(a).localeCompare(jobMoveDate(b)))
+    .filter(j => j.status !== "Completed")
+    .flatMap(j => jobStages(j).filter(st => st.date && st.date > todayISO()).map(st => ({ j, st })))
+    .sort((a, b) => a.st.date.localeCompare(b.st.date))
     .slice(0, 6);
   const followUps = enquiries
     .filter(e => e.followUpDate && !["Won", "Lost"].includes(e.status))
@@ -481,12 +482,13 @@ function Dashboard({ data, setView }) {
 
       <SectionTitle>Upcoming moves</SectionTitle>
       {upcoming.length === 0 && <Empty icon="truck" text="No moves coming up" />}
-      {upcoming.map(j => (
-        <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
+      {upcoming.map(({ j, st }, ix) => (
+        <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.type || "Move"}{st.time ? ` · ${st.time}` : ""}</div>
               <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(jobMoveDate(j))} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
+              <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(st.date)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
             </div>
             <StatusBadge status={j.status} />
           </div>
@@ -983,7 +985,7 @@ function QuoteModal({ data, enquiry, onClose }) {
     for (let i = 0; i < n; i++) out.push(existing[i] || { desc: (days[i] && days[i].type) || "Move", amount: "" });
     return out;
   });
-  const [vat, setVat] = useState(enquiry.quoteVat || false);
+  const [vat, setVat] = useState((enquiry.quoteLines && enquiry.quoteLines.length) ? !!enquiry.quoteVat : true);
   const [extra, setExtra] = useState(enquiry.quoteExtra || {});
   const setEx = (k, v) => setExtra(p => ({ ...p, [k]: v }));
   const total = quoteTotal(lines, vat);
@@ -1130,6 +1132,10 @@ function MovePlanModal({ data, enquiry, onClose }) {
     return { veh, crew };
   }
   async function save() {
+    if (linkedJob) {
+      const incomplete = days.some(d => !(d.crew && d.crew.length) || !(d.vehicleIds && d.vehicleIds.length));
+      if (incomplete && !confirm("Some days don't have staff or a vehicle assigned yet. Save the move plan anyway?")) return;
+    }
     let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days });
     if (linkedJob) {
       const newStages = days.map((day, i) => {
