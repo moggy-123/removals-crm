@@ -10,14 +10,14 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // ── Field mapping: app (camelCase) <-> db (snake_case) ──────────────────────
 
 const customerToDb = c => ({
-  id: c.id, name: c.name, company: c.company, phone: c.phone, email: c.email,
+  id: c.id, name: c.name, company: c.company, phone: c.phone, home_phone: c.homePhone || "", email: c.email,
   address1: c.address1, address2: c.address2, town: c.town, county: c.county,
   postcode: c.postcode, cust_type: c.custType || "Private", ref: c.ref || null, notes: c.notes,
   updated_at: c.updatedAt || Date.now(),
   created_at: c.createdAt || new Date().toISOString(),
 });
 const customerFromDb = r => ({
-  id: r.id, name: r.name, company: r.company, phone: r.phone, email: r.email,
+  id: r.id, name: r.name, company: r.company, phone: r.phone, homePhone: r.home_phone || "", email: r.email,
   address1: r.address1, address2: r.address2, town: r.town, county: r.county,
   postcode: r.postcode, custType: r.cust_type || "Private", ref: r.ref || null, notes: r.notes,
   updatedAt: r.updated_at, createdAt: r.created_at,
