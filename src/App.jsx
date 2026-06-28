@@ -704,7 +704,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
       <Field label="Survey time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field>
       <Field label="Surveyor">
         <Select value={f.surveyor} onChange={v => set("surveyor", v)} placeholder="Select surveyor…"
-          options={Array.from(new Set([...(data.staff || []).filter(s => s.role === "Surveyor" && s.active !== false).map(s => s.name), f.surveyor].filter(Boolean)))} />
+          options={Array.from(new Set([...(data.staff || []).filter(s => s.role === "Surveyor").map(s => s.name), f.surveyor].filter(Boolean)))} />
       </Field>
       <Field label="Dates flexible?">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
