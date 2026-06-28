@@ -958,6 +958,10 @@ function QuoteModal({ data, enquiry, onClose }) {
   const [extra, setExtra] = useState(enquiry.quoteExtra || {});
   const setEx = (k, v) => setExtra(p => ({ ...p, [k]: v }));
   const total = quoteTotal(lines, vat);
+  const subtotalNet = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const moveProtect = Math.round(subtotalNet * 0.1 * 100) / 100;
+  const [surveyDate, setSurveyDate] = useState(enquiry.surveyDate || "");
+  const [surveyTime, setSurveyTime] = useState(enquiry.surveyTime || "");
   const customer = (data.customers || []).find(c => c.id === enquiry.customerId);
 
   const setLine = (i, k, v) => setLines(p => p.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
@@ -969,7 +973,8 @@ function QuoteModal({ data, enquiry, onClose }) {
       ...enquiry,
       quoteLines: lines.filter(l => l.desc || l.amount),
       quoteVat: vat, quoteTotal: total,
-      quoteExtra: extra,
+      quoteExtra: { ...extra, lateKey: extra.lateKey ?? "FREE" },
+      surveyDate, surveyTime,
       quoteStatus: status, quoteSentDate: sentDate ?? enquiry.quoteSentDate,
       status: ["Won", "Lost"].includes(enquiry.status) ? enquiry.status : (total > 0 ? "Quoted" : enquiry.status),
     };
@@ -1005,6 +1010,11 @@ function QuoteModal({ data, enquiry, onClose }) {
         </div>
       )}
 
+      <div style={{ display: "flex", gap: 10, marginBottom: 6 }}>
+        <div style={{ flex: 1 }}><Field label="Survey date"><Input type="date" value={surveyDate} onChange={setSurveyDate} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Survey time"><Input type="time" value={surveyTime} onChange={setSurveyTime} /></Field></div>
+      </div>
+
       {lines.map((l, i) => (
         <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
           <input style={{ ...inputStyle, flex: 1 }} value={l.desc} onChange={ev => setLine(i, "desc", ev.target.value)} placeholder="Description" />
@@ -1032,10 +1042,17 @@ function QuoteModal({ data, enquiry, onClose }) {
         <span style={{ fontSize: 22, fontWeight: 800 }}>{gbp(total)}</span>
       </div>
 
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", margin: "4px 0 8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>MoveProtect & storage (optional — appear on the PDF)</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", margin: "4px 0 8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Quote extras (appear on the PDF)</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
-        <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>MoveProtect charge (not in total)</span>
-        <input style={{ ...inputStyle, width: 100 }} type="number" value={extra.moveProtect || ""} onChange={ev => setEx("moveProtect", ev.target.value)} placeholder="£" />
+        <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>MoveProtect <span style={{ color: "#9CA3AF" }}>(net × 10%, not in total)</span></span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{gbp(moveProtect)}</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>Late Key Waiver</span>
+        <select style={{ ...inputStyle, width: 110 }} value={extra.lateKey ?? "FREE"} onChange={ev => setEx("lateKey", ev.target.value)}>
+          <option value="FREE">FREE</option>
+          {[80, 100, 120, 140, 160, 180, 200].map(v => <option key={v} value={v}>£{v.toFixed(2)}</option>)}
+        </select>
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
         <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>Storage £/container/week (ex VAT)</span>
@@ -1323,12 +1340,14 @@ async function buildQuotePdf(e, c) {
       L(30, base(t), it.desc, fs); if (it.amount) R(x1 - 4, base(t), gbpPlain(it.amount), fs);
     }
     const vT = 204 + nL * rowH, tT = 204 + (nL + 1) * rowH, lkT = 204 + (nL + 2) * rowH, mpT = 204 + (nL + 3) * rowH;
+    const ex = e.quoteExtra || {};
+    const lk = ex.lateKey, lkText = (lk && lk !== "FREE" && Number(lk) > 0) ? gbpPlain(lk) : "FREE";
+    const mp = Math.round(subtotal * 0.1 * 100) / 100;
     L(30, base(vT), "Vat @ 20%", fs); R(x1 - 4, base(vT), e.quoteVat ? gbpPlain(vatAmt) : "", fs);
     L(30, base(tT), "Total", fs, bold); R(x1 - 4, base(tT), gbpPlain(total), fs, bold);
-    L(30, base(lkT), "Late Key Waiver", fs); R(x1 - 4, base(lkT), "FREE", fs);
+    L(30, base(lkT), "Late Key Waiver", fs); R(x1 - 4, base(lkT), lkText, fs);
     L(30, base(mpT), "MoveProtect (not incl.)", Math.min(fs, 7.5));
-    const ex = e.quoteExtra || {};
-    if (Number(ex.moveProtect) > 0) R(x1 - 4, base(mpT), gbpPlain(ex.moveProtect), fs);
+    if (mp > 0) R(x1 - 4, base(mpT), gbpPlain(mp), fs);
   }
   const ex = e.quoteExtra || {};
   if (Number(ex.storageWeekly) > 0) {
