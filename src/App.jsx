@@ -497,17 +497,22 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
         <Btn size="sm" onClick={() => setView({ screen: "newEnquiry" })}><Icon name="plus" size={14} /> New</Btn>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, background: "#E9EDEC", borderRadius: 14, padding: 4, marginBottom: 12 }}>
         {filters.map(f => {
           const active = filter === f;
           const alert = f === "Surveyed" && surveyedCount > 0;
           return (
             <button key={f} onClick={() => setFilter(f)} style={{
-              padding: "6px 14px", borderRadius: 99, border: "none", whiteSpace: "nowrap", cursor: "pointer",
-              fontSize: 13, fontWeight: 600,
-              background: active ? (alert ? "#DC2626" : TEAL) : (alert ? "#FEE2E2" : "#F3F4F6"),
-              color: active ? "#fff" : (alert ? "#DC2626" : "#6B7280"),
-            }}>{f === "Won" ? "Booked" : f}{alert ? ` ${surveyedCount}` : ""}</button>
+              padding: "9px 4px", borderRadius: 10, border: "none", cursor: "pointer",
+              fontSize: 13.5, fontWeight: active ? 700 : 600, transition: "all .15s",
+              background: active ? "#fff" : "transparent",
+              color: active ? (alert ? "#DC2626" : NAVY) : (alert ? "#DC2626" : "#6B7280"),
+              boxShadow: active ? "0 1px 4px rgba(15,46,42,.12)" : "none",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+            }}>
+              {f === "Won" ? "Booked" : f}
+              {alert ? <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "#DC2626", borderRadius: 99, minWidth: 16, height: 16, lineHeight: "16px", padding: "0 4px", textAlign: "center" }}>{surveyedCount}</span> : null}
+            </button>
           );
         })}
       </div>
@@ -2319,16 +2324,22 @@ function CalendarView({ data, setView, initialDate, initialMode }) {
           <Btn size="sm" variant="grey" onClick={()=>setAnchor(new Date())}>Today</Btn>
           <span style={{ fontSize:17, fontWeight:800, letterSpacing:"-.01em", color:"#10211E" }}>{rangeLabel}</span>
         </div>
-        <div style={{ display:"inline-flex", background:"#EEF3F2", borderRadius:11, padding:3, gap:2 }}>
-          {["agenda","day","week","month"].map(m => (
-            <button key={m} onClick={()=>setMode(m)} style={{ border:"none", background: mode===m?TEAL:"transparent", color: mode===m?"#fff":"#5b6a66", fontWeight:700, fontSize:13, padding:"7px 15px", borderRadius:9, cursor:"pointer", textTransform:"capitalize" }}>{m}</button>
+        <div style={{ display: "inline-flex", background: "#E9EDEC", borderRadius: 12, padding: 4, gap: 3 }}>
+          {["agenda", "day", "week", "month"].map(m => (
+            <button key={m} onClick={() => setMode(m)} style={{ border: "none", background: mode === m ? "#fff" : "transparent", color: mode === m ? TEAL_D : "#6B7280", fontWeight: mode === m ? 700 : 600, fontSize: 13, padding: "7px 13px", borderRadius: 9, cursor: "pointer", textTransform: "capitalize", boxShadow: mode === m ? "0 1px 4px rgba(15,46,42,.12)" : "none" }}>{m}</button>
           ))}
         </div>
       </div>
 
-      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-        {[["all","All"],["moves","Moves"],["surveys","Surveys"]].map(([v,label]) => (
-          <button key={v} onClick={()=>setShow(v)} style={{ border:"none", borderRadius:99, padding:"6px 16px", fontSize:13, fontWeight:700, cursor:"pointer", background: show===v?NAVY:"#F1F5F4", color: show===v?"#fff":"#5b6a66" }}>{label}</button>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, background: "#E9EDEC", borderRadius: 14, padding: 4, marginBottom: 14 }}>
+        {[["all", "All"], ["moves", "Moves"], ["surveys", "Surveys"]].map(([v, label]) => (
+          <button key={v} onClick={() => setShow(v)} style={{
+            border: "none", borderRadius: 10, padding: "9px 4px", fontSize: 13.5, cursor: "pointer",
+            fontWeight: show === v ? 700 : 600, transition: "all .15s",
+            background: show === v ? "#fff" : "transparent",
+            color: show === v ? NAVY : "#6B7280",
+            boxShadow: show === v ? "0 1px 4px rgba(15,46,42,.12)" : "none",
+          }}>{label}</button>
         ))}
       </div>
 
