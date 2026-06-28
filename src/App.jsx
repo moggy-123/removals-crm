@@ -534,7 +534,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
 
 // ── Customer picker (existing or add new inline) ────────────────────────────
 function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
-  const [mode, setMode] = useState(customerId ? "existing" : (data.customers || []).length ? "existing" : "new");
+  const [mode, setMode] = useState(customerId ? "existing" : (newCust && newCust.name) ? "new" : (data.customers || []).length ? "existing" : "new");
   const customers = [...(data.customers || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   return (
     <div style={{ background: "#F9FAFB", borderRadius: 10, padding: 12, marginBottom: 14, border: "1px solid #F3F4F6" }}>
@@ -561,6 +561,30 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
 }
 
 // ── Enquiry form (create / edit) ────────────────────────────────────────────
+function parseEnquiryEmail(text) {
+  const t = (text || "").replace(/\r/g, "");
+  const out = { name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", toAddress1: "", toTown: "", toPostcode: "", preferredDate: "", notes: "" };
+  const PC = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i;
+  const PCG = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/gi;
+  const em = t.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); if (em) out.email = em[0];
+  const ph = t.match(/(\+?44|0)[\d\s()-]{8,13}\d/); if (ph) { let p = ph[0].replace(/[()\s-]/g, ""); if (p.startsWith("+44")) p = "0" + p.slice(3); out.phone = p; }
+  const field = labels => { for (const L of labels) { const m = t.match(new RegExp("^\\s*" + L + "\\s*[:\\-]\\s*(.+)$", "im")); if (m && m[1].trim()) return m[1].trim(); } return ""; };
+  out.name = field(["name", "customer name", "full name", "client name", "contact name", "your name"]);
+  const fromLine = field(["moving from", "move from", "collection address", "collection", "current address", "from address", "pickup", "from"]);
+  const toLine = field(["moving to", "move to", "delivery address", "delivery", "destination", "to address", "drop off", "to"]);
+  const splitPC = line => { if (!line) return ["", ""]; const m = line.match(PC); const pc = m ? m[0].toUpperCase().replace(/\s+/g, " ") : ""; const rest = line.replace(PC, "").replace(/[,\s]+$/, "").trim(); return [rest, pc]; };
+  let [fa, fpc] = splitPC(fromLine); let [ta, tpc] = splitPC(toLine);
+  const allPC = (t.match(PCG) || []).map(s => s.toUpperCase().replace(/\s+/g, " "));
+  out.fromAddress1 = fa; out.toAddress1 = ta;
+  out.fromPostcode = fpc || allPC[0] || ""; out.toPostcode = tpc || allPC[1] || "";
+  out.fromTown = field(["from town", "from city"]); out.toTown = field(["to town", "to city", "destination town"]);
+  const dm = t.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if (dm) { let y = dm[3]; if (y.length === 2) y = "20" + y; out.preferredDate = `${y.padStart(4, "0")}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}`; }
+  if (!out.name && out.email) out.name = out.email.split("@")[0].replace(/[._\-]+/g, " ").replace(/\b\w/g, ch => ch.toUpperCase()).trim();
+  out.notes = t.trim().slice(0, 1500);
+  return out;
+}
+
 function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
   const e = editEnquiry || {};
   const [customerId, setCustomerId] = useState(e.customerId || initialCustomerId || "");
@@ -576,6 +600,22 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [pickerKey, setPickerKey] = useState(0);
+  const autofill = () => {
+    const p = parseEnquiryEmail(pasteText);
+    setNewCust({ name: p.name || "", phone: p.phone || "", email: p.email || "" });
+    setCustomerId("");
+    setF(prev => ({ ...prev,
+      fromAddress1: p.fromAddress1 || prev.fromAddress1, fromTown: p.fromTown || prev.fromTown, fromPostcode: p.fromPostcode || prev.fromPostcode,
+      toAddress1: p.toAddress1 || prev.toAddress1, toTown: p.toTown || prev.toTown, toPostcode: p.toPostcode || prev.toPostcode,
+      preferredDate: p.preferredDate || prev.preferredDate,
+      notes: prev.notes ? prev.notes : p.notes,
+    }));
+    setPickerKey(k => k + 1);
+    setPasteOpen(false);
+  };
 
   // When an existing customer is picked, prefill "moving from":
   // their last move's TO address if they've moved before, else their stored address.
@@ -622,7 +662,17 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     <Modal title={e.id ? "Edit Enquiry" : "New Enquiry"} onClose={onClose}>
       {!e.id && (
         <Field label="Customer" required>
-          <CustomerPicker data={data} customerId={customerId} onPick={selectCustomer} newCust={newCust} setNewCust={setNewCust} />
+          {!pasteOpen
+            ? <Btn size="sm" variant="grey" style={{ marginBottom: 10 }} onClick={() => setPasteOpen(true)}><Icon name="mail" size={14} /> Paste enquiry email to autofill</Btn>
+            : <div style={{ background: "#F9FAFB", border: "1px solid #F3F4F6", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                <div style={{ fontSize: 12.5, color: "#374151", marginBottom: 8 }}>Paste the enquiry email and I'll pull out the name, contact details, postcodes and move date. Check everything before saving.</div>
+                <Textarea value={pasteText} onChange={setPasteText} rows={6} placeholder="Paste the full email here…" />
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <Btn size="sm" variant="grey" onClick={() => setPasteOpen(false)}>Cancel</Btn>
+                  <Btn size="sm" onClick={autofill} disabled={!pasteText.trim()}>Autofill</Btn>
+                </div>
+              </div>}
+          <CustomerPicker key={pickerKey} data={data} customerId={customerId} onPick={selectCustomer} newCust={newCust} setNewCust={setNewCust} />
         </Field>
       )}
 
@@ -891,8 +941,13 @@ const EXTRA_PRESETS = ["Packing service", "Packing materials", "Dismantle / reas
 
 function QuoteModal({ data, enquiry, onClose }) {
   const [lines, setLines] = useState(() => {
-    if (enquiry.quoteLines && enquiry.quoteLines.length) return enquiry.quoteLines;
-    return [{ desc: "Removal service", amount: "" }];
+    const days = enquiry.stages || [];
+    const existing = enquiry.quoteLines || [];
+    const n = Math.max(days.length, existing.length);
+    if (n === 0) return [{ desc: "Removal service", amount: "" }];
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(existing[i] || { desc: (days[i] && days[i].type) || "Move", amount: "" });
+    return out;
   });
   const [vat, setVat] = useState(enquiry.quoteVat || false);
   const [extra, setExtra] = useState(enquiry.quoteExtra || {});
@@ -1217,11 +1272,39 @@ async function buildQuotePdf(e, c) {
   L(92, 109, c?.name); L(470, 109, c?.phone);
   L(92, 126, c?.email); L(304, 126, moveWhen);
   L(92, 144, fromAddr); L(92, 180, toAddr);
-  const ytops = [204, 220, 236, 252];
-  lines.slice(0, 4).forEach((l, i) => { L(30, ytops[i] + 11.5, l.desc); if (l.amount) R(290, ytops[i] + 11.5, gbpPlain(l.amount)); });
-  R(290, 279.5, e.quoteVat ? gbpPlain(vatAmt) : ""); R(290, 295.5, gbpPlain(total), 9, bold); R(290, 311.5, "FREE");
+  // ── MOVING grid: dynamic — one row per quote line, totals directly beneath ──
+  {
+    const GREY = rgb(0.5, 0.5, 0.5), HEADF = rgb(0.93, 0.93, 0.93), WHITE = rgb(1, 1, 1), BLACK = rgb(0, 0, 0);
+    const yT = t => H - t;
+    const hline = (a, b, t) => p1.drawLine({ start: { x: a, y: yT(t) }, end: { x: b, y: yT(t) }, thickness: 0.7, color: GREY });
+    const vline = (x, t1, t2) => p1.drawLine({ start: { x, y: yT(t1) }, end: { x, y: yT(t2) }, thickness: 0.7, color: GREY });
+    const x0 = 27, x1 = 293, ax = 233;
+    p1.drawRectangle({ x: 26.5, y: yT(333), width: 267.5, height: 333 - 187, color: WHITE });
+    const nL = Math.max(1, Math.min(lines.length, 6));
+    const rowH = Math.min(16, (333 - 204) / (nL + 4));
+    const rows = nL + 4, bottom = 204 + rows * rowH;
+    p1.drawRectangle({ x: x0, y: yT(204), width: x1 - x0, height: 16, color: HEADF });
+    hline(x0, x1, 188); hline(x0, x1, 204);
+    for (let i = 1; i <= rows; i++) hline(x0, x1, 204 + i * rowH);
+    vline(x0, 188, bottom); vline(x1, 188, bottom); vline(ax, 204, bottom);
+    const mw = bold.widthOfTextAtSize("MOVING", 10);
+    p1.drawText("\u221A", { x: 32, y: yT(200.5), size: 11, font: bold, color: BLACK });
+    p1.drawText("MOVING", { x: (x0 + x1) / 2 - mw / 2, y: yT(200.5), size: 10, font: bold, color: BLACK });
+    const fs = rowH >= 15 ? 9 : 8;
+    const base = t => t + rowH - 4.8;
+    for (let i = 0; i < nL; i++) {
+      const t = 204 + i * rowH, it = lines[i] || { desc: "", amount: "" };
+      L(30, base(t), it.desc, fs); if (it.amount) R(x1 - 4, base(t), gbpPlain(it.amount), fs);
+    }
+    const vT = 204 + nL * rowH, tT = 204 + (nL + 1) * rowH, lkT = 204 + (nL + 2) * rowH, mpT = 204 + (nL + 3) * rowH;
+    L(30, base(vT), "Vat @ 20%", fs); R(x1 - 4, base(vT), e.quoteVat ? gbpPlain(vatAmt) : "", fs);
+    L(30, base(tT), "Total", fs, bold); R(x1 - 4, base(tT), gbpPlain(total), fs, bold);
+    L(30, base(lkT), "Late Key Waiver", fs); R(x1 - 4, base(lkT), "FREE", fs);
+    L(30, base(mpT), "MoveProtect (not incl.)", Math.min(fs, 7.5));
+    const ex = e.quoteExtra || {};
+    if (Number(ex.moveProtect) > 0) R(x1 - 4, base(mpT), gbpPlain(ex.moveProtect), fs);
+  }
   const ex = e.quoteExtra || {};
-  if (Number(ex.moveProtect) > 0) R(290, 327.5, gbpPlain(ex.moveProtect));
   if (Number(ex.storageWeekly) > 0) {
     const sw = Number(ex.storageWeekly), sVat = Math.round(sw * 0.2 * 100) / 100;
     R(565, 215.5, gbpPlain(sw)); R(565, 279.5, gbpPlain(sVat)); R(565, 295.5, gbpPlain(sw + sVat), 9, bold);
