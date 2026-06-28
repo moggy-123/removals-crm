@@ -603,6 +603,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
     toPropertyType: e.toPropertyType || "", toFloor: e.toFloor || "", toAccess: e.toAccess || "",
     notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
+    surveyor: e.surveyor || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -701,6 +702,10 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
         {(f.surveyDate || f.surveyTime) && <button onClick={() => setF(p => ({ ...p, surveyDate: "", surveyTime: "" }))} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: "4px 0 0" }}>Remove survey date</button>}
       </Field>
       <Field label="Survey time"><Input type="time" value={f.surveyTime} onChange={v => set("surveyTime", v)} /></Field>
+      <Field label="Surveyor">
+        <Select value={f.surveyor} onChange={v => set("surveyor", v)} placeholder="Select surveyor…"
+          options={Array.from(new Set([...(data.staff || []).filter(s => s.role === "Surveyor" && s.active !== false).map(s => s.name), f.surveyor].filter(Boolean)))} />
+      </Field>
       <Field label="Dates flexible?">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
           <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
@@ -1278,7 +1283,7 @@ async function loadPdfLib() {
 
 async function buildQuotePdf(e, c) {
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
-  const surveyor = localStorage.getItem("removals_surveyor") || "";
+  const surveyor = e.surveyor || localStorage.getItem("removals_surveyor") || "";
   const lines = (e.quoteLines || []).filter(l => l.desc || l.amount);
   const subtotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const vatAmt = e.quoteVat ? Math.round(subtotal * 0.2 * 100) / 100 : 0;
@@ -1363,11 +1368,9 @@ async function buildQuotePdf(e, c) {
 function QuotePdfView({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
-  const [surveyor, setSurveyor] = useState(localStorage.getItem("removals_surveyor") || "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   if (!e) return <div style={{ padding: 20 }}>Quote not found.</div>;
-  const saveSurveyor = v => { setSurveyor(v); localStorage.setItem("removals_surveyor", v); };
 
   const firstName = (() => { const n = (c?.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim(); return (n.split(/\s+/)[0] || "there"); })();
   const makeFile = async () => {
@@ -1412,7 +1415,6 @@ function QuotePdfView({ data, id, setView }) {
       </div>
       <Card>
         <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>This fills your R&J quotation template with {c?.name || "the customer"}'s details and quote, ready to send.</div>
-        <Field label="Surveyor"><Input value={surveyor} onChange={saveSurveyor} placeholder="e.g. Matt Williams" /></Field>
         <Btn style={{ marginTop: 12 }} disabled={busy} onClick={share}><Icon name="quote" size={16} /> {busy ? "Building…" : "Create & send quote"}</Btn>
         <Btn variant="grey" style={{ marginTop: 8 }} disabled={busy} onClick={download}><Icon name="quote" size={14} /> Download PDF only</Btn>
         {c?.email ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> Email {firstName} (pre-addressed)</Btn> : null}
@@ -1894,7 +1896,7 @@ function vehicleColor(data, vehicleId) {
   return idx >= 0 ? VEHICLE_COLORS[idx % VEHICLE_COLORS.length] : "#94A4A0";
 }
 const VEHICLE_TYPES = ["Small Van (SWB)", "Medium Van (LWB)", "Luton Van", "7.5 Tonne Lorry", "18 Tonne Lorry", "Other"];
-const STAFF_ROLES = ["Driver", "Porter", "Packer", "Driver / Porter", "Owner", "Office"];
+const STAFF_ROLES = ["Driver", "Porter", "Packer", "Driver / Porter", "Surveyor", "Owner", "Office"];
 
 function CompanyView({ data, setView }) {
   const [vForm, setVForm] = useState(null);   // null | {} | record
