@@ -1243,9 +1243,27 @@ function fmtUK(iso) { if (!iso) return ""; const d = new Date(iso + (iso.length 
 function fmtLong(iso) { if (!iso) return ""; const d = new Date(iso + (iso.length === 10 ? "T00:00" : "")); if (isNaN(d)) return iso; return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }); }
 function gbpPlain(n) { return "£" + Number(n || 0).toFixed(2); }
 
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src; s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("load failed"));
+    document.body.appendChild(s);
+  });
+}
+async function loadPdfLib() {
+  if (window.PDFLib) return window.PDFLib;
+  const urls = [
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js",
+    "https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js",
+  ];
+  for (const u of urls) { try { await loadScript(u); if (window.PDFLib) return window.PDFLib; } catch (_e) { /* try next */ } }
+  throw new Error("Could not load the PDF library — check your internet connection and try again.");
+}
+
 async function buildQuotePdf(e, c) {
-  const PDFLIB_URL = "https://esm.sh/pdf-lib@1.17.1";
-  const { PDFDocument, StandardFonts, rgb } = await import(/* @vite-ignore */ PDFLIB_URL);
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
   const surveyor = localStorage.getItem("removals_surveyor") || "";
   const lines = (e.quoteLines || []).filter(l => l.desc || l.amount);
   const subtotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
