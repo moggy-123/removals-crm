@@ -556,7 +556,7 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
         <div>
           <Input value={newCust.name} onChange={v => setNewCust({ ...newCust, name: v })} placeholder="Full name *" />
           <div style={{ height: 8 }} />
-          <Input value={newCust.phone} onChange={v => setNewCust({ ...newCust, phone: v })} placeholder="Phone" />
+          <Input value={newCust.phone} onChange={v => setNewCust({ ...newCust, phone: v })} placeholder="Mobile phone" />
           <div style={{ height: 8 }} />
           <Input value={newCust.email} onChange={v => setNewCust({ ...newCust, email: v })} placeholder="Email" type="email" />
         </div>
@@ -960,8 +960,6 @@ function QuoteModal({ data, enquiry, onClose }) {
   const total = quoteTotal(lines, vat);
   const subtotalNet = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const moveProtect = Math.round(subtotalNet * 0.1 * 100) / 100;
-  const [surveyDate, setSurveyDate] = useState(enquiry.surveyDate || "");
-  const [surveyTime, setSurveyTime] = useState(enquiry.surveyTime || "");
   const customer = (data.customers || []).find(c => c.id === enquiry.customerId);
 
   const setLine = (i, k, v) => setLines(p => p.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
@@ -974,7 +972,6 @@ function QuoteModal({ data, enquiry, onClose }) {
       quoteLines: lines.filter(l => l.desc || l.amount),
       quoteVat: vat, quoteTotal: total,
       quoteExtra: { ...extra, lateKey: extra.lateKey ?? "FREE" },
-      surveyDate, surveyTime,
       quoteStatus: status, quoteSentDate: sentDate ?? enquiry.quoteSentDate,
       status: ["Won", "Lost"].includes(enquiry.status) ? enquiry.status : (total > 0 ? "Quoted" : enquiry.status),
     };
@@ -1009,11 +1006,6 @@ function QuoteModal({ data, enquiry, onClose }) {
           Survey: <b>{enquiry.volumeCuFt} cu ft</b> · {recommendVehicle(enquiry.volumeCuFt).vehicle}
         </div>
       )}
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 6 }}>
-        <div style={{ flex: 1 }}><Field label="Survey date"><Input type="date" value={surveyDate} onChange={setSurveyDate} /></Field></div>
-        <div style={{ flex: 1 }}><Field label="Survey time"><Input type="time" value={surveyTime} onChange={setSurveyTime} /></Field></div>
-      </div>
 
       {lines.map((l, i) => (
         <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
@@ -1313,7 +1305,7 @@ async function buildQuotePdf(e, c) {
   const R = (xr, base, t, s = 9, f = bold) => { const tt = clean(t); if (!tt) return; const w = f.widthOfTextAtSize(tt, s); p1.drawText(tt, { x: xr - w, y: H - base, size: s, font: f, color: black }); };
 
   L(92, 92.5, surveyor); L(304, 92.5, surveyWhen); L(472, 93, ref, 12, bold, red);
-  L(92, 109, c?.name); L(470, 109, c?.phone);
+  L(92, 109, c?.name); L(304, 109, c?.homePhone); L(470, 109, c?.phone);
   L(92, 126, c?.email); L(304, 126, moveWhen);
   L(92, 144, fromAddr); L(92, 180, toAddr);
   // ── MOVING grid: dynamic — one row per quote line, totals directly beneath ──
@@ -1746,7 +1738,7 @@ function CustomersList({ data, setView }) {
 function CustomerForm({ data, onClose, editCustomer }) {
   const c = editCustomer || {};
   const [f, setF] = useState({
-    name: c.name || "", company: c.company || "", phone: c.phone || "", email: c.email || "",
+    name: c.name || "", company: c.company || "", phone: c.phone || "", homePhone: c.homePhone || "", email: c.email || "",
     address1: c.address1 || "", address2: c.address2 || "", town: c.town || "", county: c.county || "", postcode: c.postcode || "",
     custType: c.custType || "Private", notes: c.notes || "",
   });
@@ -1763,9 +1755,10 @@ function CustomerForm({ data, onClose, editCustomer }) {
       <Field label="Type"><Select value={f.custType} onChange={v => set("custType", v)} options={["Private", "Commercial"]} /></Field>
       {f.custType === "Commercial" && <Field label="Company"><Input value={f.company} onChange={v => set("company", v)} /></Field>}
       <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Phone"><Input value={f.phone} onChange={v => set("phone", v)} /></Field></div>
-        <div style={{ flex: 1 }}><Field label="Email"><Input type="email" value={f.email} onChange={v => set("email", v)} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Mobile phone"><Input value={f.phone} onChange={v => set("phone", v)} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Home phone"><Input value={f.homePhone} onChange={v => set("homePhone", v)} /></Field></div>
       </div>
+      <Field label="Email"><Input type="email" value={f.email} onChange={v => set("email", v)} /></Field>
       <Field label="Address"><Input value={f.address1} onChange={v => set("address1", v)} /></Field>
       <Field label="Address line 2"><Input value={f.address2} onChange={v => set("address2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
@@ -1805,7 +1798,8 @@ function CustomerDetail({ data, id, setView }) {
       </div>
       <Card>
         {c.ref && <Row label="Reference" value={`#${c.ref}`} />}
-        <Row label="Phone" value={c.phone} />
+        <Row label="Mobile" value={c.phone} />
+        {c.homePhone && <Row label="Home phone" value={c.homePhone} />}
         <Row label="Email" value={c.email} />
         {c.company && <Row label="Company" value={c.company} />}
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
