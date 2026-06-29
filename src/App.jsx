@@ -372,6 +372,9 @@ function Dashboard({ data, setView }) {
     .sort((a, b) => ((jobStages(a).find(st => st.date === todayIso) || {}).time || "").localeCompare((jobStages(b).find(st => st.date === todayIso) || {}).time || ""));
   const bookedVehToday = new Set(todayStages.flatMap(st => st.vehicleIds || []));
   const todaysMovesList = todaysMoves.map(j => ({ j, st: jobStages(j).find(s => s.date === todayIso) || {} }));
+  const upcomingSurveys = enquiries
+    .filter(e => e.surveyDate && e.status !== "Lost" && e.surveyDate >= todayIso)
+    .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
   const vehicles = data.vehicles || [];
   const staffActive = (data.staff || []).filter(s => s.active !== false);
@@ -409,9 +412,9 @@ function Dashboard({ data, setView }) {
         <Btn variant={dashShow === "moves" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")}><Icon name="truck" size={15} /> Moves</Btn>
       </div>
 
-      {dashShow === "surveys" && (
+      {dashShow !== "moves" && (
         <div style={{ marginBottom: 18 }}>
-          {todaysSurveys.length === 0 ? <Empty icon="calendar" text="No surveys today" /> : todaysSurveys.map(e => (
+          {upcomingSurveys.length === 0 ? <Empty icon="calendar" text="No upcoming surveys" /> : upcomingSurveys.map(e => (
             <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -2177,7 +2180,7 @@ function vehicleColor(data, vehicleId) {
   const idx = list.findIndex(v => v.id === vehicleId);
   return idx >= 0 ? VEHICLE_COLORS[idx % VEHICLE_COLORS.length] : "#94A4A0";
 }
-const VEHICLE_TYPES = ["Small Van (SWB)", "Medium Van (LWB)", "Luton Van", "7.5 Tonne Lorry", "18 Tonne Lorry", "Other"];
+const VEHICLE_TYPES = ["18t", "7.5t", "3.5t", "Van"];
 const STAFF_ROLES = ["Driver", "Porter", "Packer", "Driver / Porter", "Surveyor", "Owner", "Office"];
 
 function CompanyView({ data, setView }) {
