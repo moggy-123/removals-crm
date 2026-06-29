@@ -662,6 +662,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     toPropertyType: e.toPropertyType || "", toFloor: e.toFloor || "", toAccess: e.toAccess || "",
     notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
     surveyor: e.surveyor || "",
+    exchanged: e.exchanged || false,
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -700,6 +701,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     let data2 = data;
     let cid = customerId;
     if (!e.id && !f.surveyDate) { alert("Please set a survey date for this enquiry."); return; }
+    if (f.exchanged && !f.preferredDate) { alert("This move is marked as exchanged — please set the confirmed move date."); return; }
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
       cid = uid();
@@ -764,11 +766,19 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
         <Select value={f.surveyor} onChange={v => set("surveyor", v)} placeholder="Select surveyor…"
           options={Array.from(new Set([...(data.staff || []).filter(s => s.role === "Surveyor").map(s => s.name), f.surveyor].filter(Boolean)))} />
       </Field>
-      <Field label="Dates flexible?">
+      <Field label="Exchanged?">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
-          <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
+          <input type="checkbox" checked={f.exchanged} onChange={ev => setF(p => ({ ...p, exchanged: ev.target.checked, dateFlexible: ev.target.checked ? false : p.dateFlexible }))} style={{ width: 18, height: 18 }} /> Contracts exchanged — move date confirmed
         </label>
+        {f.exchanged && !f.preferredDate && <div style={{ fontSize: 12, color: "#DC2626", marginTop: 6 }}>Set the confirmed move date above.</div>}
       </Field>
+      {!f.exchanged && (
+        <Field label="Dates flexible?">
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
+            <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
+          </label>
+        </Field>
+      )}
 
       <SectionTitle>Moving from</SectionTitle>
       {customerId && (f.fromAddress1 || f.fromTown || f.fromPostcode) && (
@@ -1412,8 +1422,8 @@ async function buildQuotePdf(e, c) {
   const ref = c?.ref ? String(c.ref) : "";
   const fromAddr = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join("  ");
   const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join("  ");
-  const surveyWhen = e.surveyDate ? `${fmtUK(e.surveyDate)}${e.surveyTime ? " " + e.surveyTime : ""}` : "";
-  const moveWhen = e.preferredDate ? fmtUK(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
+  const surveyWhen = e.surveyDate ? fmtUK(e.surveyDate) : "";
+  const moveWhen = e.preferredDate ? (fmtUK(e.preferredDate) + (e.exchanged ? "  (Exchanged)" : "")) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
 
   const res = await fetch("/quote-template.pdf");
   if (!res.ok) throw new Error("Template not found — upload quote-template.pdf to the public folder on GitHub.");
@@ -1516,6 +1526,7 @@ async function buildQuotePdf(e, c) {
     const p3 = pdf.getPage(2);
     const WHITE = rgb(1, 1, 1), BLK = rgb(0, 0, 0), GREY80 = rgb(0.8, 0.8, 0.8);
     if (c?.name) p3.drawText(clean(c.name), { x: 114, y: H - 84, size: 10, font });
+    if (fromAddr) p3.drawText(clean(fromAddr), { x: 114, y: H - 108, size: 9, font });
     if (e.surveyDate) p3.drawText(clean(fmtLong(e.surveyDate)), { x: 114, y: H - 131, size: 9, font });
     // remove the old grey Reference cell from the survey-date row
     p3.drawRectangle({ x: 301, y: H - 139, width: 77, height: 22, color: WHITE });
@@ -1526,8 +1537,8 @@ async function buildQuotePdf(e, c) {
     pln(rbL, rbT, rbL, rbB); pln(rbR, rbT, rbR, rbB); pln(rbL, rbT, rbR, rbT); pln(rbL, rbB, rbR, rbB);
     const rtw = bold.widthOfTextAtSize("Reference", 9);
     p3.drawText("Reference", { x: (rbL + rbR) / 2 - rtw / 2, y: H - 84, size: 9, font: bold, color: BLK });
-    // reference number + surname on the top line, right of the grey box
-    const accRef = `${ref}${c?.name ? " " + c.name.split(" ").slice(-1)[0] : ""}`.trim();
+    // reference number only on the top line, right of the grey box
+    const accRef = ref || "";
     if (accRef) { const aw = bold.widthOfTextAtSize(clean(accRef), 11); p3.drawText(clean(accRef), { x: 561 - aw, y: H - 84, size: 11, font: bold, color: red }); }
   }
 
