@@ -788,7 +788,7 @@ function InventoryModal({ data, enquiry, onClose }) {
     const out = {};
     (enquiry.inventory || []).forEach(it => {
       if (it.slot) {                       // new format
-        out[it.slot] = { catalogId: it.catalogId ?? null, room: it.room, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg, qty: it.qty };
+        out[it.slot] = { catalogId: it.catalogId ?? null, room: it.room, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg, qty: it.qty, notMoving: !!it.notMoving, dismantle: it.dismantle || "" };
       } else {                             // old format → migrate
         const label = it.room === "Bedroom" ? "Bedroom 1" : it.room;
         const slot = `${label}::${it.id}`;
@@ -854,12 +854,26 @@ function InventoryModal({ data, enquiry, onClose }) {
     setLines(p => { const n = { ...p }; Object.keys(n).forEach(s => { if (n[s].room === label) delete n[s]; }); return n; });
   }
 
-  const totals = inventoryTotals(Object.values(lines).map(v => ({ cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty })));
+  const totals = inventoryTotals(Object.values(lines).filter(v => !v.notMoving).map(v => ({ cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty })));
+  const toggleNotMoving = slot => setLines(p => p[slot] ? { ...p, [slot]: { ...p[slot], notMoving: !p[slot].notMoving } } : p);
+  const cycleDismantle = slot => setLines(p => { if (!p[slot]) return p; const cur = p[slot].dismantle || ""; const nxt = cur === "" ? "Mover" : cur === "Mover" ? "Customer" : ""; return { ...p, [slot]: { ...p[slot], dismantle: nxt } }; });
+  const AnnotChips = ({ slot }) => {
+    const v = lines[slot];
+    if (!v || !v.qty) return null;
+    const dis = v.dismantle || "";
+    const chip = (active, color, onClick, txt) => <button onClick={onClick} style={{ border: active ? "none" : "1px solid #E3E9E8", background: active ? color : "#fff", color: active ? "#fff" : "#6B7280", borderRadius: 99, fontSize: 11, fontWeight: 700, padding: "3px 9px", cursor: "pointer", marginRight: 6, marginTop: 6 }}>{txt}</button>;
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap" }}>
+        {chip(!!v.notMoving, "#DC2626", () => toggleNotMoving(slot), v.notMoving ? "✕ Not moving" : "Not moving")}
+        {chip(!!dis, TEAL, () => cycleDismantle(slot), dis ? `Dismantle: ${dis}` : "Dismantle")}
+      </div>
+    );
+  };
   const rec = recommendVehicle(totals.cuFt);
 
   async function save() {
     const inventory = Object.entries(lines).filter(([, v]) => v.qty > 0)
-      .map(([slot, v]) => ({ slot, catalogId: v.catalogId ?? null, room: v.room, name: v.name, cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty }));
+      .map(([slot, v]) => ({ slot, catalogId: v.catalogId ?? null, room: v.room, name: v.name, cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty, notMoving: !!v.notMoving, dismantle: v.dismantle || "" }));
     const rec2 = {
       ...enquiry, inventory,
       volumeCuFt: totals.cuFt, volumeM3: totals.m3, weightKg: totals.kg,
@@ -921,20 +935,22 @@ function InventoryModal({ data, enquiry, onClose }) {
               const slot = `${label}::${it.id}`;
               const isCustom = typeof it.id === "string" && it.id.startsWith("cust_");
               return (
-                <div key={slot} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{it.name}{isCustom && <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}> · custom</span>}</div>
+                <div key={slot} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+                  <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: lines[slot]?.notMoving ? "#9CA3AF" : "#111827", textDecoration: lines[slot]?.notMoving ? "line-through" : "none" }}>{it.name}{isCustom && <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}> · custom</span>}</div>
                     <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg{isCustom && <span onClick={() => deleteCustomItem(it.id)} style={{ color: "#DC2626", fontWeight: 600, marginLeft: 8, cursor: "pointer" }}>remove from list</span>}</div>
+                    <AnnotChips slot={slot} />
                   </div>
                   <Stepper slot={slot} meta={{ catalogId: it.id, room: label, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg }} />
                 </div>
               );
             })}
             {customSlots.map(([slot, v]) => (
-              <div key={slot} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{v.name} <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}>· custom</span></div>
+              <div key={slot} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+                <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: v.notMoving ? "#9CA3AF" : "#111827", textDecoration: v.notMoving ? "line-through" : "none" }}>{v.name} <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}>· custom</span></div>
                   <div style={{ fontSize: 11, color: "#9CA3AF" }}>{v.cuFt} cu ft · {v.kg} kg</div>
+                  <AnnotChips slot={slot} />
                 </div>
                 <Stepper slot={slot} meta={v} />
               </div>
@@ -1524,8 +1540,18 @@ async function buildSurveyPdf(e, c, data) {
     const order = [], idx = {};
     inv.forEach(it => { const r = it.room || "Other"; if (!(r in idx)) { idx[r] = order.length; order.push([r, []]); } order[idx[r]][1].push(it); });
     order.forEach(([room, items]) => {
+      const moving = items.filter(it => !it.notMoving), staying = items.filter(it => it.notMoving);
       ensure(20); at(room, M, y, 10, bold, navy); y -= 14;
-      items.forEach(it => { ensure(13); at(`${it.qty} x ${it.name}`, M + 10, y, 9.5, font, navy); y -= 13; });
+      moving.forEach(it => {
+        ensure(13);
+        let t = `${it.qty} x ${it.name}`;
+        if (it.dismantle) t += `   (dismantle & reassemble: ${it.dismantle})`;
+        at(t, M + 10, y, 9.5, font, navy); y -= 13;
+      });
+      if (staying.length) {
+        ensure(13); at("Not moving:", M + 10, y, 9, bold, grey); y -= 12;
+        staying.forEach(it => { ensure(12); at(`-  ${it.qty} x ${it.name}`, M + 18, y, 9, font, grey); y -= 12; });
+      }
       y -= 4;
     });
     ensure(18); page.drawLine({ start: { x: M, y: y + 4 }, end: { x: W - M, y: y + 4 }, thickness: 0.6, color: grey });
