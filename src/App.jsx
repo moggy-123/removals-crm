@@ -1488,6 +1488,8 @@ async function buildQuotePdf(e, c) {
     L(sx0 + 4, base(vT), "Vat @ 20%", fs); if (sweek > 0) R(sx1 - 4, base(vT), gbpPlain(sVat), fs);
     L(sx0 + 4, base(tT), "Total", fs, bold); if (sweek > 0) R(sx1 - 4, base(tT), gbpPlain(sweek + sVat), fs, bold);
     L(sx0 + 4, base(lkT), "Containers Required", fs); if (sCont > 0) R(sx1 - 4, base(lkT), String(sCont), fs);
+    L(sx0 + 4, base(mpT), "Estimated weekly storage cost", fs, bold);
+    if (sweek > 0 && sCont > 0) R(sx1 - 4, base(mpT), gbpPlain(sCont * (sweek + sVat)), fs, bold);
   }
   // Ref + surname placed right after "...use this reference number:"
   L(476, 378, `${ref}${c?.name ? " " + c.name.split(" ").slice(-1)[0] : ""}`, 8, bold, red);
