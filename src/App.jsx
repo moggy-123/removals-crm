@@ -344,6 +344,7 @@ function autoCompletePastMoves(d) {
 function Dashboard({ data, setView }) {
   const enquiries = data.enquiries || [];
   const jobs = data.jobs || [];
+  const [dashShow, setDashShow] = useState("");
   const open = enquiries.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status));
   const quotesOut = enquiries.filter(e => e.status === "Quoted");
   const now = new Date();
@@ -370,6 +371,13 @@ function Dashboard({ data, setView }) {
     .filter(j => j.status !== "Completed" && (j.moveDate === todayIso || jobStages(j).some(st => st.date === todayIso)))
     .sort((a, b) => ((jobStages(a).find(st => st.date === todayIso) || {}).time || "").localeCompare((jobStages(b).find(st => st.date === todayIso) || {}).time || ""));
   const bookedVehToday = new Set(todayStages.flatMap(st => st.vehicleIds || []));
+  const upcomingSurveys = enquiries
+    .filter(e => e.surveyDate && e.status !== "Lost" && e.surveyDate >= todayIso)
+    .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
+  const upcomingMoves = jobs
+    .filter(j => j.status !== "Completed")
+    .flatMap(j => jobStages(j).filter(st => st.date && st.date >= todayIso).map(st => ({ j, st })))
+    .sort((a, b) => a.st.date.localeCompare(b.st.date));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
   const vehicles = data.vehicles || [];
   const staffActive = (data.staff || []).filter(s => s.active !== false);
@@ -395,8 +403,47 @@ function Dashboard({ data, setView }) {
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
         <Stat label="Booked moves" value={jobs.filter(j => j.status !== "Completed").length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
-        <Stat label="Booked this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" />
+        <Stat label="Booked this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
       </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: dashShow ? 12 : 18 }}>
+        <Btn variant={dashShow === "surveys" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")}><Icon name="check" size={15} /> Surveys</Btn>
+        <Btn variant={dashShow === "moves" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")}><Icon name="truck" size={15} /> Moves</Btn>
+      </div>
+
+      {dashShow === "surveys" && (
+        <div style={{ marginBottom: 18 }}>
+          {upcomingSurveys.length === 0 ? <Empty icon="calendar" text="No upcoming surveys" /> : upcomingSurveys.map(e => (
+            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "#B45309", textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(e.surveyDate)}{e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
+                  <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
+                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
+                </div>
+                <StatusBadge status={e.status} />
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {dashShow === "moves" && (
+        <div style={{ marginBottom: 18 }}>
+          {upcomingMoves.length === 0 ? <Empty icon="truck" text="No upcoming moves" /> : upcomingMoves.map(({ j, st }, ix) => (
+            <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(st.date)}{st.time ? ` · ${st.time}` : ""}{st.type ? ` · ${st.type}` : ""}</div>
+                  <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
+                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}</div>
+                </div>
+                <StatusBadge status={j.status} />
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
 
       <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
         <Icon name="plus" size={16} /> New Enquiry
@@ -566,7 +613,10 @@ function EnquiriesList({ data, setView, initialFilter }) {
 // ── Customer picker (existing or add new inline) ────────────────────────────
 function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
   const [mode, setMode] = useState(customerId ? "existing" : (newCust && newCust.name) ? "new" : (data.customers || []).length ? "existing" : "new");
+  const [q, setQ] = useState("");
   const customers = [...(data.customers || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const selected = customers.find(c => c.id === customerId);
+  const filtered = q.trim() ? customers.filter(c => `${c.name || ""} ${c.company || ""} ${c.phone || ""} ${c.homePhone || ""} ${c.town || ""} ${c.postcode || ""}`.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 10) : [];
   return (
     <div style={{ background: "#F9FAFB", borderRadius: 10, padding: 12, marginBottom: 14, border: "1px solid #F3F4F6" }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -574,10 +624,30 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
         <Btn size="sm" variant={mode === "new" ? "primary" : "grey"} onClick={() => { setMode("new"); onPick(""); }}>New customer</Btn>
       </div>
       {mode === "existing" ? (
-        <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={customerId || ""} onChange={e => onPick(e.target.value)}>
-          <option value="">Select customer…</option>
-          {customers.map(c => <option key={c.id} value={c.id}>{c.company ? `${c.name} — ${c.company}` : c.name}</option>)}
-        </select>
+        selected && !q ? (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff", border: "1px solid #E3E9E8", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, color: "#111827" }}>{selected.name}</div>
+              <div style={{ fontSize: 12, color: "#9CA3AF" }}>{[selected.company, selected.phone, selected.town].filter(Boolean).join(" · ")}</div>
+            </div>
+            <Btn size="sm" variant="grey" onClick={() => onPick("")}>Change</Btn>
+          </div>
+        ) : (
+          <div>
+            <Input value={q} onChange={setQ} placeholder="Search name, company, phone or postcode…" />
+            {q.trim() && (
+              <div style={{ marginTop: 8, maxHeight: 240, overflowY: "auto" }}>
+                {filtered.length === 0 ? <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>No matches</div>
+                  : filtered.map(c => (
+                    <div key={c.id} onClick={() => { onPick(c.id); setQ(""); }} style={{ padding: "9px 11px", borderRadius: 8, cursor: "pointer", background: "#fff", border: "1px solid #EFF2F1", marginBottom: 6 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{c.name}</div>
+                      <div style={{ fontSize: 12, color: "#9CA3AF" }}>{[c.company, c.phone, c.town].filter(Boolean).join(" · ") || "—"}</div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )
       ) : (
         <div>
           <Input value={newCust.name} onChange={v => setNewCust({ ...newCust, name: v })} placeholder="Full name *" />
@@ -2500,9 +2570,9 @@ function startOfWeek(d){ const x=new Date(d); const wd=(x.getDay()+6)%7; return 
 function parseTime(t){ if(!t) return null; const m=String(t).match(/(\d{1,2}):(\d{2})/); return m ? (+m[1])+(+m[2])/60 : null; }
 function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"am":"pm"; let H=hh%12; if(H===0)H=12; return mm?`${H}:${String(mm).padStart(2,"0")}${ap}`:`${H}${ap}`; }
 
-function CalendarView({ data, setView, initialDate, initialMode }) {
+function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
   const [mode, setMode] = useState(initialMode || "week");
-  const [show, setShow] = useState("all");
+  const [show, setShow] = useState(initialShow || "all");
   const showMoves = show !== "surveys";
   const showSurveys = show !== "moves";
   const [anchor, setAnchor] = useState(() => initialDate ? new Date(initialDate + "T00:00") : new Date());
@@ -2896,7 +2966,7 @@ export default function App() {
 
   function fullScreen() {
     if (view.screen === "dashboard") return <Dashboard data={data} setView={setView} />;
-    if (view.screen === "calendar") return <CalendarView data={data} setView={setView} initialDate={view.date} initialMode={view.calMode} />;
+    if (view.screen === "calendar") return <CalendarView data={data} setView={setView} initialDate={view.date} initialMode={view.calMode} initialShow={view.calShow} />;
     if (view.screen === "quotePdf") return <QuotePdfView data={data} id={view.id} setView={setView} />;
     if (view.screen === "surveyPdf") return <SurveyPdfView data={data} id={view.id} setView={setView} />;
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
