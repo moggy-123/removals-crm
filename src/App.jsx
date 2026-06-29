@@ -405,7 +405,7 @@ function Dashboard({ data, setView }) {
       </Btn>
 
       <div style={{ display: "flex", gap: 10, marginBottom: dashShow ? 12 : 18 }}>
-        <Btn variant={dashShow === "surveys" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")}><Icon name="check" size={15} /> Surveys</Btn>
+        <Btn variant={dashShow === "surveys" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")}>Surveys</Btn>
         <Btn variant={dashShow === "moves" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")}><Icon name="truck" size={15} /> Moves</Btn>
       </div>
 
@@ -482,20 +482,24 @@ function Dashboard({ data, setView }) {
         </>
       )}
 
-      <SectionTitle>Upcoming moves</SectionTitle>
-      {upcoming.length === 0 && <Empty icon="truck" text="No moves coming up" />}
-      {upcoming.map(({ j, st }, ix) => (
-        <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.type || "Move"}{st.time ? ` · ${st.time}` : ""}</div>
-              <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(st.date)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
-            </div>
-            <StatusBadge status={j.status} />
-          </div>
-        </Card>
-      ))}
+      {dashShow !== "surveys" && (
+        <>
+          <SectionTitle>Upcoming moves</SectionTitle>
+          {upcoming.length === 0 && <Empty icon="truck" text="No moves coming up" />}
+          {upcoming.map(({ j, st }, ix) => (
+            <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.type || "Move"}{st.time ? ` · ${st.time}` : ""}</div>
+                  <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
+                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(st.date)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
+                </div>
+                <StatusBadge status={j.status} />
+              </div>
+            </Card>
+          ))}
+        </>
+      )}
     </div>
   );
 }
