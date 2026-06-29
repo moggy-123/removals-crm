@@ -1467,13 +1467,28 @@ async function buildQuotePdf(e, c) {
     tickBox(lkT); L(descX, base(lkT), "Late Key Waiver", fs); R(x1 - 4, base(lkT), lkText, fs);
     tickBox(mpT); L(descX, base(mpT), "MoveProtect (not incl.)", Math.min(fs, 7.5));
     if (mp > 0) R(x1 - 4, base(mpT), gbpPlain(mp), fs);
+
+    // ── STORAGE grid: mirror the quote grid geometry on the right ──
+    const sx0 = 302, sx1 = 569, sax = 508.5;
+    p1.drawRectangle({ x: 301, y: yT(333), width: 269, height: 333 - 187, color: WHITE });
+    p1.drawRectangle({ x: sx0, y: yT(204), width: sx1 - sx0, height: 16, color: HEADF });
+    hline(sx0, sx1, 188); hline(sx0, sx1, 204);
+    for (let i = 1; i <= rows; i++) hline(sx0, sx1, 204 + i * rowH);
+    vline(sx0, 188, bottom); vline(sx1, 188, bottom); vline(sax, 204, bottom);
+    const shw = bold.widthOfTextAtSize("STORAGE", 10);
+    p1.drawText("STORAGE", { x: (sx0 + sx1) / 2 - shw / 2, y: yT(200.5), size: 10, font: bold, color: BLACK });
+    const sweek = Number(ex.storageWeekly) || 0, sVat = Math.round(sweek * 0.2 * 100) / 100, sCont = Number(ex.storageContainers) || 0;
+    if (rowH >= 13) {
+      L(sx0 + 4, 204 + rowH * 0.45, "Storage Charges", fs);
+      L(sx0 + 4, 204 + rowH - 3, "(per container, weekly)", 5.5, font, GREY);
+    } else {
+      L(sx0 + 4, base(204), "Storage Charges", fs);
+    }
+    if (sweek > 0) R(sx1 - 4, base(204), gbpPlain(sweek), fs);
+    L(sx0 + 4, base(vT), "Vat @ 20%", fs); if (sweek > 0) R(sx1 - 4, base(vT), gbpPlain(sVat), fs);
+    L(sx0 + 4, base(tT), "Total", fs, bold); if (sweek > 0) R(sx1 - 4, base(tT), gbpPlain(sweek + sVat), fs, bold);
+    L(sx0 + 4, base(lkT), "Containers Required", fs); if (sCont > 0) R(sx1 - 4, base(lkT), String(sCont), fs);
   }
-  const ex = e.quoteExtra || {};
-  if (Number(ex.storageWeekly) > 0) {
-    const sw = Number(ex.storageWeekly), sVat = Math.round(sw * 0.2 * 100) / 100;
-    R(565, 215.5, gbpPlain(sw)); R(565, 279.5, gbpPlain(sVat)); R(565, 295.5, gbpPlain(sw + sVat), 9, bold);
-  }
-  if (Number(ex.storageContainers) > 0) R(565, 311.5, String(ex.storageContainers));
   L(398, 393, `${ref}${c?.name ? " " + c.name.split(" ").slice(-1)[0] : ""}`, 7, bold, red);
 
   if (pdf.getPageCount() > 2) {
