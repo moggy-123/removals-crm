@@ -1485,7 +1485,7 @@ function QuotePdfView({ data, id, setView }) {
     setErr(""); setBusy(true);
     try { const { file } = await makeFile(); downloadFile(file); }
     catch (ex) { setErr(ex.message || "Could not build the PDF."); }
-    setBusy(false);
+    setBusy(false); setTimeout(resetZoom, 200);
   };
   const emailCustomer = () => {
     const ref = c?.ref ? String(c.ref) : "";
@@ -1517,6 +1517,15 @@ function QuotePdfView({ data, id, setView }) {
     </div>
   );
 }
+function resetZoom() {
+  try {
+    const vp = document.querySelector('meta[name="viewport"]');
+    if (!vp) return;
+    vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes");
+    setTimeout(() => vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"), 80);
+  } catch (_e) { /* noop */ }
+}
+
 async function buildSurveyPdf(e, c, data) {
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
   const pdf = await PDFDocument.create();
@@ -1638,7 +1647,7 @@ function SurveyPdfView({ data, id, setView }) {
     } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
     setBusy(false);
   };
-  const download = async () => { setErr(""); setBusy(true); try { const { file } = await makeFile(); downloadFile(file); } catch (ex) { setErr(ex.message || "Could not build the PDF."); } setBusy(false); };
+  const download = async () => { setErr(""); setBusy(true); try { const { file } = await makeFile(); downloadFile(file); } catch (ex) { setErr(ex.message || "Could not build the PDF."); } setBusy(false); setTimeout(resetZoom, 200); };
   const emailCustomer = () => {
     const subject = "Your survey & move plan";
     const body = `Hi ${firstName},\n\nPlease find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
@@ -2801,6 +2810,14 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState("syncing");
   const device = useDeviceType();
   const wide = device !== "phone";
+
+  useEffect(() => {
+    const onBack = () => resetZoom();
+    window.addEventListener("focus", onBack);
+    window.addEventListener("pageshow", onBack);
+    document.addEventListener("visibilitychange", onBack);
+    return () => { window.removeEventListener("focus", onBack); window.removeEventListener("pageshow", onBack); document.removeEventListener("visibilitychange", onBack); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
