@@ -1071,7 +1071,8 @@ function QuoteModal({ data, enquiry, onClose }) {
   const setEx = (k, v) => setExtra(p => ({ ...p, [k]: v }));
   const total = quoteTotal(lines, vat);
   const subtotalNet = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  const moveProtect = Math.round(subtotalNet * 0.1 * 100) / 100;
+  const mpPct = Number(extra.mpPct) || 10;
+  const moveProtect = Math.round(subtotalNet * (mpPct / 100) * 100) / 100;
   const customer = (data.customers || []).find(c => c.id === enquiry.customerId);
 
   const setLine = (i, k, v) => setLines(p => p.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
@@ -1083,7 +1084,7 @@ function QuoteModal({ data, enquiry, onClose }) {
       ...enquiry,
       quoteLines: lines.filter(l => l.desc || l.amount),
       quoteVat: vat, quoteTotal: total,
-      quoteExtra: { ...extra, lateKey: extra.lateKey ?? "FREE" },
+      quoteExtra: { ...extra, lateKey: extra.lateKey ?? "FREE", mpPct: Number(extra.mpPct) || 10 },
       quoteStatus: status, quoteSentDate: sentDate ?? enquiry.quoteSentDate,
       status: ["Won", "Lost"].includes(enquiry.status) ? enquiry.status : (total > 0 ? "Quoted" : enquiry.status),
     };
@@ -1148,8 +1149,11 @@ function QuoteModal({ data, enquiry, onClose }) {
 
       <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", margin: "4px 0 8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Quote extras (appear on the PDF)</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
-        <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>MoveProtect <span style={{ color: "#9CA3AF" }}>(net × 10%, not in total)</span></span>
-        <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{gbp(moveProtect)}</span>
+        <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>MoveProtect <span style={{ color: "#9CA3AF" }}>(net × {mpPct}%, not in total)</span></span>
+        <select style={{ ...inputStyle, width: 78 }} value={mpPct} onChange={ev => setEx("mpPct", Number(ev.target.value))}>
+          {[5, 10, 15].map(v => <option key={v} value={v}>{v}%</option>)}
+        </select>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "#111827", minWidth: 66, textAlign: "right" }}>{gbp(moveProtect)}</span>
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
         <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>Late Key Waiver</span>
@@ -1461,7 +1465,8 @@ async function buildQuotePdf(e, c) {
     const vT = 204 + nL * rowH, tT = 204 + (nL + 1) * rowH, lkT = 204 + (nL + 2) * rowH, mpT = 204 + (nL + 3) * rowH;
     const ex = e.quoteExtra || {};
     const lk = ex.lateKey, lkText = (lk && lk !== "FREE" && Number(lk) > 0) ? gbpPlain(lk) : "FREE";
-    const mp = Math.round(subtotal * 0.1 * 100) / 100;
+    const mpPct = Number(ex.mpPct) || 10;
+    const mp = Math.round(subtotal * (mpPct / 100) * 100) / 100;
     L(descX, base(vT), "Vat @ 20%", fs); R(x1 - 4, base(vT), e.quoteVat ? gbpPlain(vatAmt) : "", fs);
     L(descX, base(tT), "Total", fs, bold); R(x1 - 4, base(tT), gbpPlain(total), fs, bold);
     tickBox(lkT); L(descX, base(lkT), "Late Key Waiver", fs); R(x1 - 4, base(lkT), lkText, fs);
@@ -1511,7 +1516,8 @@ async function buildQuotePdf(e, c) {
     const p3 = pdf.getPage(2);
     if (c?.name) p3.drawText(clean(c.name), { x: 114, y: H - 84, size: 10, font });
     if (e.surveyDate) p3.drawText(clean(fmtLong(e.surveyDate)), { x: 114, y: H - 131, size: 9, font });
-    if (ref) p3.drawText(clean(ref), { x: 384, y: H - 132, size: 11, font: bold, color: red });
+    const accRef = `${ref}${c?.name ? " " + c.name.split(" ").slice(-1)[0] : ""}`.trim();
+    if (accRef) { const aw = bold.widthOfTextAtSize(clean(accRef), 11); p3.drawText(clean(accRef), { x: 561 - aw, y: H - 84, size: 11, font: bold, color: red }); }
   }
 
   const out = await pdf.save();
