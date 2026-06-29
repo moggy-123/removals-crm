@@ -1489,7 +1489,21 @@ async function buildQuotePdf(e, c) {
     L(sx0 + 4, base(tT), "Total", fs, bold); if (sweek > 0) R(sx1 - 4, base(tT), gbpPlain(sweek + sVat), fs, bold);
     L(sx0 + 4, base(lkT), "Containers Required", fs); if (sCont > 0) R(sx1 - 4, base(lkT), String(sCont), fs);
   }
-  L(398, 393, `${ref}${c?.name ? " " + c.name.split(" ").slice(-1)[0] : ""}`, 7, bold, red);
+  // Ref + surname placed right after "...use this reference number:"
+  L(476, 378, `${ref}${c?.name ? " " + c.name.split(" ").slice(-1)[0] : ""}`, 8, bold, red);
+
+  // ── Expand the Notes box up into the empty band below the three columns ──
+  {
+    const WHITE = rgb(1, 1, 1), BLACK = rgb(0, 0, 0);
+    const boxL = 25, boxR = 569.6, newTop = 410, boxBot = 532;
+    p1.drawRectangle({ x: boxL - 1, y: H - 530, width: boxR - boxL + 2, height: 530 - 398, color: WHITE });
+    L(31, 404, "Notes:", 9, bold, red);
+    const ln = (xa, ya, xb, yb) => p1.drawLine({ start: { x: xa, y: H - ya }, end: { x: xb, y: H - yb }, thickness: 0.8, color: BLACK });
+    ln(boxL, newTop, boxR, newTop);
+    ln(boxL, 398, boxL, boxBot);
+    ln(boxR, 398, boxR, boxBot);
+    ln(boxL, boxBot, boxR, boxBot);
+  }
 
   if (pdf.getPageCount() > 2) {
     const p3 = pdf.getPage(2);
