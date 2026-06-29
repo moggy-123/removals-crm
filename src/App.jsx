@@ -1455,7 +1455,9 @@ function QuotePdfView({ data, id, setView }) {
   const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [copied, setCopied] = useState("");
   if (!e) return <div style={{ padding: 20 }}>Quote not found.</div>;
+  const copy = (which, val) => { if (!val || !navigator.clipboard) return; navigator.clipboard.writeText(val).then(() => { setCopied(which); setTimeout(() => setCopied(""), 1500); }).catch(() => {}); };
 
   const firstName = (() => { const n = (c?.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim(); return (n.split(/\s+/)[0] || "there"); })();
   const makeFile = async () => {
@@ -1503,6 +1505,12 @@ function QuotePdfView({ data, id, setView }) {
         <Btn style={{ marginTop: 12 }} disabled={busy} onClick={share}><Icon name="quote" size={16} /> {busy ? "Building…" : "Create & send quote"}</Btn>
         <Btn variant="grey" style={{ marginTop: 8 }} disabled={busy} onClick={download}><Icon name="quote" size={14} /> Download PDF only</Btn>
         {c?.email ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> Email {firstName} (pre-addressed)</Btn> : null}
+        {(c?.email || c?.phone) && (
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            {c?.email && <Btn size="sm" variant="grey" onClick={() => copy("email", c.email)}>{copied === "email" ? "Copied ✓" : "Copy email"}</Btn>}
+            {c?.phone && <Btn size="sm" variant="grey" onClick={() => copy("mobile", c.phone)}>{copied === "mobile" ? "Copied ✓" : "Copy mobile"}</Btn>}
+          </div>
+        )}
         {err ? <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div> : null}
         <div style={{ marginTop: 14, fontSize: 11.5, color: "#6B7280" }}>"Create &amp; send" opens the share menu with the PDF attached — pick Mail, Messages or WhatsApp. "Email {firstName}" opens a ready-addressed email; download first, then attach it.</div>
       </Card>
@@ -1541,8 +1549,6 @@ async function buildSurveyPdf(e, c, data) {
   if (c?.email) kv("Email", c.email);
   const fromAddr = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join(", ");
   const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join(", ");
-  kv("Moving from", fromAddr);
-  kv("Moving to", toAddr);
   const kvWrap = (label, value) => {
     if (!value) return;
     const ls = wrap(value, 0, 9.5, font, W - (M + 92) - M);
@@ -1551,8 +1557,14 @@ async function buildSurveyPdf(e, c, data) {
     ls.forEach(ln => { at(ln, M + 92, y, 9.5, font, navy); y -= 13; });
     y -= 2;
   };
-  kvWrap("Access from", e.fromAccess);
-  kvWrap("Access to", e.toAccess);
+  kv("Moving from", fromAddr);
+  kv("Moving to", toAddr);
+
+  if (e.fromAccess || e.toAccess) {
+    heading("Access — please read");
+    kvWrap("From", e.fromAccess);
+    kvWrap("To", e.toAccess);
+  }
 
   const stages = Array.isArray(e.stages) ? e.stages : [];
   const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? v.name : ""; };
@@ -1610,7 +1622,9 @@ function SurveyPdfView({ data, id, setView }) {
   const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [copied, setCopied] = useState("");
   if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
+  const copy = (which, val) => { if (!val || !navigator.clipboard) return; navigator.clipboard.writeText(val).then(() => { setCopied(which); setTimeout(() => setCopied(""), 1500); }).catch(() => {}); };
   const firstName = (() => { const n = (c?.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim(); return (n.split(/\s+/)[0] || "there"); })();
   const makeFile = async () => { const { bytes, ref } = await buildSurveyPdf(e, c, data); return { file: new File([bytes], `Survey-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref }; };
   const downloadFile = file => { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); };
@@ -1641,6 +1655,12 @@ function SurveyPdfView({ data, id, setView }) {
         <Btn style={{ marginTop: 12 }} disabled={busy} onClick={share}><Icon name="quote" size={16} /> {busy ? "Building…" : "Create & send"}</Btn>
         <Btn variant="grey" style={{ marginTop: 8 }} disabled={busy} onClick={download}><Icon name="quote" size={14} /> Download PDF only</Btn>
         {c?.email ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> Email {firstName} (pre-addressed)</Btn> : null}
+        {(c?.email || c?.phone) && (
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            {c?.email && <Btn size="sm" variant="grey" onClick={() => copy("email", c.email)}>{copied === "email" ? "Copied ✓" : "Copy email"}</Btn>}
+            {c?.phone && <Btn size="sm" variant="grey" onClick={() => copy("mobile", c.phone)}>{copied === "mobile" ? "Copied ✓" : "Copy mobile"}</Btn>}
+          </div>
+        )}
         {err ? <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div> : null}
       </Card>
     </div>
