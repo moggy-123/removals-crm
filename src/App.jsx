@@ -371,13 +371,7 @@ function Dashboard({ data, setView }) {
     .filter(j => j.status !== "Completed" && (j.moveDate === todayIso || jobStages(j).some(st => st.date === todayIso)))
     .sort((a, b) => ((jobStages(a).find(st => st.date === todayIso) || {}).time || "").localeCompare((jobStages(b).find(st => st.date === todayIso) || {}).time || ""));
   const bookedVehToday = new Set(todayStages.flatMap(st => st.vehicleIds || []));
-  const upcomingSurveys = enquiries
-    .filter(e => e.surveyDate && e.status !== "Lost" && e.surveyDate >= todayIso)
-    .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
-  const upcomingMoves = jobs
-    .filter(j => j.status !== "Completed")
-    .flatMap(j => jobStages(j).filter(st => st.date && st.date >= todayIso).map(st => ({ j, st })))
-    .sort((a, b) => a.st.date.localeCompare(b.st.date));
+  const todaysMovesList = todaysMoves.map(j => ({ j, st: jobStages(j).find(s => s.date === todayIso) || {} }));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
   const vehicles = data.vehicles || [];
   const staffActive = (data.staff || []).filter(s => s.active !== false);
@@ -413,7 +407,7 @@ function Dashboard({ data, setView }) {
 
       {dashShow === "surveys" && (
         <div style={{ marginBottom: 18 }}>
-          {upcomingSurveys.length === 0 ? <Empty icon="calendar" text="No upcoming surveys" /> : upcomingSurveys.map(e => (
+          {todaysSurveys.length === 0 ? <Empty icon="calendar" text="No surveys today" /> : todaysSurveys.map(e => (
             <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -430,7 +424,7 @@ function Dashboard({ data, setView }) {
 
       {dashShow === "moves" && (
         <div style={{ marginBottom: 18 }}>
-          {upcomingMoves.length === 0 ? <Empty icon="truck" text="No upcoming moves" /> : upcomingMoves.map(({ j, st }, ix) => (
+          {todaysMovesList.length === 0 ? <Empty icon="truck" text="No moves today" /> : todaysMovesList.map(({ j, st }, ix) => (
             <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -448,45 +442,6 @@ function Dashboard({ data, setView }) {
       <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
         <Icon name="plus" size={16} /> New Enquiry
       </Btn>
-
-      {todaysSurveys.length > 0 && (
-        <>
-          <SectionTitle>Today's surveys</SectionTitle>
-          {todaysSurveys.map(e => (
-            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: AMBER, textTransform: "uppercase", letterSpacing: ".05em" }}>Survey{e.surveyTime ? ` · ${e.surveyTime}` : ""}</div>
-                  <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
-                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
-                </div>
-                <StatusBadge status={e.status} />
-              </div>
-            </Card>
-          ))}
-        </>
-      )}
-
-      {todaysMoves.length > 0 && (
-        <>
-          <SectionTitle>Today's moves</SectionTitle>
-          {todaysMoves.map(j => {
-            const stg = jobStages(j).find(st => st.date === todayIso) || {};
-            return (
-              <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{stg.type || "Move"}{stg.time ? ` · ${stg.time}` : ""}</div>
-                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
-                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}</div>
-                  </div>
-                  <StatusBadge status={j.status} />
-                </div>
-              </Card>
-            );
-          })}
-        </>
-      )}
 
       {(vehicles.length > 0 || staffActive.length > 0) && (
         <>
