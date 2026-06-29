@@ -400,6 +400,10 @@ function Dashboard({ data, setView }) {
         <Stat label="Booked this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
       </div>
 
+      <Btn variant="amber" style={{ width: "100%", marginBottom: 14 }} onClick={() => setView({ screen: "newEnquiry" })}>
+        <Icon name="plus" size={16} /> New Enquiry
+      </Btn>
+
       <div style={{ display: "flex", gap: 10, marginBottom: dashShow ? 12 : 18 }}>
         <Btn variant={dashShow === "surveys" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")}><Icon name="check" size={15} /> Surveys</Btn>
         <Btn variant={dashShow === "moves" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")}><Icon name="truck" size={15} /> Moves</Btn>
@@ -439,11 +443,7 @@ function Dashboard({ data, setView }) {
         </div>
       )}
 
-      <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
-        <Icon name="plus" size={16} /> New Enquiry
-      </Btn>
-
-      {(vehicles.length > 0 || staffActive.length > 0) && (
+      {dashShow !== "surveys" && (vehicles.length > 0 || staffActive.length > 0) && (
         <>
           <SectionTitle>Available today</SectionTitle>
           <Card>
