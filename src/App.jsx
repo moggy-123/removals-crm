@@ -1497,7 +1497,7 @@ function QuotePdfView({ data, id, setView }) {
   return (
     <div style={{ maxWidth: 560, margin: "0 auto" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
-        <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiryDetail", id: e.id })}><Icon name="back" size={14} /> Back</Btn>
+        <Btn variant="ghost" size="sm" onClick={() => { setView({ screen: "enquiryDetail", id: e.id }); setTimeout(() => { try { window.location.reload(); } catch (_e) {} }, 30); }}><Icon name="back" size={14} /> Back</Btn>
         <div style={{ fontWeight: 800, fontSize: 18 }}>Quote PDF</div>
       </div>
       <Card>
@@ -1656,7 +1656,7 @@ function SurveyPdfView({ data, id, setView }) {
   return (
     <div style={{ maxWidth: 560, margin: "0 auto" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
-        <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiryDetail", id: e.id })}><Icon name="back" size={14} /> Back</Btn>
+        <Btn variant="ghost" size="sm" onClick={() => { setView({ screen: "enquiryDetail", id: e.id }); setTimeout(() => { try { window.location.reload(); } catch (_e) {} }, 30); }}><Icon name="back" size={14} /> Back</Btn>
         <div style={{ fontWeight: 800, fontSize: 18 }}>Survey & Move Plan PDF</div>
       </div>
       <Card>
