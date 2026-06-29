@@ -1469,6 +1469,124 @@ function QuotePdfView({ data, id, setView }) {
     </div>
   );
 }
+async function buildSurveyPdf(e, c, data) {
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const W = 595.28, H = 841.89, M = 44;
+  const teal = rgb(0.055, 0.486, 0.451), navy = rgb(0.059, 0.18, 0.165), grey = rgb(0.42, 0.46, 0.45), white = rgb(1, 1, 1);
+  const clean = s => String(s == null ? "" : s).replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"').replace(/[\u2013\u2014\u2212]/g, "-").replace(/\u2026/g, "...").replace(/\u00A0/g, " ").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
+  let page, y;
+  const np = () => { page = pdf.addPage([W, H]); y = H - M; };
+  const ensure = h => { if (y - h < M) np(); };
+  const at = (t, x, yy, size, f = font, col = navy) => page.drawText(clean(t), { x, y: yy, size, font: f, color: col });
+  const heading = t => { ensure(30); y -= 8; at(t, M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 15; };
+  const kv = (label, value) => { ensure(15); at(label, M, y, 9.5, bold, grey); at(value || "-", M + 92, y, 9.5, font, navy); y -= 15; };
+  const wrap = (t, x, size, f, maxW) => { const words = clean(t).split(/\s+/); const lines = []; let ln = ""; for (const w of words) { const test = ln ? ln + " " + w : w; if (f.widthOfTextAtSize(test, size) > maxW && ln) { lines.push(ln); ln = w; } else ln = test; } if (ln) lines.push(ln); return lines; };
+
+  np();
+  page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
+  at("R&J Removals & Storage", M, H - 34, 16, bold, white);
+  at("Survey & Move Plan", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
+  const ref = c?.ref ? `Ref ${c.ref}` : "";
+  if (ref) { const w = bold.widthOfTextAtSize(ref, 12); at(ref, W - M - w, H - 40, 12, bold, white); }
+  y = H - 88;
+  at(`Please check everything below is correct and let us know of any changes. Generated ${fmtUK(todayISO())}.`, M, y, 9, font, grey); y -= 20;
+
+  heading("Your details");
+  kv("Name", c?.name);
+  if (c?.phone) kv("Mobile", c.phone);
+  if (c?.homePhone) kv("Home phone", c.homePhone);
+  if (c?.email) kv("Email", c.email);
+  const fromAddr = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join(", ");
+  const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join(", ");
+  kv("Moving from", fromAddr);
+  kv("Moving to", toAddr);
+
+  const stages = Array.isArray(e.stages) ? e.stages : [];
+  const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? v.name : ""; };
+  heading("Move plan");
+  if (!stages.length) { at("To be confirmed.", M, y, 9.5, font, navy); y -= 16; }
+  else stages.forEach((d, i) => {
+    ensure(40);
+    const when = [d.date ? fmtUK(d.date) : "Date TBC", d.time].filter(Boolean).join(" · ");
+    at(`Day ${i + 1}`, M, y, 9.5, bold, navy); at(`${d.type || "Move"}  —  ${when}`, M + 50, y, 9.5, font, navy); y -= 14;
+    const crew = (d.crew || []).join(", "); const vehs = (d.vehicleIds || []).map(vName).filter(Boolean).join(", ");
+    at("Crew:", M + 50, y, 9, bold, grey); at(crew || "-", M + 84, y, 9, font, navy); y -= 12;
+    at("Vehicle:", M + 50, y, 9, bold, grey); at(vehs || "-", M + 92, y, 9, font, navy); y -= 16;
+  });
+
+  const inv = Array.isArray(e.inventory) ? e.inventory : [];
+  heading("Inventory — what's moving");
+  if (!inv.length) { at("No items recorded.", M, y, 9.5, font, navy); y -= 16; }
+  else {
+    const order = [], idx = {};
+    inv.forEach(it => { const r = it.room || "Other"; if (!(r in idx)) { idx[r] = order.length; order.push([r, []]); } order[idx[r]][1].push(it); });
+    order.forEach(([room, items]) => {
+      ensure(20); at(room, M, y, 10, bold, navy); y -= 14;
+      items.forEach(it => { ensure(13); at(`${it.qty} x ${it.name}`, M + 10, y, 9.5, font, navy); y -= 13; });
+      y -= 4;
+    });
+    ensure(18); page.drawLine({ start: { x: M, y: y + 4 }, end: { x: W - M, y: y + 4 }, thickness: 0.6, color: grey });
+    const cuft = Math.round(e.volumeCuFt || 0), m3 = (e.volumeM3 || 0).toFixed(1);
+    at(`Total volume: ${cuft} cu ft  (${m3} m3)`, M, y - 6, 10, bold, teal); y -= 22;
+  }
+
+  heading("Acknowledgement");
+  wrap("I confirm that the inventory and move plan shown above are correct to the best of my knowledge. Please advise R&J Removals & Storage of any additions or changes before the move date.", M, 9.5, font, W - 2 * M).forEach(ln => { ensure(13); at(ln, M, y, 9.5, font, navy); y -= 13; });
+  y -= 24; ensure(40);
+  page.drawLine({ start: { x: M, y }, end: { x: M + 230, y }, thickness: 0.8, color: navy });
+  page.drawLine({ start: { x: W - M - 150, y }, end: { x: W - M, y }, thickness: 0.8, color: navy });
+  at("Signed", M, y - 12, 9, bold, grey); at("Date", W - M - 150, y - 12, 9, bold, grey); y -= 26;
+  at(`Name: ${c?.name || ""}`, M, y, 9.5, font, navy);
+
+  const out = await pdf.save();
+  return { bytes: out, ref: c?.ref ? String(c.ref) : "" };
+}
+
+function SurveyPdfView({ data, id, setView }) {
+  const e = (data.enquiries || []).find(x => x.id === id);
+  const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
+  const firstName = (() => { const n = (c?.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim(); return (n.split(/\s+/)[0] || "there"); })();
+  const makeFile = async () => { const { bytes, ref } = await buildSurveyPdf(e, c, data); return { file: new File([bytes], `Survey-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref }; };
+  const downloadFile = file => { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); };
+  const share = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const { file } = await makeFile();
+      const text = `Hi ${firstName}, please find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
+      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: "Survey & Move Plan", text });
+      else downloadFile(file);
+    } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
+    setBusy(false);
+  };
+  const download = async () => { setErr(""); setBusy(true); try { const { file } = await makeFile(); downloadFile(file); } catch (ex) { setErr(ex.message || "Could not build the PDF."); } setBusy(false); };
+  const emailCustomer = () => {
+    const subject = "Your survey & move plan";
+    const body = `Hi ${firstName},\n\nPlease find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
+    window.location.href = `mailto:${encodeURIComponent(c?.email || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+  return (
+    <div style={{ maxWidth: 560, margin: "0 auto" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
+        <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiryDetail", id: e.id })}><Icon name="back" size={14} /> Back</Btn>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Survey & Move Plan PDF</div>
+      </div>
+      <Card>
+        <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>Creates a customer copy of the inventory and move plan for {c?.name || "the customer"} to check and sign off. No prices are shown.</div>
+        <Btn style={{ marginTop: 12 }} disabled={busy} onClick={share}><Icon name="quote" size={16} /> {busy ? "Building…" : "Create & send"}</Btn>
+        <Btn variant="grey" style={{ marginTop: 8 }} disabled={busy} onClick={download}><Icon name="quote" size={14} /> Download PDF only</Btn>
+        {c?.email ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> Email {firstName} (pre-addressed)</Btn> : null}
+        {err ? <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div> : null}
+      </Card>
+    </div>
+  );
+}
+
 function MoveManageModal({ data, job, onClose }) {
   const [f, setF] = useState({ price: job.price ?? "", deposit: job.deposit ?? "", depositPaid: !!job.depositPaid, balancePaid: !!job.balancePaid, status: job.status || "Provisional" });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -1681,6 +1799,7 @@ function EnquiryDetail({ data, id, setView }) {
           <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {e.quoteTotal ? "Edit" : "Build"}</Btn>
         </div>
         {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
+        {((e.inventory && e.inventory.length) || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "surveyPdf", id: e.id })}><Icon name="quote" size={14} /> Survey &amp; move plan PDF</Btn> : null}
       </Card>
 
       {e.followUpDate && (
@@ -2680,6 +2799,7 @@ export default function App() {
     if (view.screen === "dashboard") return <Dashboard data={data} setView={setView} />;
     if (view.screen === "calendar") return <CalendarView data={data} setView={setView} initialDate={view.date} initialMode={view.calMode} />;
     if (view.screen === "quotePdf") return <QuotePdfView data={data} id={view.id} setView={setView} />;
+    if (view.screen === "surveyPdf") return <SurveyPdfView data={data} id={view.id} setView={setView} />;
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
     return null;
   }
