@@ -1447,6 +1447,7 @@ async function buildQuotePdf(e, c) {
     vline(x0, 188, bottom); vline(x1, 188, bottom); vline(ax, 204, bottom);
     const mw = bold.widthOfTextAtSize("MOVING", 10);
     p1.drawText("MOVING", { x: (x0 + x1) / 2 - mw / 2, y: yT(200.5), size: 10, font: bold, color: BLACK });
+    p1.drawText("Tick the services required", { x: 30, y: yT(200.3), size: 6.5, font: bold, color: BLACK });
     const fs = rowH >= 15 ? 9 : 8;
     const base = t => t + rowH - 4.8;
     const boxSize = Math.max(5.5, Math.min(8, rowH - 6));
