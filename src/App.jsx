@@ -1514,8 +1514,19 @@ async function buildQuotePdf(e, c) {
 
   if (pdf.getPageCount() > 2) {
     const p3 = pdf.getPage(2);
+    const WHITE = rgb(1, 1, 1), BLK = rgb(0, 0, 0), GREY80 = rgb(0.8, 0.8, 0.8);
     if (c?.name) p3.drawText(clean(c.name), { x: 114, y: H - 84, size: 10, font });
     if (e.surveyDate) p3.drawText(clean(fmtLong(e.surveyDate)), { x: 114, y: H - 131, size: 9, font });
+    // remove the old grey Reference cell from the survey-date row
+    p3.drawRectangle({ x: 301, y: H - 139, width: 77, height: 22, color: WHITE });
+    // grey "Reference" label box on the Name line, just left of the reference
+    const rbL = 360, rbR = 430, rbT = 68, rbB = 92;
+    p3.drawRectangle({ x: rbL, y: H - rbB, width: rbR - rbL, height: rbB - rbT, color: GREY80 });
+    const pln = (xa, ya, xb, yb) => p3.drawLine({ start: { x: xa, y: H - ya }, end: { x: xb, y: H - yb }, thickness: 0.8, color: BLK });
+    pln(rbL, rbT, rbL, rbB); pln(rbR, rbT, rbR, rbB); pln(rbL, rbT, rbR, rbT); pln(rbL, rbB, rbR, rbB);
+    const rtw = bold.widthOfTextAtSize("Reference", 9);
+    p3.drawText("Reference", { x: (rbL + rbR) / 2 - rtw / 2, y: H - 84, size: 9, font: bold, color: BLK });
+    // reference number + surname on the top line, right of the grey box
     const accRef = `${ref}${c?.name ? " " + c.name.split(" ").slice(-1)[0] : ""}`.trim();
     if (accRef) { const aw = bold.widthOfTextAtSize(clean(accRef), 11); p3.drawText(clean(accRef), { x: 561 - aw, y: H - 84, size: 11, font: bold, color: red }); }
   }
