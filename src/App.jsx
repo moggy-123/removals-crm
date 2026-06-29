@@ -2744,6 +2744,8 @@ function useDeviceType() {
 function ResponsiveStyles({ device }) {
   const wide = device !== "phone";
   const common = `
+    html,body{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+    *{-webkit-text-size-adjust:100%;text-size-adjust:100%}
     *{scrollbar-width:thin;scrollbar-color:#CBD6D3 transparent}
     ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#CBD6D3;border-radius:9px}
     .rm-btn:hover,.rm-btn-sm:hover{transform:translateY(-1px)}
