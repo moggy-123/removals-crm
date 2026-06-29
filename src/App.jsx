@@ -855,16 +855,22 @@ function InventoryModal({ data, enquiry, onClose }) {
   }
 
   const totals = inventoryTotals(Object.values(lines).filter(v => v.qty > 0).map(v => ({ cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty })));
-  const cycleDismantle = slot => setLines(p => { if (!p[slot]) return p; const cur = p[slot].dismantle || ""; const nxt = cur === "" ? "Mover" : cur === "Mover" ? "Customer" : ""; return { ...p, [slot]: { ...p[slot], dismantle: nxt } }; });
-  const AnnotChips = ({ slot }) => {
+  const setDismantle = (slot, val) => setLines(p => p[slot] ? { ...p, [slot]: { ...p[slot], dismantle: val } } : p);
+  const toggleWho = slot => setLines(p => p[slot] ? { ...p, [slot]: { ...p[slot], dismantle: p[slot].dismantle === "Customer" ? "Mover" : "Customer" } } : p);
+  const DisCheck = ({ slot }) => {
     const v = lines[slot];
-    if (!v || v.qty <= 0 || !canDismantle(v.name)) return null;
-    const dis = v.dismantle || "";
+    if (!v || v.qty <= 0) return null;
     return (
-      <div style={{ display: "flex", flexWrap: "wrap" }}>
-        <button onClick={() => cycleDismantle(slot)} style={{ border: dis ? "none" : "1px solid #E3E9E8", background: dis ? TEAL : "#fff", color: dis ? "#fff" : "#6B7280", borderRadius: 99, fontSize: 11, fontWeight: 700, padding: "3px 9px", cursor: "pointer", marginTop: 6 }}>{dis ? `Dismantle: ${dis}` : "Dismantle / reassemble"}</button>
-      </div>
+      <label style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, cursor: "pointer", userSelect: "none", flexShrink: 0 }}>
+        <span style={{ fontSize: 8.5, color: v.dismantle ? TEAL : "#9CA3AF", fontWeight: 700, lineHeight: 1, whiteSpace: "nowrap" }}>Dismantle</span>
+        <input type="checkbox" checked={!!v.dismantle} onChange={e => setDismantle(slot, e.target.checked ? "Mover" : "")} style={{ width: 17, height: 17, accentColor: TEAL }} />
+      </label>
     );
+  };
+  const DisPill = ({ slot }) => {
+    const v = lines[slot];
+    if (!v || !v.dismantle) return null;
+    return <button onClick={() => toggleWho(slot)} style={{ marginTop: 6, border: "none", background: TEAL, color: "#fff", borderRadius: 99, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>Dismantle &amp; reassemble: {v.dismantle} ⟲</button>;
   };
   const rec = recommendVehicle(totals.cuFt);
 
@@ -941,9 +947,12 @@ function InventoryModal({ data, enquiry, onClose }) {
                       {q < 0 && <span style={{ fontSize: 10, color: "#DC2626", fontWeight: 700 }}> · not moving</span>}
                     </div>
                     <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg{isCustom && <span onClick={() => deleteCustomItem(it.id)} style={{ color: "#DC2626", fontWeight: 600, marginLeft: 8, cursor: "pointer" }}>remove from list</span>}</div>
-                    <AnnotChips slot={slot} />
+                    <DisPill slot={slot} />
                   </div>
-                  <Stepper slot={slot} meta={{ catalogId: it.id, room: label, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <DisCheck slot={slot} />
+                    <Stepper slot={slot} meta={{ catalogId: it.id, room: label, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg }} />
+                  </div>
                 </div>
               );
             })}
@@ -956,9 +965,12 @@ function InventoryModal({ data, enquiry, onClose }) {
                     {v.qty < 0 && <span style={{ fontSize: 10, color: "#DC2626", fontWeight: 700 }}> · not moving</span>}
                   </div>
                   <div style={{ fontSize: 11, color: "#9CA3AF" }}>{v.cuFt} cu ft · {v.kg} kg</div>
-                  <AnnotChips slot={slot} />
+                  <DisPill slot={slot} />
                 </div>
-                <Stepper slot={slot} meta={v} />
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <DisCheck slot={slot} />
+                  <Stepper slot={slot} meta={v} />
+                </div>
               </div>
             ))}
             <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: "1px solid #F9FAFB", alignItems: "center" }}>
@@ -1190,6 +1202,12 @@ function MovePlanModal({ data, enquiry, onClose }) {
   return (
     <Modal title="Move plan" onClose={onClose}>
       <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>{linkedJob ? "Assign the staff and vehicles for each day. Saving updates the move and the calendar." : "Scope the days for this move. These carry onto the move when you create it."}</div>
+      {(enquiry.fromAccess || enquiry.toAccess) && (
+        <div style={{ fontSize: 12.5, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 9, padding: "9px 11px", marginBottom: 12 }}>
+          {enquiry.fromAccess && <div style={{ marginBottom: enquiry.toAccess ? 6 : 0 }}><span style={{ fontWeight: 700, color: "#9A3412" }}>Access at {enquiry.fromTown || "from"}: </span><span style={{ color: "#7C2D12" }}>{enquiry.fromAccess}</span></div>}
+          {enquiry.toAccess && <div><span style={{ fontWeight: 700, color: "#9A3412" }}>Access at {enquiry.toTown || "to"}: </span><span style={{ color: "#7C2D12" }}>{enquiry.toAccess}</span></div>}
+        </div>
+      )}
       {linkedJob && days.length > 0 && (
         <div style={{ fontSize: 12.5, fontWeight: 700, color: "#10211E", background: "#F1F5F4", borderRadius: 9, padding: "8px 11px", marginBottom: 12 }}>
           You booked: {days.length} day{days.length !== 1 ? "s" : ""} · planned {days.reduce((n, d) => n + (Number(d.staffCount) || 0), 0)} staff{(() => { const tot = {}; days.forEach(d => Object.entries(d.vehTypes || {}).forEach(([k, v]) => tot[k] = (tot[k] || 0) + (Number(v) || 0))); const s = vehTypesSummary(tot); return s ? ` · ${s}` : ""; })()}
@@ -1525,6 +1543,16 @@ async function buildSurveyPdf(e, c, data) {
   const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join(", ");
   kv("Moving from", fromAddr);
   kv("Moving to", toAddr);
+  const kvWrap = (label, value) => {
+    if (!value) return;
+    const ls = wrap(value, 0, 9.5, font, W - (M + 92) - M);
+    ensure(13 * ls.length + 2);
+    at(label, M, y, 9.5, bold, grey);
+    ls.forEach(ln => { at(ln, M + 92, y, 9.5, font, navy); y -= 13; });
+    y -= 2;
+  };
+  kvWrap("Access from", e.fromAccess);
+  kvWrap("Access to", e.toAccess);
 
   const stages = Array.isArray(e.stages) ? e.stages : [];
   const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? v.name : ""; };
@@ -2247,11 +2275,6 @@ function removeCustomItemFromCatalog(id) {
 }
 const STAGE_TYPES = DEFAULT_DAY_TYPES;
 // Returns a job's day-stages, synthesising one from legacy single-day fields if needed.
-function canDismantle(name) {
-  const n = (name || "").toLowerCase();
-  if (/bedside/.test(n)) return false;
-  return /(sofa|wardrobe|bookcase|chest of drawers|divan|bunk|\bbed\b|\bbeds\b)/.test(n);
-}
 function jobStages(j) {
   if (Array.isArray(j.stages) && j.stages.length) return j.stages;
   if (j.moveDate) return [{ id: "legacy", type: "Move", date: j.moveDate, time: j.startTime || "", vehicleIds: (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []), crew: j.crew || [], notes: "" }];
