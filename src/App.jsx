@@ -1449,18 +1449,22 @@ async function buildQuotePdf(e, c) {
     p1.drawText("MOVING", { x: (x0 + x1) / 2 - mw / 2, y: yT(200.5), size: 10, font: bold, color: BLACK });
     const fs = rowH >= 15 ? 9 : 8;
     const base = t => t + rowH - 4.8;
+    const boxSize = Math.max(5.5, Math.min(8, rowH - 6));
+    const descX = 30 + boxSize + 5;
+    const tickBox = t => p1.drawRectangle({ x: 30, y: yT(t + rowH / 2 + boxSize / 2), width: boxSize, height: boxSize, borderColor: BLACK, borderWidth: 0.8, color: WHITE });
     for (let i = 0; i < nL; i++) {
       const t = 204 + i * rowH, it = lines[i] || { desc: "", amount: "" };
-      L(30, base(t), it.desc, fs); if (it.amount) R(x1 - 4, base(t), gbpPlain(it.amount), fs);
+      if (it.desc || it.amount) tickBox(t);
+      L(descX, base(t), it.desc, fs); if (it.amount) R(x1 - 4, base(t), gbpPlain(it.amount), fs);
     }
     const vT = 204 + nL * rowH, tT = 204 + (nL + 1) * rowH, lkT = 204 + (nL + 2) * rowH, mpT = 204 + (nL + 3) * rowH;
     const ex = e.quoteExtra || {};
     const lk = ex.lateKey, lkText = (lk && lk !== "FREE" && Number(lk) > 0) ? gbpPlain(lk) : "FREE";
     const mp = Math.round(subtotal * 0.1 * 100) / 100;
-    L(30, base(vT), "Vat @ 20%", fs); R(x1 - 4, base(vT), e.quoteVat ? gbpPlain(vatAmt) : "", fs);
-    L(30, base(tT), "Total", fs, bold); R(x1 - 4, base(tT), gbpPlain(total), fs, bold);
-    L(30, base(lkT), "Late Key Waiver", fs); R(x1 - 4, base(lkT), lkText, fs);
-    L(30, base(mpT), "MoveProtect (not incl.)", Math.min(fs, 7.5));
+    L(descX, base(vT), "Vat @ 20%", fs); R(x1 - 4, base(vT), e.quoteVat ? gbpPlain(vatAmt) : "", fs);
+    L(descX, base(tT), "Total", fs, bold); R(x1 - 4, base(tT), gbpPlain(total), fs, bold);
+    tickBox(lkT); L(descX, base(lkT), "Late Key Waiver", fs); R(x1 - 4, base(lkT), lkText, fs);
+    tickBox(mpT); L(descX, base(mpT), "MoveProtect (not incl.)", Math.min(fs, 7.5));
     if (mp > 0) R(x1 - 4, base(mpT), gbpPlain(mp), fs);
   }
   const ex = e.quoteExtra || {};
