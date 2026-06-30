@@ -20,8 +20,33 @@ function monthNameToYM(name) {
   if (idx < now.getMonth()) y += 1;
   return `${y}-${String(idx + 1).padStart(2, "0")}`;
 }
+function stripEmailHtml(html) {
+  return (html || "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|tr|li|h[1-6]|td|th|table)>/gi, "\n").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;/g, "'").replace(/&quot;/gi, '"').replace(/[ \t]+/g, " ");
+}
+const EMAIL_LABELS = ["Exact Move Date", "How did you here of us", "How did you hear of us", "How did you hear", "Special Requirements", "Special Requirement", "Post Code", "Postcode", "Bedrooms", "Furnished", "Property Type", "Property", "Address Line 1", "Address", "Storage", "Packing", "Access", "Source", "Email", "Phone", "Mobile", "Title", "Name", "City", "Town", "From", "To"];
+function normalizeEmailLabels(t) {
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const L of EMAIL_LABELS) t = t.replace(new RegExp("[ \\t]*\\b" + esc(L) + "[ \\t]*:", "gi"), "\n" + L + ":");
+  return t.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "").trim();
+}
+function repairLabelValueLines(t) {
+  const lines = t.split("\n").map(l => l.trim()).filter(l => l !== "");
+  const bareLabel = l => { const m = l.match(/^([A-Za-z][A-Za-z /]*?)\s*:\s*$/); return m ? m[1].toLowerCase() : null; };
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const bl = bareLabel(lines[i]);
+    if (bl && bl !== "from" && bl !== "to") {
+      const nxt = lines[i + 1];
+      if (nxt && bareLabel(nxt) === null && !/^(from|to)\s*:?\s*$/i.test(nxt)) { out.push(lines[i].replace(/\s*$/, "") + " " + nxt); i++; continue; }
+    }
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
 function parseEnquiryEmail(text) {
-  const t = (text || "").replace(/\r/g, "");
+  let t = (text || "").replace(/\r/g, "");
+  if (/<[a-z!\/][^>]*>/i.test(t)) t = stripEmailHtml(t);
+  t = repairLabelValueLines(normalizeEmailLabels(t));
   const out = { name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", fromAccess: "", fromPropertyType: "", fromBedrooms: "", toAddress1: "", toTown: "", toPostcode: "", toAccess: "", toPropertyType: "", preferredDate: "", moveMonth: "", dateFlexible: false, notes: "" };
   const PC = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i;
   const PCG = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/gi;
