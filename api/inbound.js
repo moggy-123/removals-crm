@@ -11,6 +11,7 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6Ik
 // CHANGE THIS to your own secret, and use the same value in the ?key= URL.
 const INBOUND_SECRET = process.env.INBOUND_SECRET || "Dave-1966";
 
+
 const EMAIL_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 function monthNameToYM(name) {
   const idx = EMAIL_MONTHS.indexOf((name || "").toLowerCase());
