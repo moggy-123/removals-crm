@@ -1518,19 +1518,19 @@ async function buildQuotePdf(e, c) {
     ln(boxR, 398, boxR, boxBot);
     ln(boxL, boxBot, boxR, boxBot);
     if (e.notes) {
-      const maxW = boxR - 39, lh = 11, maxY = boxBot - 6;
-      let ny = 424;
+      const maxW = boxR - 39, lh = 13.5, maxY = boxBot - 6;
+      let ny = 426;
       outer:
       for (const paraRaw of String(e.notes).split(/\r?\n/)) {
         let line = "";
         for (const w of clean(paraRaw).split(/\s+/).filter(Boolean)) {
           const test = line ? line + " " + w : w;
-          if (font.widthOfTextAtSize(test, 9) > maxW && line) {
-            L(31, ny, line, 9); ny += lh; line = w;
+          if (font.widthOfTextAtSize(test, 11) > maxW && line) {
+            L(31, ny, line, 11); ny += lh; line = w;
             if (ny > maxY) break outer;
           } else line = test;
         }
-        if (line) { if (ny > maxY) break; L(31, ny, line, 9); ny += lh; }
+        if (line) { if (ny > maxY) break; L(31, ny, line, 11); ny += lh; }
       }
     }
   }
