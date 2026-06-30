@@ -207,15 +207,6 @@ function upsertLocal(data, table, record) {
   return { ...data, [table]: next };
 }
 
-function exportBackup() {
-  const data = loadData();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `removals-backup-${todayISO()}.json`; a.click();
-  URL.revokeObjectURL(url);
-}
-
 // ── Icons ───────────────────────────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = "currentColor" }) => {
   const paths = {
@@ -2472,7 +2463,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B2</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B3</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
