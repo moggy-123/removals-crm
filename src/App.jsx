@@ -2402,7 +2402,67 @@ function vehicleColor(data, vehicleId) {
 const VEHICLE_TYPES = ["18t", "7.5t", "3.5t", "Van"];
 const STAFF_ROLES = ["Driver", "Porter", "Packer", "Driver / Porter", "Surveyor", "Owner", "Office"];
 
+// Build a portable JSON backup of the whole dataset. Uses the native share sheet
+// on mobile (save to Files / iCloud / email), falling back to a download link.
+async function exportBackup(data) {
+  const payload = {
+    app: "removals-crm", version: 1, exportedAt: new Date().toISOString(),
+    data: {
+      customers: data.customers || [], enquiries: data.enquiries || [],
+      jobs: data.jobs || [], vehicles: data.vehicles || [], staff: data.staff || [],
+    },
+  };
+  const json = JSON.stringify(payload, null, 2);
+  const fname = `removals-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  try {
+    const file = new File([json], fname, { type: "application/json" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Removals CRM backup" });
+      return;
+    }
+  } catch (e) { if (e && e.name === "AbortError") return; }
+  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Restore = merge the backup into the current data (backup copy wins by id).
+// Non-destructive: existing records not in the backup are kept.
+async function restoreBackup(currentData, inc) {
+  const tables = ["customers", "enquiries", "jobs", "vehicles", "staff"];
+  const merged = { ...EMPTY };
+  tables.forEach(t => {
+    const byId = {};
+    (currentData[t] || []).forEach(r => { if (r && r.id) byId[r.id] = r; });
+    (inc[t] || []).forEach(r => { if (r && r.id) byId[r.id] = r; });
+    merged[t] = Object.values(byId);
+  });
+  await saveAndReload(merged);
+}
+
 function CompanyView({ data, setView }) {
+  const restoreRef = useRef(null);
+  const [restoring, setRestoring] = useState(false);
+  async function onRestoreFile(ev) {
+    const file = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      const inc = (payload && payload.data) ? payload.data : payload;
+      if (!inc || (!inc.customers && !inc.enquiries && !inc.jobs && !inc.staff && !inc.vehicles)) {
+        alert("This doesn't look like a Removals CRM backup file."); return;
+      }
+      const counts = ["customers", "enquiries", "jobs", "vehicles", "staff"].map(t => `${(inc[t] || []).length} ${t}`).join(", ");
+      if (!confirm(`Restore from this backup?\n\nIt contains: ${counts}.\n\nMatching records will be added or updated from the backup. Nothing already on the device is deleted.`)) return;
+      setRestoring(true);
+      await restoreBackup(data, inc);
+      alert("Restore complete.");
+    } catch (err) {
+      alert("Couldn't read that file: " + ((err && err.message) || err));
+    } finally { setRestoring(false); }
+  }
   const [vForm, setVForm] = useState(null);   // null | {} | record
   const [sForm, setSForm] = useState(null);
   const vehicles = [...(data.vehicles || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -2449,6 +2509,21 @@ function CompanyView({ data, setView }) {
           ))}
         </Card>
       </div>
+
+      <Card style={{ marginBottom: 0, marginTop: 14 }}>
+        <h4 style={{ margin: "0 0 6px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Backup &amp; Restore</h4>
+        <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 12, lineHeight: 1.5 }}>
+          Save a copy of everything ({(data.customers || []).length} customers · {(data.enquiries || []).length} enquiries · {(data.jobs || []).length} jobs). Keep it in Files, iCloud or Drive. You can restore it on any device.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <Btn onClick={() => exportBackup(data)}><Icon name="box" size={15} /> Download backup</Btn>
+          <Btn variant="ghost" onClick={() => restoreRef.current && restoreRef.current.click()} disabled={restoring}>{restoring ? "Restoring…" : "Restore from file…"}</Btn>
+        </div>
+        <input ref={restoreRef} type="file" accept="application/json,.json" style={{ display: "none" }} onChange={onRestoreFile} />
+        <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 10, lineHeight: 1.5 }}>
+          Tip: do this every week or so. On Supabase's paid plan your cloud data is also backed up automatically every day — this manual backup keeps working alongside it.
+        </div>
+      </Card>
 
       {vForm && <VehicleForm data={data} editVehicle={vForm.id ? vForm : null} onClose={() => setVForm(null)} />}
       {sForm && <StaffForm data={data} editStaff={sForm.id ? sForm : null} onClose={() => setSForm(null)} />}
