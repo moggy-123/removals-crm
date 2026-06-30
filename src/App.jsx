@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase } from "./supabase";
-import { FURNITURE, ROOMS, recommendVehicle } from "./furniture";
+import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
 const SIG_KEY = "removals_sigs";
@@ -933,6 +933,8 @@ function InventoryModal({ data, enquiry, onClose }) {
     if (room === "Bedroom") {
       beds.forEach(lbl => sections.push({ label: lbl, catalogRoom: "Bedroom", isBedroom: true }));
       sections.push({ addBedroom: true });
+    } else if (room === "Lounge / Living Room 2") {
+      sections.push({ label: room, catalogRoom: "Lounge / Living Room" });
     } else {
       sections.push({ label: room, catalogRoom: room });
     }
@@ -949,7 +951,8 @@ function InventoryModal({ data, enquiry, onClose }) {
       if (fhNameRef.current) fhNameRef.current.value = "";
       if (fhVolRef.current) fhVolRef.current.value = "";
     };
-    const catItems = [...FURNITURE.filter(it => it.room === catalogRoom), ...customItems.filter(it => it.room === catalogRoom)].filter(it => matches(it.name));
+    const boxItems = BOX_ITEMS.filter(b => b.id !== WARDROBE_BOX_ID || isBedroom || label === "Hallway");
+    const catItems = [...FURNITURE.filter(it => it.room === catalogRoom), ...customItems.filter(it => it.room === catalogRoom), ...boxItems].filter(it => matches(it.name));
     const customSlots = Object.entries(lines).filter(([, v]) => v.catalogId == null && v.room === label && matches(v.name));
     if (search && catItems.length === 0 && customSlots.length === 0) return null;
     const sectionQty = Object.values(lines).filter(v => v.room === label && v.qty > 0).reduce((s, v) => s + v.qty, 0);
