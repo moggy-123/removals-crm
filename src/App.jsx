@@ -1493,12 +1493,9 @@ async function buildQuotePdf(e, c) {
     const shw = bold.widthOfTextAtSize("STORAGE", 10);
     p1.drawText("STORAGE", { x: (sx0 + sx1) / 2 - shw / 2, y: yT(200.5), size: 10, font: bold, color: BLACK });
     const sweek = Number(ex.storageWeekly) || 0, sVat = Math.round(sweek * 0.2 * 100) / 100, sCont = Number(ex.storageContainers) || 0;
-    if (rowH >= 13) {
-      L(sx0 + 4, 204 + rowH * 0.45, "Storage Charges", fs);
-      L(sx0 + 4, 204 + rowH - 3, "(per container, weekly)", 5.5, font, GREY);
-    } else {
-      L(sx0 + 4, base(204), "Storage Charges", fs);
-    }
+    L(sx0 + 4, base(204), "Storage Charges", fs);
+    const scw = font.widthOfTextAtSize("Storage Charges", fs);
+    L(sx0 + 4 + scw + 6, base(204), "(per container, weekly)", 6.5, font, GREY);
     if (sweek > 0) R(sx1 - 4, base(204), gbpPlain(sweek), fs);
     L(sx0 + 4, base(vT), "Vat @ 20%", fs); if (sweek > 0) R(sx1 - 4, base(vT), gbpPlain(sVat), fs);
     L(sx0 + 4, base(tT), "Total", fs, bold); if (sweek > 0) R(sx1 - 4, base(tT), gbpPlain(sweek + sVat), fs, bold);
