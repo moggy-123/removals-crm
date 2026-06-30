@@ -2429,30 +2429,41 @@ async function restoreBackup(currentData, inc) {
     (inc[t] || []).forEach(r => { if (r && r.id) byId[r.id] = r; });
     merged[t] = Object.values(byId);
   });
+  const counts = tables.map(t => `${merged[t].length} ${t}`).join(", ");
+  try { sessionStorage.setItem("restoreMsg", `Restore complete — now holding ${counts}.`); } catch {}
   await saveAndReload(merged);
 }
 
 function CompanyView({ data, setView }) {
   const restoreRef = useRef(null);
   const [restoring, setRestoring] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  async function doRestore(inc) {
+    if (!inc || (!inc.customers && !inc.enquiries && !inc.jobs && !inc.staff && !inc.vehicles)) {
+      alert("This doesn't look like a Removals CRM backup."); return;
+    }
+    const counts = ["customers", "enquiries", "jobs", "vehicles", "staff"].map(t => `${(inc[t] || []).length} ${t}`).join(", ");
+    if (!confirm(`Restore this backup?\n\nIt contains: ${counts}.\n\nMatching records are added or updated from the backup. Nothing already on the device is deleted.`)) return;
+    setRestoring(true);
+    try { await restoreBackup(data, inc); }
+    catch (err) { setRestoring(false); alert("Restore failed: " + ((err && err.message) || err)); }
+  }
   async function onRestoreFile(ev) {
     const file = ev.target.files && ev.target.files[0];
     ev.target.value = "";
     if (!file) return;
     try {
-      const payload = JSON.parse(await file.text());
-      const inc = (payload && payload.data) ? payload.data : payload;
-      if (!inc || (!inc.customers && !inc.enquiries && !inc.jobs && !inc.staff && !inc.vehicles)) {
-        alert("This doesn't look like a Removals CRM backup file."); return;
-      }
-      const counts = ["customers", "enquiries", "jobs", "vehicles", "staff"].map(t => `${(inc[t] || []).length} ${t}`).join(", ");
-      if (!confirm(`Restore from this backup?\n\nIt contains: ${counts}.\n\nMatching records will be added or updated from the backup. Nothing already on the device is deleted.`)) return;
-      setRestoring(true);
-      await restoreBackup(data, inc);
-      alert("Restore complete.");
-    } catch (err) {
-      alert("Couldn't read that file: " + ((err && err.message) || err));
-    } finally { setRestoring(false); }
+      const text = typeof file.text === "function" ? await file.text() : await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file); });
+      const payload = JSON.parse(text);
+      await doRestore(payload && payload.data ? payload.data : payload);
+    } catch (err) { alert("Couldn't read that file: " + ((err && err.message) || err)); }
+  }
+  async function onRestorePaste() {
+    let payload;
+    try { payload = JSON.parse(pasteText.trim()); }
+    catch { alert("That isn't valid backup text. Open your backup file, Select All, Copy, then paste it here."); return; }
+    await doRestore(payload && payload.data ? payload.data : payload);
   }
   const [vForm, setVForm] = useState(null);   // null | {} | record
   const [sForm, setSForm] = useState(null);
@@ -2463,7 +2474,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B3</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B4</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -2509,8 +2520,15 @@ function CompanyView({ data, setView }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <Btn onClick={() => exportBackup(data)}><Icon name="box" size={15} /> Download backup</Btn>
           <Btn variant="ghost" onClick={() => restoreRef.current && restoreRef.current.click()} disabled={restoring}>{restoring ? "Restoring…" : "Restore from file…"}</Btn>
+          <button onClick={() => setPasteOpen(o => !o)} style={{ background: "none", border: "none", color: TEAL, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 4, alignSelf: "flex-start" }}>{pasteOpen ? "Hide paste box" : "…or paste backup text instead"}</button>
+          {pasteOpen && (
+            <div>
+              <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} rows={4} placeholder="Open your backup file, Select All, Copy, then paste it here…" style={{ ...inputStyle, resize: "vertical", marginBottom: 8 }} />
+              <Btn variant="ghost" onClick={onRestorePaste} disabled={restoring || !pasteText.trim()}>{restoring ? "Restoring…" : "Restore pasted text"}</Btn>
+            </div>
+          )}
         </div>
-        <input ref={restoreRef} type="file" accept="application/json,.json" style={{ display: "none" }} onChange={onRestoreFile} />
+        <input ref={restoreRef} type="file" accept="application/json,.json,text/plain" style={{ display: "none" }} onChange={onRestoreFile} />
         <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 10, lineHeight: 1.5 }}>
           Tip: do this every week or so. On Supabase's paid plan your cloud data is also backed up automatically every day — this manual backup keeps working alongside it.
         </div>
@@ -3129,6 +3147,12 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState("syncing");
   const device = useDeviceType();
   const wide = device !== "phone";
+
+  useEffect(() => {
+    let m = null;
+    try { m = sessionStorage.getItem("restoreMsg"); if (m) sessionStorage.removeItem("restoreMsg"); } catch {}
+    if (m) setTimeout(() => alert(m), 400);
+  }, []);
 
   useEffect(() => {
     const onBack = () => resetZoom();
