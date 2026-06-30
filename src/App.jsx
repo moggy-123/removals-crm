@@ -851,6 +851,16 @@ function InventoryModal({ data, enquiry, onClose }) {
     return arr.length ? arr : ["Bedroom 1"];
   })();
   const [beds, setBeds] = useState(initialBedrooms);
+  // initialise lounges from existing lines ("Lounge / Living Room", "...2", "...3")
+  const initialLounges = (() => {
+    const set = new Set();
+    (enquiry.inventory || []).forEach(it => {
+      if (it.room && /^Lounge \/ Living Room( \d+)?$/.test(it.room)) set.add(it.room);
+    });
+    const arr = [...set].sort((a, b) => (parseInt(a.replace(/\D/g, "")) || 1) - (parseInt(b.replace(/\D/g, "")) || 1));
+    return arr.length ? arr : ["Lounge / Living Room"];
+  })();
+  const [lounges, setLounges] = useState(initialLounges);
   const [search, setSearch] = useState("");
   const [openSection, setOpenSection] = useState(ROOMS[0]);
   const [customItems, setCustomItems] = useState(getCustomItems());
@@ -895,6 +905,17 @@ function InventoryModal({ data, enquiry, onClose }) {
     setBeds(b => b.filter(x => x !== label));
     setLines(p => { const n = { ...p }; Object.keys(n).forEach(s => { if (n[s].room === label) delete n[s]; }); return n; });
   }
+  function addLounge() {
+    const nums = lounges.map(l => parseInt(l.replace(/\D/g, "")) || 1);
+    const next = `Lounge / Living Room ${Math.max(1, ...nums) + 1}`;
+    setLounges([...lounges, next]);
+    setOpenSection(next);
+  }
+  function removeLounge(label) {
+    if (!confirm(`Remove ${label} and its items?`)) return;
+    setLounges(l => l.filter(x => x !== label));
+    setLines(p => { const n = { ...p }; Object.keys(n).forEach(s => { if (n[s].room === label) delete n[s]; }); return n; });
+  }
 
   const totals = inventoryTotals(Object.values(lines).filter(v => v.qty > 0).map(v => ({ cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty })));
   const setDismantle = (slot, val) => setLines(p => p[slot] ? { ...p, [slot]: { ...p[slot], dismantle: val } } : p);
@@ -933,14 +954,15 @@ function InventoryModal({ data, enquiry, onClose }) {
     if (room === "Bedroom") {
       beds.forEach(lbl => sections.push({ label: lbl, catalogRoom: "Bedroom", isBedroom: true }));
       sections.push({ addBedroom: true });
-    } else if (room === "Lounge / Living Room 2") {
-      sections.push({ label: room, catalogRoom: "Lounge / Living Room" });
+    } else if (room === "Lounge / Living Room") {
+      lounges.forEach(lbl => sections.push({ label: lbl, catalogRoom: "Lounge / Living Room", isLounge: true }));
+      sections.push({ addLounge: true });
     } else {
       sections.push({ label: room, catalogRoom: room });
     }
   });
 
-  function Section({ label, catalogRoom, isBedroom }) {
+  function Section({ label, catalogRoom, isBedroom, isLounge }) {
     const fhNameRef = useRef(null), fhVolRef = useRef(null);
     const addFh = () => {
       const name = (fhNameRef.current?.value || "").trim();
@@ -973,6 +995,7 @@ function InventoryModal({ data, enquiry, onClose }) {
           <span>{label}</span>
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {isBedroom && beds.length > 1 && <span onClick={e => { e.stopPropagation(); removeBedroom(label); }} style={{ color: "#DC2626", fontSize: 13, fontWeight: 600 }}>Remove</span>}
+            {isLounge && lounges.length > 1 && <span onClick={e => { e.stopPropagation(); removeLounge(label); }} style={{ color: "#DC2626", fontSize: 13, fontWeight: 600 }}>Remove</span>}
             {sectionQty > 0 && <span style={{ background: TEAL, color: "#fff", borderRadius: 99, fontSize: 12, padding: "1px 8px", fontWeight: 700 }}>{sectionQty}</span>}
             <span style={{ color: "#9CA3AF" }}>{isOpen ? "▾" : "▸"}</span>
           </span>
@@ -1038,6 +1061,8 @@ function InventoryModal({ data, enquiry, onClose }) {
 
       {sections.map((s, i) => s.addBedroom
         ? (!search && <button key="addbed" onClick={addBedroom} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another bedroom</button>)
+        : s.addLounge
+        ? (!search && <button key="addlounge" onClick={addLounge} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another lounge</button>)
         : <Section key={s.label} {...s} />
       )}
 
