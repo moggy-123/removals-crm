@@ -135,7 +135,6 @@ export const WARDROBE_BOX_ID = "box-wardrobe";
 export const ROOMS = [
   "Hallway",
   "Lounge / Living Room",
-  "Lounge / Living Room 2",
   "Dining Room",
   "Conservatory",
   "Kitchen",
