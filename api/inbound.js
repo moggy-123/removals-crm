@@ -9,7 +9,7 @@
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://vpcygvdjfgiwlsdyxhzs.supabase.co";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwY3lndmRqZmdpd2xzZHl4aHpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4OTU0MTQsImV4cCI6MjA5NzQ3MTQxNH0.sk4-r5vvlYuxHcaq8Ee5TXflgQ0fF62rAOP6ZABY51g";
 // CHANGE THIS to your own secret, and use the same value in the ?key= URL.
-const INBOUND_SECRET = process.env.INBOUND_SECRET || "Dave-1966-2026";
+const INBOUND_SECRET = process.env.INBOUND_SECRET || "Dave-1966";
 
 const EMAIL_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 function monthNameToYM(name) {
