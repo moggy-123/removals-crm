@@ -810,7 +810,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
       <Field label="Floor / level"><Input value={f.toFloor} onChange={v => set("toFloor", v)} placeholder="e.g. Ground, 2nd" /></Field>
       <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={f.toAccess} onChange={v => set("toAccess", v)} rows={2} /></Field>
 
-      <Field label="General notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
+      <Field label="General notes"><Textarea value={f.notes} onChange={v => set("notes", v.split("\n").slice(0, 8).join("\n"))} rows={8} /></Field>
 
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
@@ -861,6 +861,23 @@ function InventoryModal({ data, enquiry, onClose }) {
     return arr.length ? arr : ["Lounge / Living Room"];
   })();
   const [lounges, setLounges] = useState(initialLounges);
+  // ── Freehand mode (alternative to the detailed catalogue) ──
+  const [invMode, setInvMode] = useState((enquiry.inventory || []).some(it => it.freehand) ? "freehand" : "detailed");
+  const [freeRooms, setFreeRooms] = useState(() => {
+    const out = {};
+    const ensure = r => (out[r] = out[r] || { text: "", cuFt: "", wardrobe: 0 });
+    (enquiry.inventory || []).forEach(it => {
+      if (!it.freehand || typeof it.slot !== "string") return;
+      if (it.slot.startsWith("fh::")) { const r = ensure(it.room); r.text = it.raw ?? it.name ?? ""; r.cuFt = it.cuFt || ""; }
+      else if (it.slot.startsWith("fhwb::")) { const r = ensure(it.room); r.wardrobe = it.qty || 0; }
+    });
+    return out;
+  });
+  const [dismantleNote, setDismantleNote] = useState(() => {
+    const d = (enquiry.inventory || []).find(it => it.freehand && it.slot === "fh-dismantle");
+    return d ? (d.raw ?? d.name ?? "") : "";
+  });
+  const setFree = (label, key, val) => setFreeRooms(p => ({ ...p, [label]: { text: "", cuFt: "", wardrobe: 0, ...p[label], [key]: val } }));
   const [search, setSearch] = useState("");
   const [openSection, setOpenSection] = useState(ROOMS[0]);
   const [customItems, setCustomItems] = useState(getCustomItems());
@@ -918,6 +935,13 @@ function InventoryModal({ data, enquiry, onClose }) {
   }
 
   const totals = inventoryTotals(Object.values(lines).filter(v => v.qty > 0).map(v => ({ cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty })));
+  const freeTotals = (() => {
+    let cuFt = 0;
+    Object.values(freeRooms).forEach(r => { cuFt += (Number(r.cuFt) || 0) + (Number(r.wardrobe) || 0) * 12; });
+    cuFt = Math.round(cuFt * 100) / 100;
+    return { cuFt, m3: Math.round(cuFt * 0.0283168 * 10) / 10, kg: 0 };
+  })();
+  const aTot = invMode === "freehand" ? freeTotals : totals;
   const setDismantle = (slot, val) => setLines(p => p[slot] ? { ...p, [slot]: { ...p[slot], dismantle: val } } : p);
   const toggleWho = slot => setLines(p => p[slot] ? { ...p, [slot]: { ...p[slot], dismantle: p[slot].dismantle === "Customer" ? "Mover" : "Customer" } } : p);
   const DisCheck = ({ slot }) => {
@@ -935,14 +959,31 @@ function InventoryModal({ data, enquiry, onClose }) {
     if (!v || !v.dismantle) return null;
     return <button onClick={() => toggleWho(slot)} style={{ marginTop: 6, border: "none", background: TEAL, color: "#fff", borderRadius: 99, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>Dismantle &amp; reassemble: {v.dismantle} ⟲</button>;
   };
-  const rec = recommendVehicle(totals.cuFt);
+  const rec = recommendVehicle(aTot.cuFt);
 
   async function save() {
-    const inventory = Object.entries(lines).filter(([, v]) => v.qty !== 0)
-      .map(([slot, v]) => ({ slot, catalogId: v.catalogId ?? null, room: v.room, name: v.name, cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty, dismantle: v.dismantle || "" }));
+    let inventory, vol;
+    if (invMode === "freehand") {
+      inventory = [];
+      Object.entries(freeRooms).forEach(([room, r]) => {
+        const text = (r.text || "").trim();
+        const cuFt = Number(r.cuFt) || 0;
+        const wb = Number(r.wardrobe) || 0;
+        if (text || cuFt) {
+          inventory.push({ slot: "fh::" + room, room, name: (text.replace(/\s*\n\s*/g, " · ") || "(see volume)"), raw: text, cuFt: Math.round(cuFt * 100) / 100, m3: Math.round(cuFt * 0.0283168 * 1000) / 1000, kg: 0, qty: 1, freehand: true });
+        }
+        if (wb > 0) inventory.push({ slot: "fhwb::" + room, room, name: "Hanging Wardrobe Box", cuFt: 12, m3: 0.34, kg: 18, qty: wb, freehand: true, wardrobe: true });
+      });
+      if (dismantleNote.trim()) inventory.push({ slot: "fh-dismantle", room: "Dismantle / Reassemble", name: dismantleNote.trim().replace(/\s*\n\s*/g, " · "), raw: dismantleNote.trim(), cuFt: 0, m3: 0, kg: 0, qty: 1, freehand: true, dismantleNote: true });
+      vol = freeTotals;
+    } else {
+      inventory = Object.entries(lines).filter(([, v]) => v.qty !== 0)
+        .map(([slot, v]) => ({ slot, catalogId: v.catalogId ?? null, room: v.room, name: v.name, cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty, dismantle: v.dismantle || "" }));
+      vol = totals;
+    }
     const rec2 = {
       ...enquiry, inventory,
-      volumeCuFt: totals.cuFt, volumeM3: totals.m3, weightKg: totals.kg,
+      volumeCuFt: vol.cuFt, volumeM3: vol.m3, weightKg: vol.kg,
       status: enquiry.status === "New" ? "Surveyed" : enquiry.status,
     };
     await saveAndReload(upsertLocal(data, "enquiries", rec2));
@@ -1055,15 +1096,67 @@ function InventoryModal({ data, enquiry, onClose }) {
     );
   }
 
+  const removeLink = { color: "#DC2626", fontSize: 13, fontWeight: 600 };
+  function renderFree(s) {
+    const { label, isBedroom, isLounge } = s;
+    const r = freeRooms[label] || { text: "", cuFt: "", wardrobe: 0 };
+    const isOpen = openSection === label;
+    const showWardrobe = isBedroom || label === "Hallway";
+    const hasData = (r.text || "").trim() || Number(r.cuFt) > 0 || Number(r.wardrobe) > 0;
+    return (
+      <div key={label} style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
+        <button onClick={() => setOpenSection(isOpen ? null : label)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#111827" }}>
+          <span>{label}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {isBedroom && beds.length > 1 && <span onClick={e => { e.stopPropagation(); removeBedroom(label); }} style={removeLink}>Remove</span>}
+            {isLounge && lounges.length > 1 && <span onClick={e => { e.stopPropagation(); removeLounge(label); }} style={removeLink}>Remove</span>}
+            {hasData && <span style={{ background: TEAL, color: "#fff", borderRadius: 99, fontSize: 12, padding: "1px 8px", fontWeight: 700 }}>{Number(r.cuFt) > 0 ? `${r.cuFt} ft³` : "✓"}</span>}
+            <span style={{ color: "#9CA3AF" }}>{isOpen ? "▾" : "▸"}</span>
+          </span>
+        </button>
+        {isOpen && (
+          <div style={{ padding: "10px 14px" }}>
+            <textarea value={r.text} onChange={e => setFree(label, "text", e.target.value)} rows={4} placeholder="List the furniture in this room…" style={{ ...inputStyle, resize: "vertical", marginBottom: 8 }} />
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>Volume</label>
+              <input type="number" inputMode="decimal" value={r.cuFt} onChange={e => setFree(label, "cuFt", e.target.value)} placeholder="cu ft" style={{ ...inputStyle, width: 90 }} />
+              <span style={{ fontSize: 12, color: "#9CA3AF" }}>cu ft</span>
+              {showWardrobe && (
+                <span style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+                  <label style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>Wardrobe boxes</label>
+                  <button onClick={() => setFree(label, "wardrobe", Math.max(0, (Number(r.wardrobe) || 0) - 1))} style={stepBtn(true)}>−</button>
+                  <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700 }}>{Number(r.wardrobe) || 0}</span>
+                  <button onClick={() => setFree(label, "wardrobe", (Number(r.wardrobe) || 0) + 1)} style={stepBtn(true)}>+</button>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Modal title="Survey / Inventory" onClose={onClose}>
-      <div style={{ marginBottom: 12 }}><Input value={search} onChange={setSearch} placeholder="🔍 Search items…" /></div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {[["detailed", "Detailed list"], ["freehand", "Freehand"]].map(([m, lbl]) => (
+          <button key={m} onClick={() => setInvMode(m)} style={{ flex: 1, padding: "9px", borderRadius: 9, border: `1.5px solid ${invMode === m ? TEAL : "#E5E7EB"}`, background: invMode === m ? "#F0FDFA" : "#fff", color: invMode === m ? TEAL : "#6B7280", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{lbl}</button>
+        ))}
+      </div>
 
-      {sections.map((s, i) => s.addBedroom
-        ? (!search && <button key="addbed" onClick={addBedroom} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another bedroom</button>)
-        : s.addLounge
-        ? (!search && <button key="addlounge" onClick={addLounge} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another lounge</button>)
-        : <Section key={s.label} {...s} />
+      {invMode === "detailed" && <div style={{ marginBottom: 12 }}><Input value={search} onChange={setSearch} placeholder="🔍 Search items…" /></div>}
+
+      {sections.map(s => {
+        if (s.addBedroom) return (invMode === "freehand" || !search) ? <button key="addbed" onClick={addBedroom} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another bedroom</button> : null;
+        if (s.addLounge) return (invMode === "freehand" || !search) ? <button key="addlounge" onClick={addLounge} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another lounge</button> : null;
+        return invMode === "freehand" ? renderFree(s) : <Section key={s.label} {...s} />;
+      })}
+
+      {invMode === "freehand" && (
+        <div style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, padding: "12px 14px" }}>
+          <div style={{ fontWeight: 700, color: "#111827", marginBottom: 8 }}>Dismantle / Reassemble</div>
+          <textarea value={dismantleNote} onChange={e => setDismantleNote(e.target.value)} rows={3} placeholder="Items to dismantle and reassemble…" style={{ ...inputStyle, resize: "vertical" }} />
+        </div>
       )}
 
       {/* sticky totals */}
@@ -1071,12 +1164,14 @@ function InventoryModal({ data, enquiry, onClose }) {
         <div style={{ background: NAVY, color: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
             <span style={{ fontSize: 13, opacity: .85 }}>Total volume</span>
-            <span style={{ fontWeight: 800 }}>{totals.cuFt} cu ft · {totals.m3} m³</span>
+            <span style={{ fontWeight: 800 }}>{aTot.cuFt} cu ft · {aTot.m3} m³</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 13, opacity: .85 }}>Est. weight</span>
-            <span style={{ fontWeight: 700 }}>{totals.kg} kg</span>
-          </div>
+          {invMode === "detailed" && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 13, opacity: .85 }}>Est. weight</span>
+              <span style={{ fontWeight: 700 }}>{aTot.kg} kg</span>
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, opacity: .85 }}>Recommended</span>
             <span style={{ fontWeight: 700 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads} loads` : ""}</span>
