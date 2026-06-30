@@ -2451,9 +2451,32 @@ async function restoreBackup(currentData, inc) {
   await saveAndReload(merged);
 }
 
+// Permanently delete all customers, enquiries and jobs (keeps staff & vehicles).
+// Deletes each record properly (tombstone + cloud delete) so it stays gone on every device.
+async function wipeBusinessData(data) {
+  const tables = ["jobs", "enquiries", "customers"];
+  SAVING_IN_PROGRESS = true;
+  showSavingOverlay();
+  const all = [];
+  tables.forEach(t => (data[t] || []).forEach(r => { if (r && r.id) all.push([t, r.id]); }));
+  all.forEach(([, id]) => addTombstone(id));
+  for (const [t, id] of all) { try { await deleteRecord(t, id); } catch {} }
+  const cleared = { ...data, customers: [], enquiries: [], jobs: [] };
+  localStorage.setItem(DB_KEY, JSON.stringify(cleared));
+  try {
+    const sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}");
+    all.forEach(([, id]) => { delete sigs[id]; });
+    localStorage.setItem(SIG_KEY, JSON.stringify(sigs));
+  } catch {}
+  try { sessionStorage.setItem("restoreMsg", "All customers, enquiries and jobs have been deleted."); } catch {}
+  SAVING_IN_PROGRESS = false;
+  window.location.reload();
+}
+
 function CompanyView({ data, setView }) {
   const restoreRef = useRef(null);
   const [restoring, setRestoring] = useState(false);
+  const [wiping, setWiping] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   async function doRestore(inc) {
@@ -2482,6 +2505,15 @@ function CompanyView({ data, setView }) {
     catch { alert("That isn't valid backup text. Open your backup file, Select All, Copy, then paste it here."); return; }
     await doRestore(payload && payload.data ? payload.data : payload);
   }
+  async function onWipe() {
+    const nc = (data.customers || []).length, ne = (data.enquiries || []).length, nj = (data.jobs || []).length;
+    if (nc + ne + nj === 0) { alert("There are no customers, enquiries or jobs to delete."); return; }
+    if (!confirm(`Delete ALL ${nc} customers, ${ne} enquiries and ${nj} jobs?\n\nStaff and vehicles are kept. This cannot be undone except by restoring a backup.`)) return;
+    if (!confirm("Last check — permanently clear your live data on every device?")) return;
+    setWiping(true);
+    try { await wipeBusinessData(data); }
+    catch (err) { setWiping(false); alert("Wipe failed: " + ((err && err.message) || err)); }
+  }
   const [vForm, setVForm] = useState(null);   // null | {} | record
   const [sForm, setSForm] = useState(null);
   const vehicles = [...(data.vehicles || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -2491,7 +2523,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B5</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B6</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -2549,6 +2581,14 @@ function CompanyView({ data, setView }) {
         <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 10, lineHeight: 1.5 }}>
           Tip: do this every week or so. On Supabase's paid plan your cloud data is also backed up automatically every day — this manual backup keeps working alongside it.
         </div>
+      </Card>
+
+      <Card style={{ marginBottom: 0, marginTop: 14, border: "1px solid #FECACA", background: "#FEF2F2" }}>
+        <h4 style={{ margin: "0 0 6px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#DC2626", fontWeight: 800 }}>Danger zone</h4>
+        <div style={{ fontSize: 13, color: "#7F1D1D", marginBottom: 12, lineHeight: 1.5 }}>
+          Permanently delete every customer, enquiry and job. Your staff and vehicles are kept. <b>Download a backup first.</b>
+        </div>
+        <Btn variant="ghost" onClick={onWipe} disabled={wiping} style={{ color: "#DC2626", borderColor: "#FCA5A5", width: "100%" }}>{wiping ? "Deleting…" : "Delete all customers, enquiries & jobs"}</Btn>
       </Card>
 
       {vForm && <VehicleForm data={data} editVehicle={vForm.id ? vForm : null} onClose={() => setVForm(null)} />}
