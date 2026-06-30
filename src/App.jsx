@@ -1423,7 +1423,7 @@ async function buildQuotePdf(e, c) {
   const fromAddr = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join("  ");
   const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join("  ");
   const surveyWhen = e.surveyDate ? fmtUK(e.surveyDate) : "";
-  const moveWhen = e.preferredDate ? (fmtUK(e.preferredDate) + (e.exchanged ? "  (Exchanged)" : "")) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
+  const moveWhen = e.preferredDate ? fmtUK(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
 
   const res = await fetch("/quote-template.pdf");
   if (!res.ok) throw new Error("Template not found — upload quote-template.pdf to the public folder on GitHub.");
@@ -1440,9 +1440,9 @@ async function buildQuotePdf(e, c) {
   const L = (x, base, t, s = 9, f = font, col = black) => { const tt = clean(t); if (!tt) return; p1.drawText(tt, { x, y: H - base, size: s, font: f, color: col }); };
   const R = (xr, base, t, s = 9, f = bold) => { const tt = clean(t); if (!tt) return; const w = f.widthOfTextAtSize(tt, s); p1.drawText(tt, { x: xr - w, y: H - base, size: s, font: f, color: black }); };
 
-  L(92, 92.5, surveyor); L(304, 92.5, surveyWhen); L(472, 93, ref, 12, bold, red);
+  L(92, 92.5, surveyor); L(304, 92.5, surveyWhen); L(472, 93, ref, 13.2, bold, red);
   L(92, 109, c?.name); L(304, 109, c?.homePhone); L(470, 109, c?.phone);
-  L(92, 126, c?.email); L(304, 126, moveWhen);
+  L(92, 126, c?.email); L(304, 126, moveWhen); L(472, 126, e.exchanged ? "Yes" : "No");
   L(92, 144, fromAddr); L(92, 180, toAddr);
   // ── MOVING grid: dynamic — one row per quote line, totals directly beneath ──
   {
