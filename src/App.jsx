@@ -641,27 +641,112 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
 }
 
 // ── Enquiry form (create / edit) ────────────────────────────────────────────
+const EMAIL_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+function monthNameToYM(name) {
+  const idx = EMAIL_MONTHS.indexOf((name || "").toLowerCase());
+  if (idx < 0) return "";
+  const now = new Date();
+  let y = now.getFullYear();
+  if (idx < now.getMonth()) y += 1;
+  return `${y}-${String(idx + 1).padStart(2, "0")}`;
+}
+function stripEmailHtml(html) {
+  return (html || "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|tr|li|h[1-6]|td|th|table)>/gi, "\n").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;/g, "'").replace(/&quot;/gi, '"').replace(/[ \t]+/g, " ");
+}
+const EMAIL_LABELS = ["Exact Move Date", "How did you here of us", "How did you hear of us", "How did you hear", "Special Requirements", "Special Requirement", "Post Code", "Postcode", "Bedrooms", "Furnished", "Property Type", "Property", "Address Line 1", "Address", "Storage", "Packing", "Access", "Source", "Email", "Phone", "Mobile", "Title", "Name", "City", "Town", "From", "To"];
+function normalizeEmailLabels(t) {
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const L of EMAIL_LABELS) t = t.replace(new RegExp("[ \\t]*\\b" + esc(L) + "[ \\t]*:", "gi"), "\n" + L + ":");
+  return t.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "").trim();
+}
+function repairLabelValueLines(t) {
+  const lines = t.split("\n").map(l => l.trim()).filter(l => l !== "");
+  const bareLabel = l => { const m = l.match(/^([A-Za-z][A-Za-z /]*?)\s*:\s*$/); return m ? m[1].toLowerCase() : null; };
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const bl = bareLabel(lines[i]);
+    if (bl && bl !== "from" && bl !== "to") {
+      const nxt = lines[i + 1];
+      if (nxt && bareLabel(nxt) === null && !/^(from|to)\s*:?\s*$/i.test(nxt)) { out.push(lines[i].replace(/\s*$/, "") + " " + nxt); i++; continue; }
+    }
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
 function parseEnquiryEmail(text) {
-  const t = (text || "").replace(/\r/g, "");
-  const out = { name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", toAddress1: "", toTown: "", toPostcode: "", preferredDate: "", notes: "" };
+  let t = (text || "").replace(/\r/g, "");
+  if (/<[a-z!\/][^>]*>/i.test(t)) t = stripEmailHtml(t);
+  t = repairLabelValueLines(normalizeEmailLabels(t));
+  const out = { name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", fromAccess: "", fromPropertyType: "", fromBedrooms: "", toAddress1: "", toTown: "", toPostcode: "", toAccess: "", toPropertyType: "", preferredDate: "", moveMonth: "", dateFlexible: false, notes: "" };
   const PC = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i;
   const PCG = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/gi;
   const em = t.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); if (em) out.email = em[0];
   const ph = t.match(/(\+?44|0)[\d\s()-]{8,13}\d/); if (ph) { let p = ph[0].replace(/[()\s-]/g, ""); if (p.startsWith("+44")) p = "0" + p.slice(3); out.phone = p; }
-  const field = labels => { for (const L of labels) { const m = t.match(new RegExp("^\\s*" + L + "\\s*[:\\-]\\s*(.+)$", "im")); if (m && m[1].trim()) return m[1].trim(); } return ""; };
-  out.name = field(["name", "customer name", "full name", "client name", "contact name", "your name"]);
-  const fromLine = field(["moving from", "move from", "collection address", "collection", "current address", "from address", "pickup", "from"]);
-  const toLine = field(["moving to", "move to", "delivery address", "delivery", "destination", "to address", "drop off", "to"]);
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const fieldIn = (block, labels) => { for (const L of labels) { const m = block.match(new RegExp("^[ \\t]*" + esc(L) + "[ \\t]*:[ \\t]*(.+?)[ \\t]*$", "im")); if (m && m[1].trim()) return m[1].trim(); } return ""; };
+
+  // Split into top / From / To sections when the form uses "From:" / "To:" headers
+  let topBlock = t, fromBlock = "", toBlock = "", sectioned = false;
+  const mFrom = t.match(/^[ \t]*from[ \t]*:?[ \t]*$/im);
+  const mTo = t.match(/^[ \t]*to[ \t]*:?[ \t]*$/im);
+  if (mFrom && mTo && mFrom.index < mTo.index) {
+    sectioned = true;
+    topBlock = t.slice(0, mFrom.index);
+    fromBlock = t.slice(mFrom.index + mFrom[0].length, mTo.index);
+    toBlock = t.slice(mTo.index + mTo[0].length);
+  }
+
+  const title = fieldIn(topBlock, ["title"]);
+  const nm = fieldIn(topBlock, ["name", "customer name", "full name", "client name", "contact name", "your name"]);
+  out.name = [title, nm].filter(Boolean).join(" ").trim();
+
   const splitPC = line => { if (!line) return ["", ""]; const m = line.match(PC); const pc = m ? m[0].toUpperCase().replace(/\s+/g, " ") : ""; const rest = line.replace(PC, "").replace(/[,\s]+$/, "").trim(); return [rest, pc]; };
-  let [fa, fpc] = splitPC(fromLine); let [ta, tpc] = splitPC(toLine);
-  const allPC = (t.match(PCG) || []).map(s => s.toUpperCase().replace(/\s+/g, " "));
-  out.fromAddress1 = fa; out.toAddress1 = ta;
-  out.fromPostcode = fpc || allPC[0] || ""; out.toPostcode = tpc || allPC[1] || "";
-  out.fromTown = field(["from town", "from city"]); out.toTown = field(["to town", "to city", "destination town"]);
-  const dm = t.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  let fromBeds = "", toBeds = "", fromFurn = "";
+  if (sectioned) {
+    out.fromAddress1 = fieldIn(fromBlock, ["address", "address line 1", "street", "house"]);
+    out.fromTown = fieldIn(fromBlock, ["city", "town"]);
+    out.fromPostcode = (fieldIn(fromBlock, ["post code", "postcode"]) || "").toUpperCase().replace(/\s+/g, " ");
+    out.fromAccess = fieldIn(fromBlock, ["access"]);
+    out.fromPropertyType = fieldIn(fromBlock, ["property", "property type"]);
+    out.fromBedrooms = fromBeds = fieldIn(fromBlock, ["bedrooms", "beds"]);
+    fromFurn = fieldIn(fromBlock, ["furnished"]);
+    out.toAddress1 = fieldIn(toBlock, ["address", "address line 1", "street", "house"]);
+    out.toTown = fieldIn(toBlock, ["city", "town"]);
+    out.toPostcode = (fieldIn(toBlock, ["post code", "postcode"]) || "").toUpperCase().replace(/\s+/g, " ");
+    out.toAccess = fieldIn(toBlock, ["access"]);
+    out.toPropertyType = fieldIn(toBlock, ["property", "property type"]);
+    toBeds = fieldIn(toBlock, ["bedrooms", "beds"]);
+  } else {
+    const fromLine = fieldIn(t, ["moving from", "move from", "collection address", "collection", "current address", "from address", "pickup", "from"]);
+    const toLine = fieldIn(t, ["moving to", "move to", "delivery address", "delivery", "destination", "to address", "drop off", "to"]);
+    const [fa, fpc] = splitPC(fromLine); const [ta, tpc] = splitPC(toLine);
+    const allPC = (t.match(PCG) || []).map(s => s.toUpperCase().replace(/\s+/g, " "));
+    out.fromAddress1 = fa; out.toAddress1 = ta;
+    out.fromPostcode = fpc || allPC[0] || ""; out.toPostcode = tpc || allPC[1] || "";
+    out.fromTown = fieldIn(t, ["from town", "from city"]); out.toTown = fieldIn(t, ["to town", "to city", "destination town"]);
+  }
+
+  // Move date / month
+  const moveVal = fieldIn(topBlock, ["exact move date", "move date", "moving date", "preferred date", "preferred move date", "date"]);
+  const dm = (moveVal || t).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
   if (dm) { let y = dm[3]; if (y.length === 2) y = "20" + y; out.preferredDate = `${y.padStart(4, "0")}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}`; }
+  if (!out.preferredDate) { const mm = (moveVal || "").match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i); if (mm) out.moveMonth = monthNameToYM(mm[1]); }
+  if (!out.preferredDate && /\bno\b/i.test(moveVal)) out.dateFlexible = true;
+
   if (!out.name && out.email) out.name = out.email.split("@")[0].replace(/[._\-]+/g, " ").replace(/\b\w/g, ch => ch.toUpperCase()).trim();
-  out.notes = t.trim().slice(0, 1500);
+
+  // Tidy notes from the extra fields (so nothing is lost)
+  const extras = [];
+  const add = (label, val) => { if (val && val.trim()) extras.push(`${label}: ${val.trim()}`); };
+  add("Packing", fieldIn(topBlock, ["packing"]));
+  add("Storage", fieldIn(topBlock, ["storage"]));
+  add("Heard via", fieldIn(topBlock, ["how did you here of us", "how did you hear of us", "how did you hear", "source", "referral"]));
+  add("Special requirements", fieldIn(topBlock, ["special requirements", "special requirement", "requirements"]));
+  const fromProp = [out.fromPropertyType, fromBeds ? `${fromBeds} bed` : "", fromFurn].filter(Boolean).join(", ");
+  const toProp = [out.toPropertyType, toBeds ? `${toBeds} bed` : ""].filter(Boolean).join(", ");
+  add("From property", fromProp);
+  add("To property", toProp);
+  out.notes = extras.length ? extras.join("\n") : t.trim().slice(0, 1200);
   return out;
 }
 
@@ -691,8 +776,11 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     setCustomerId("");
     setF(prev => ({ ...prev,
       fromAddress1: p.fromAddress1 || prev.fromAddress1, fromTown: p.fromTown || prev.fromTown, fromPostcode: p.fromPostcode || prev.fromPostcode,
+      fromAccess: p.fromAccess || prev.fromAccess, fromPropertyType: p.fromPropertyType || prev.fromPropertyType, fromBedrooms: p.fromBedrooms || prev.fromBedrooms,
       toAddress1: p.toAddress1 || prev.toAddress1, toTown: p.toTown || prev.toTown, toPostcode: p.toPostcode || prev.toPostcode,
-      preferredDate: p.preferredDate || prev.preferredDate,
+      toAccess: p.toAccess || prev.toAccess, toPropertyType: p.toPropertyType || prev.toPropertyType,
+      preferredDate: p.preferredDate || prev.preferredDate, moveMonth: p.moveMonth || prev.moveMonth,
+      dateFlexible: p.dateFlexible || prev.dateFlexible,
       notes: prev.notes ? prev.notes : p.notes,
     }));
     setPickerKey(k => k + 1);
@@ -2523,7 +2611,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B6</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B8</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
