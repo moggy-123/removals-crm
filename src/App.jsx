@@ -172,6 +172,14 @@ function addTombstone(id) {
 function getTombstones() {
   try { return JSON.parse(localStorage.getItem(TOMB_KEY) || "[]"); } catch { return []; }
 }
+// Lift tombstones (used by Restore so deleted records can come back)
+function removeTombstones(ids) {
+  try {
+    const set = new Set(ids);
+    const t = (JSON.parse(localStorage.getItem(TOMB_KEY) || "[]")).filter(id => !set.has(id));
+    localStorage.setItem(TOMB_KEY, JSON.stringify(t));
+  } catch {}
+}
 
 // Push only changed/new records (compared against last-synced signatures)
 async function pushChangedOnly(data) {
@@ -2423,12 +2431,21 @@ async function exportBackup(data) {
 async function restoreBackup(currentData, inc) {
   const tables = ["customers", "enquiries", "jobs", "vehicles", "staff"];
   const merged = { ...EMPTY };
+  const restoredIds = [];
   tables.forEach(t => {
     const byId = {};
     (currentData[t] || []).forEach(r => { if (r && r.id) byId[r.id] = r; });
-    (inc[t] || []).forEach(r => { if (r && r.id) byId[r.id] = r; });
+    (inc[t] || []).forEach(r => { if (r && r.id) { byId[r.id] = r; restoredIds.push(r.id); } });
     merged[t] = Object.values(byId);
   });
+  // Un-delete: clear tombstones so the merge can't strip them back out,
+  // and drop their sync signatures so they're re-pushed to the cloud.
+  removeTombstones(restoredIds);
+  try {
+    const sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}");
+    restoredIds.forEach(id => { delete sigs[id]; });
+    localStorage.setItem(SIG_KEY, JSON.stringify(sigs));
+  } catch {}
   const counts = tables.map(t => `${merged[t].length} ${t}`).join(", ");
   try { sessionStorage.setItem("restoreMsg", `Restore complete — now holding ${counts}.`); } catch {}
   await saveAndReload(merged);
@@ -2474,7 +2491,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B4</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B5</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
