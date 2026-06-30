@@ -69,6 +69,24 @@ function inventoryTotals(inv) {
   }
   return { cuFt: Math.round(cuFt), m3: Math.round(m3 * 100) / 100, kg: Math.round(kg) };
 }
+// Canonical room ordering — always matches the inventory input fields (ROOMS),
+// with Bedroom 1..N / Lounge 1..N kept in sequence and Dismantle notes last.
+function roomRank(label) {
+  if (!label) return 9999;
+  if (label === "Dismantle / Reassemble") return 9998;
+  const base = label.replace(/\s+\d+$/, "");
+  const num = parseInt((label.match(/\s(\d+)$/) || [])[1] || "1", 10);
+  let i = ROOMS.indexOf(label);
+  if (i === -1) i = ROOMS.indexOf(base);
+  if (i === -1) return 9997;
+  return i + Math.min(num, 99) / 100;
+}
+function sortInventoryByRoom(inv) {
+  return (inv || []).map((it, n) => [it, n]).sort((a, b) => {
+    const d = roomRank(a[0].room) - roomRank(b[0].room);
+    return d !== 0 ? d : a[1] - b[1];
+  }).map(([it]) => it);
+}
 function quoteTotal(lines, vat) {
   const sub = (lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
   return Math.round((vat ? sub * 1.2 : sub) * 100) / 100;
@@ -982,7 +1000,7 @@ function InventoryModal({ data, enquiry, onClose }) {
       vol = totals;
     }
     const rec2 = {
-      ...enquiry, inventory,
+      ...enquiry, inventory: sortInventoryByRoom(inventory),
       volumeCuFt: vol.cuFt, volumeM3: vol.m3, weightKg: vol.kg,
       status: enquiry.status === "New" ? "Surveyed" : enquiry.status,
     };
@@ -1826,6 +1844,7 @@ async function buildSurveyPdf(e, c, data) {
   else {
     const order = [], idx = {};
     inv.forEach(it => { const r = it.room || "Other"; if (!(r in idx)) { idx[r] = order.length; order.push([r, []]); } order[idx[r]][1].push(it); });
+    order.sort((a, b) => roomRank(a[0]) - roomRank(b[0]));
     order.forEach(([room, items]) => {
       const moving = items.filter(it => it.qty > 0), staying = items.filter(it => it.qty < 0);
       ensure(20); at(room, M, y, 10, bold, navy); y -= 14;
