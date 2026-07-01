@@ -378,6 +378,10 @@ function Dashboard({ data, setView }) {
     .filter(e => e.followUpDate && !["Won", "Lost"].includes(e.status))
     .sort((a, b) => (a.followUpDate || "").localeCompare(b.followUpDate || ""))
     .slice(0, 6);
+  const custById = id => (data.customers || []).find(c => c.id === id) || {};
+  const toCall = enquiries
+    .filter(e => e.status === "New" && !e.surveyDate)
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   const todaysSurveys = enquiries
     .filter(e => e.surveyDate === todayISO() && e.status !== "Lost")
     .sort((a, b) => (a.surveyTime || "").localeCompare(b.surveyTime || ""));
@@ -476,6 +480,31 @@ function Dashboard({ data, setView }) {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>{staffActive.map(s => availChip(s.name, bookedStaffToday.has(s.name)))}</div>
             </>}
           </Card>
+        </>
+      )}
+
+      {toCall.length > 0 && (
+        <>
+          <SectionTitle>To call ({toCall.length})</SectionTitle>
+          {toCall.map(e => {
+            const c = custById(e.customerId);
+            const route = [e.fromPostcode || e.fromTown, e.toPostcode || e.toTown].filter(Boolean).join(" → ");
+            const when = e.preferredDate ? fmtDateShort(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
+            return (
+              <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#CDE7E2", background: "#F4FBF9" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
+                    <div style={{ fontSize: 13, color: "#6A7B77", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{route || "New enquiry — survey not booked"}</div>
+                    {when && <div style={{ fontSize: 12, color: "#9CA3AF" }}>Move: {when}{e.dateFlexible ? " (flexible)" : ""}</div>}
+                  </div>
+                  {c.phone
+                    ? <a href={`tel:${c.phone}`} onClick={ev => ev.stopPropagation()} style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 99, background: TEAL, color: "#fff", fontWeight: 700, fontSize: 13, textDecoration: "none" }}>Call</a>
+                    : <span style={{ flexShrink: 0, fontSize: 12, color: "#B7C3C0" }}>No number</span>}
+                </div>
+              </Card>
+            );
+          })}
         </>
       )}
 
@@ -805,7 +834,6 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
   async function save() {
     let data2 = data;
     let cid = customerId;
-    if (!e.id && !f.surveyDate) { alert("Please set a survey date for this enquiry."); return; }
     if (f.exchanged && !f.preferredDate) { alert("This move is marked as exchanged — please set the confirmed move date."); return; }
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
@@ -862,7 +890,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
           })}
         </select>
       </Field>
-      <Field label="Survey date" hint="Shows on the calendar">
+      <Field label="Survey date" hint="Leave blank until booked — shows as 'To call' on the dashboard">
         <Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} />
         {(f.surveyDate || f.surveyTime) && <button onClick={() => setF(p => ({ ...p, surveyDate: "", surveyTime: "" }))} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: "4px 0 0" }}>Remove survey date</button>}
       </Field>
@@ -2611,7 +2639,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B8</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B9</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
