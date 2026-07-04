@@ -2666,7 +2666,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B10</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B12</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3353,6 +3353,8 @@ function CatalogueEditor({ catalog, onSave, setView }) {
   const [openRoom, setOpenRoom] = useState((catalog.rooms || [])[0] || "");
   const [newRoom, setNewRoom] = useState("");
   const [saving, setSaving] = useState(false);
+  const [copyRoom, setCopyRoom] = useState("");   // which room's copy-picker is open
+  const [copySearch, setCopySearch] = useState("");
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
   const numInp = { ...inp, textAlign: "center", padding: "9px 4px" };
 
@@ -3361,6 +3363,11 @@ function CatalogueEditor({ catalog, onSave, setView }) {
   const addItem = room => {
     const it = { id: slugId(room, "item"), room, name: "", cuFt: 10, m3: +(10 * M3_PER_CUFT).toFixed(3), kg: 10 };
     setDraft(d => ({ ...d, items: [...d.items, it] }));
+  };
+  const copyItemInto = (room, src) => {
+    const it = { id: slugId(room, src.name), room, name: src.name, cuFt: src.cuFt, m3: src.m3, kg: src.kg };
+    setDraft(d => ({ ...d, items: [...d.items, it] }));
+    setCopyRoom(""); setCopySearch("");
   };
   const addRoom = () => {
     const name = newRoom.trim();
@@ -3373,6 +3380,16 @@ function CatalogueEditor({ catalog, onSave, setView }) {
     if (n > 0) { alert(`"${room}" still has ${n} item(s). Delete or move them first.`); return; }
     if (!confirm(`Remove the room "${room}"?`)) return;
     setDraft(d => ({ ...d, rooms: d.rooms.filter(r => r !== room) }));
+  };
+  const moveRoom = (room, dir) => {
+    setDraft(d => {
+      const rooms = d.rooms.slice();
+      const i = rooms.indexOf(room);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= rooms.length) return d;
+      [rooms[i], rooms[j]] = [rooms[j], rooms[i]];
+      return { ...d, rooms };
+    });
   };
 
   async function doSave() {
@@ -3402,16 +3419,22 @@ function CatalogueEditor({ catalog, onSave, setView }) {
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Item catalogue</h2>
       <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Edit names, volumes (cu ft) and weights (kg). Add items or rooms. Changes sync to all your devices when you save.</div>
 
-      {draft.rooms.map(room => {
+      {draft.rooms.map((room, ri) => {
         const items = draft.items.filter(it => it.room === room);
         const isOpen = openRoom === room;
+        const isCopy = copyRoom === room;
         return (
           <Card key={room} style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setOpenRoom(isOpen ? "" : room)}>
-              <div style={{ fontWeight: 800, color: "#10211E", fontSize: 15 }}>{room} <span style={{ color: "#B7C3C0", fontWeight: 600, fontSize: 13 }}>({items.length})</span></div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <button onClick={e => { e.stopPropagation(); delRoom(room); }} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
-                <span style={{ color: "#B7C3C0", fontSize: 18 }}>{isOpen ? "▾" : "▸"}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, cursor: "pointer", minWidth: 0 }} onClick={() => setOpenRoom(isOpen ? "" : room)}>
+                <span style={{ fontWeight: 800, color: "#10211E", fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room}</span>
+                <span style={{ color: "#B7C3C0", fontWeight: 600, fontSize: 13, flexShrink: 0 }}>({items.length})</span>
+              </div>
+              <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+                <button onClick={e => { e.stopPropagation(); moveRoom(room, -1); }} disabled={ri === 0} style={{ background: "none", border: "none", color: ri === 0 ? "#D5DDDB" : "#6A7B77", fontSize: 17, cursor: ri === 0 ? "default" : "pointer", padding: "0 4px" }}>▲</button>
+                <button onClick={e => { e.stopPropagation(); moveRoom(room, 1); }} disabled={ri === draft.rooms.length - 1} style={{ background: "none", border: "none", color: ri === draft.rooms.length - 1 ? "#D5DDDB" : "#6A7B77", fontSize: 17, cursor: ri === draft.rooms.length - 1 ? "default" : "pointer", padding: "0 4px" }}>▼</button>
+                <button onClick={e => { e.stopPropagation(); delRoom(room); }} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer", marginLeft: 4 }}>Remove</button>
+                <span onClick={() => setOpenRoom(isOpen ? "" : room)} style={{ color: "#B7C3C0", fontSize: 18, cursor: "pointer", marginLeft: 2 }}>{isOpen ? "▾" : "▸"}</span>
               </div>
             </div>
             {isOpen && (
@@ -3427,7 +3450,30 @@ function CatalogueEditor({ catalog, onSave, setView }) {
                     <button onClick={() => delItem(it.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 18, cursor: "pointer", padding: 0 }}>×</button>
                   </div>
                 ))}
-                <button onClick={() => addItem(room)} style={{ background: "none", border: "1px dashed #CDE7E2", color: TEAL, fontWeight: 700, fontSize: 13, borderRadius: 9, padding: "8px 0", width: "100%", cursor: "pointer", marginTop: 4 }}>+ Add item</button>
+                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                  <button onClick={() => addItem(room)} style={{ flex: 1, background: "none", border: "1px dashed #CDE7E2", color: TEAL, fontWeight: 700, fontSize: 13, borderRadius: 9, padding: "8px 0", cursor: "pointer" }}>+ Add item</button>
+                  <button onClick={() => { setCopyRoom(isCopy ? "" : room); setCopySearch(""); }} style={{ flex: 1, background: "none", border: "1px dashed #CDE7E2", color: TEAL, fontWeight: 700, fontSize: 13, borderRadius: 9, padding: "8px 0", cursor: "pointer" }}>{isCopy ? "Close" : "Copy item in…"}</button>
+                </div>
+                {isCopy && (
+                  <div style={{ marginTop: 8, border: "1px solid #E3ECEA", borderRadius: 10, padding: 8, background: "#F8FBFA" }}>
+                    <input value={copySearch} autoFocus placeholder="Search all items…" onChange={e => setCopySearch(e.target.value)} style={inp} />
+                    <div style={{ maxHeight: 220, overflowY: "auto", marginTop: 8 }}>
+                      {draft.items
+                        .filter(it => (it.name || "").toLowerCase().includes(copySearch.toLowerCase()))
+                        .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+                        .slice(0, 60)
+                        .map((it, i) => (
+                          <div key={it.id + i} onClick={() => copyItemInto(room, it)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 6px", borderBottom: "1px solid #EEF3F2", cursor: "pointer", gap: 8 }}>
+                            <span style={{ fontSize: 14, color: "#10211E", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
+                            <span style={{ fontSize: 12, color: "#94A4A0", flexShrink: 0 }}>{it.room} · {it.cuFt}cf</span>
+                          </div>
+                        ))}
+                      {draft.items.filter(it => (it.name || "").toLowerCase().includes(copySearch.toLowerCase())).length === 0 && (
+                        <div style={{ fontSize: 13, color: "#94A4A0", padding: "8px 6px" }}>No matching items.</div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </Card>
