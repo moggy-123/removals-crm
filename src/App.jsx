@@ -1,13 +1,40 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase } from "./supabase";
+import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
 const SIG_KEY = "removals_sigs";
 const TOMB_KEY = "removals_deleted";
 const REF_KEY = "removals_ref_start";
+const CAT_KEY = "removals_catalog";
 const TABLES = ["customers", "enquiries", "jobs", "vehicles", "staff"];
 const EMPTY = { customers: [], enquiries: [], jobs: [], vehicles: [], staff: [] };
+
+// ── Editable item catalogue ────────────────────────────────────────────────
+// The built-in FURNITURE/ROOMS act as the seed. A saved catalogue (local +
+// Supabase) overrides them, so Dave can permanently edit volumes/weights,
+// add items and add rooms, and it syncs across devices.
+function buildDefaultCatalog() {
+  return { rooms: ROOMS.slice(), items: FURNITURE.map(it => ({ ...it })), updatedAt: 0 };
+}
+let ACTIVE_ROOMS = ROOMS.slice();
+let ACTIVE_FURNITURE = FURNITURE.map(it => ({ ...it }));
+function getRooms() { return ACTIVE_ROOMS; }
+function getFurniture() { return ACTIVE_FURNITURE; }
+function applyCatalog(cat) {
+  if (cat && Array.isArray(cat.rooms) && cat.rooms.length) ACTIVE_ROOMS = cat.rooms.slice();
+  if (cat && Array.isArray(cat.items) && cat.items.length) ACTIVE_FURNITURE = cat.items.map(it => ({ ...it }));
+}
+function loadLocalCatalog() {
+  try { const c = JSON.parse(localStorage.getItem(CAT_KEY) || "null"); return c && c.items ? c : null; } catch { return null; }
+}
+function saveLocalCatalog(cat) {
+  try { localStorage.setItem(CAT_KEY, JSON.stringify(cat)); } catch {}
+}
+const M3_PER_CUFT = 0.0283168;
+function slugId(room, name) {
+  return (room.slice(0, 4) + "-" + name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) + "-" + Math.random().toString(36).slice(2, 5);
+}
 
 function getRefStart() { const v = parseInt(localStorage.getItem(REF_KEY), 10); return Number.isFinite(v) ? v : 1000; }
 function setRefStart(n) { localStorage.setItem(REF_KEY, String(parseInt(n, 10) || 0)); }
@@ -76,8 +103,8 @@ function roomRank(label) {
   if (label === "Dismantle / Reassemble") return 9998;
   const base = label.replace(/\s+\d+$/, "");
   const num = parseInt((label.match(/\s(\d+)$/) || [])[1] || "1", 10);
-  let i = ROOMS.indexOf(label);
-  if (i === -1) i = ROOMS.indexOf(base);
+  let i = ACTIVE_ROOMS.indexOf(label);
+  if (i === -1) i = ACTIVE_ROOMS.indexOf(base);
   if (i === -1) return 9997;
   return i + Math.min(num, 99) / 100;
 }
@@ -1012,7 +1039,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   });
   const setFree = (label, key, val) => setFreeRooms(p => ({ ...p, [label]: { text: "", cuFt: "", wardrobe: 0, ...p[label], [key]: val } }));
   const [search, setSearch] = useState("");
-  const [openSection, setOpenSection] = useState(ROOMS[0]);
+  const [openSection, setOpenSection] = useState(getRooms()[0]);
   const [customItems, setCustomItems] = useState(getCustomItems());
 
   const matches = txt => !search || (txt || "").toLowerCase().includes(search.toLowerCase());
@@ -1124,7 +1151,7 @@ function InventoryModal({ data, enquiry, onClose }) {
 
   // Build ordered section list, expanding Bedroom into Bedroom 1..N
   const sections = [];
-  ROOMS.forEach(room => {
+  getRooms().forEach(room => {
     if (room === "Bedroom") {
       beds.forEach(lbl => sections.push({ label: lbl, catalogRoom: "Bedroom", isBedroom: true }));
       sections.push({ addBedroom: true });
@@ -1148,7 +1175,7 @@ function InventoryModal({ data, enquiry, onClose }) {
       if (fhVolRef.current) fhVolRef.current.value = "";
     };
     const boxItems = BOX_ITEMS.filter(b => b.id !== WARDROBE_BOX_ID || isBedroom || label === "Hallway");
-    const catItems = [...FURNITURE.filter(it => it.room === catalogRoom), ...customItems.filter(it => it.room === catalogRoom), ...boxItems].filter(it => matches(it.name));
+    const catItems = [...getFurniture().filter(it => it.room === catalogRoom), ...customItems.filter(it => it.room === catalogRoom), ...boxItems].filter(it => matches(it.name));
     const customSlots = Object.entries(lines).filter(([, v]) => v.catalogId == null && v.room === label && matches(v.name));
     if (search && catItems.length === 0 && customSlots.length === 0) return null;
     const sectionQty = Object.values(lines).filter(v => v.room === label && v.qty > 0).reduce((s, v) => s + v.qty, 0);
@@ -2639,9 +2666,19 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B9</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B10</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
+        <Card style={{ marginBottom: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ minWidth: 0 }}>
+              <h4 style={{ margin: "0 0 3px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Item catalogue</h4>
+              <div style={{ fontSize: 13, color: "#6A7B77" }}>Edit room items, volumes & weights. Syncs to all devices.</div>
+            </div>
+            <Btn size="sm" onClick={() => setView({ screen: "catalogue" })}>Edit</Btn>
+          </div>
+        </Card>
+
         <Card style={{ marginBottom: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <h4 style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Vehicles</h4>
@@ -3311,6 +3348,109 @@ function sectionFor(screen) {
   return null;
 }
 
+function CatalogueEditor({ catalog, onSave, setView }) {
+  const [draft, setDraft] = useState(() => ({ rooms: (catalog.rooms || []).slice(), items: (catalog.items || []).map(it => ({ ...it })) }));
+  const [openRoom, setOpenRoom] = useState((catalog.rooms || [])[0] || "");
+  const [newRoom, setNewRoom] = useState("");
+  const [saving, setSaving] = useState(false);
+  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
+  const numInp = { ...inp, textAlign: "center", padding: "9px 4px" };
+
+  const setItem = (id, field, val) => setDraft(d => ({ ...d, items: d.items.map(it => it.id === id ? { ...it, [field]: val } : it) }));
+  const delItem = id => setDraft(d => ({ ...d, items: d.items.filter(it => it.id !== id) }));
+  const addItem = room => {
+    const it = { id: slugId(room, "item"), room, name: "", cuFt: 10, m3: +(10 * M3_PER_CUFT).toFixed(3), kg: 10 };
+    setDraft(d => ({ ...d, items: [...d.items, it] }));
+  };
+  const addRoom = () => {
+    const name = newRoom.trim();
+    if (!name || draft.rooms.includes(name)) { setNewRoom(""); return; }
+    setDraft(d => ({ ...d, rooms: [...d.rooms, name] }));
+    setNewRoom(""); setOpenRoom(name);
+  };
+  const delRoom = room => {
+    const n = draft.items.filter(it => it.room === room).length;
+    if (n > 0) { alert(`"${room}" still has ${n} item(s). Delete or move them first.`); return; }
+    if (!confirm(`Remove the room "${room}"?`)) return;
+    setDraft(d => ({ ...d, rooms: d.rooms.filter(r => r !== room) }));
+  };
+
+  async function doSave() {
+    setSaving(true);
+    const items = draft.items
+      .filter(it => (it.name || "").trim())
+      .map(it => {
+        const cuFt = Math.max(0, Number(it.cuFt) || 0);
+        return { id: it.id || slugId(it.room, it.name), room: it.room, name: it.name.trim(), cuFt, m3: +(cuFt * M3_PER_CUFT).toFixed(3), kg: Math.max(0, Number(it.kg) || 0) };
+      });
+    await onSave({ rooms: draft.rooms, items });
+    setSaving(false);
+    setView({ screen: "company" });
+  }
+  function resetDefaults() {
+    if (!confirm("Reset the whole catalogue back to the built-in list? Your custom edits will be lost.")) return;
+    const def = buildDefaultCatalog();
+    setDraft({ rooms: def.rooms, items: def.items });
+    setOpenRoom(def.rooms[0]);
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <button onClick={() => setView({ screen: "company" })} style={{ background: "none", border: "none", color: TEAL, fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0 }}>‹ Back</button>
+      </div>
+      <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Item catalogue</h2>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Edit names, volumes (cu ft) and weights (kg). Add items or rooms. Changes sync to all your devices when you save.</div>
+
+      {draft.rooms.map(room => {
+        const items = draft.items.filter(it => it.room === room);
+        const isOpen = openRoom === room;
+        return (
+          <Card key={room} style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setOpenRoom(isOpen ? "" : room)}>
+              <div style={{ fontWeight: 800, color: "#10211E", fontSize: 15 }}>{room} <span style={{ color: "#B7C3C0", fontWeight: 600, fontSize: 13 }}>({items.length})</span></div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button onClick={e => { e.stopPropagation(); delRoom(room); }} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                <span style={{ color: "#B7C3C0", fontSize: 18 }}>{isOpen ? "▾" : "▸"}</span>
+              </div>
+            </div>
+            {isOpen && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 62px 62px 26px", gap: 6, fontSize: 11, color: "#94A4A0", fontWeight: 700, padding: "0 2px 4px" }}>
+                  <div>Item</div><div style={{ textAlign: "center" }}>cu ft</div><div style={{ textAlign: "center" }}>kg</div><div></div>
+                </div>
+                {items.map(it => (
+                  <div key={it.id} style={{ display: "grid", gridTemplateColumns: "1fr 62px 62px 26px", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                    <input value={it.name} placeholder="Item name" onChange={e => setItem(it.id, "name", e.target.value)} style={inp} />
+                    <input value={it.cuFt} inputMode="decimal" onChange={e => setItem(it.id, "cuFt", e.target.value)} style={numInp} />
+                    <input value={it.kg} inputMode="numeric" onChange={e => setItem(it.id, "kg", e.target.value)} style={numInp} />
+                    <button onClick={() => delItem(it.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 18, cursor: "pointer", padding: 0 }}>×</button>
+                  </div>
+                ))}
+                <button onClick={() => addItem(room)} style={{ background: "none", border: "1px dashed #CDE7E2", color: TEAL, fontWeight: 700, fontSize: 13, borderRadius: 9, padding: "8px 0", width: "100%", cursor: "pointer", marginTop: 4 }}>+ Add item</button>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800, marginBottom: 8 }}>Add a room</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={newRoom} placeholder="e.g. Utility Room" onChange={e => setNewRoom(e.target.value)} style={inp} />
+          <Btn onClick={addRoom} disabled={!newRoom.trim()}>Add</Btn>
+        </div>
+      </Card>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+        <Btn onClick={doSave} disabled={saving} style={{ flex: 1 }}>{saving ? "Saving…" : "Save catalogue"}</Btn>
+        <Btn variant="ghost" onClick={() => setView({ screen: "company" })}>Cancel</Btn>
+      </div>
+      <button onClick={resetDefaults} style={{ background: "none", border: "none", color: "#94A4A0", fontSize: 12, fontWeight: 600, cursor: "pointer", marginTop: 14, display: "block" }}>Reset to built-in defaults</button>
+    </div>
+  );
+}
+
 export default function App() {
   const [data, setData] = useState(loadData);
   const [view, setViewState] = useState(() => {
@@ -3318,8 +3458,36 @@ export default function App() {
     return { screen: "dashboard" };
   });
   const [syncStatus, setSyncStatus] = useState("syncing");
+  const [catalog, setCatalogState] = useState(() => { const l = loadLocalCatalog(); if (l) applyCatalog(l); return l || buildDefaultCatalog(); });
   const device = useDeviceType();
   const wide = device !== "phone";
+
+  // Load the item catalogue (cloud vs local, newest wins) and apply it app-wide.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await loadCatalog();
+        if (cancelled) return;
+        const local = loadLocalCatalog();
+        const localAt = (local && local.updatedAt) || 0;
+        if (remote && remote.value && (remote.updatedAt || 0) >= localAt) {
+          const cat = { ...remote.value, updatedAt: remote.updatedAt || 0 };
+          applyCatalog(cat); saveLocalCatalog(cat); setCatalogState(cat);
+        } else if (local) {
+          applyCatalog(local); setCatalogState(local);
+          if (!remote && local.items) { try { await saveCatalog({ rooms: local.rooms, items: local.items }, local.updatedAt || Date.now()); } catch {} }
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const applyCatalogEdit = async (nextCat) => {
+    const stamped = { rooms: nextCat.rooms, items: nextCat.items, updatedAt: Date.now() };
+    applyCatalog(stamped); saveLocalCatalog(stamped); setCatalogState(stamped);
+    try { await saveCatalog({ rooms: stamped.rooms, items: stamped.items }, stamped.updatedAt); } catch {}
+  };
 
   useEffect(() => {
     let m = null;
@@ -3414,6 +3582,7 @@ export default function App() {
     if (view.screen === "quotePdf") return <QuotePdfView data={data} id={view.id} setView={setView} />;
     if (view.screen === "surveyPdf") return <SurveyPdfView data={data} id={view.id} setView={setView} />;
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
+    if (view.screen === "catalogue") return <CatalogueEditor catalog={catalog} onSave={applyCatalogEdit} setView={setView} />;
     return null;
   }
 
