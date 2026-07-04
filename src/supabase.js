@@ -189,3 +189,18 @@ export async function deletePhoto(path) {
   if (!path) return;
   await supabase.storage.from(PHOTO_BUCKET).remove([path]);
 }
+
+// ── Item catalogue (rooms + furniture volumes/weights), synced across devices ─
+// Stored as a single JSON document in the app_config table (key = 'catalog').
+export async function loadCatalog() {
+  try {
+    const { data, error } = await supabase.from("app_config").select("value, updated_at").eq("key", "catalog").maybeSingle();
+    if (error) return null;
+    if (!data) return null;
+    return { value: data.value, updatedAt: Number(data.updated_at) || 0 };
+  } catch { return null; }
+}
+export async function saveCatalog(value, updatedAt) {
+  const { error } = await supabase.from("app_config").upsert({ key: "catalog", value, updated_at: updatedAt }, { onConflict: "key" });
+  if (error) throw error;
+}
