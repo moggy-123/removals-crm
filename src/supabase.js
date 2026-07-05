@@ -206,3 +206,12 @@ export async function saveCatalog(value, updatedAt) {
   const { error } = await supabase.from("app_config").upsert({ key: "catalog", value, updated_at: updatedAt }, { onConflict: "key" });
   if (error) throw error;
 }
+
+// ── Upload a generated PDF to Supabase Storage, return its public URL ────────
+export async function uploadStorageSheet(path, bytes) {
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const { error } = await supabase.storage.from("storage-sheets").upload(path, blob, { upsert: true, contentType: "application/pdf" });
+  if (error) throw error;
+  const { data } = supabase.storage.from("storage-sheets").getPublicUrl(path);
+  return data.publicUrl;
+}
