@@ -2515,6 +2515,18 @@ function CustomerForm({ data, onClose, editCustomer }) {
 function CustomerDetail({ data, id, setView }) {
   const c = (data.customers || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  async function openSheet(rec) {
+    if (sheetBusy) return;
+    setSheetBusy(true);
+    try {
+      const { bytes } = await buildStorageIntakePdf(rec, c, data);
+      const file = new File([bytes], `Storage-${c.ref || "RJ"}-${rec.date || "sheet"}.pdf`, { type: "application/pdf" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: "Storage Inventory" }); } catch (_e) {} }
+      else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
+    } catch (ex) { alert("Could not open sheet: " + ((ex && ex.message) || ex)); }
+    setSheetBusy(false);
+  }
   if (!c) return <div style={{ padding: 20 }}>Customer not found.</div>;
   const enquiries = (data.enquiries || []).filter(e => e.customerId === id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   const jobs = (data.jobs || []).filter(j => j.customerId === id);
@@ -2564,6 +2576,23 @@ function CustomerDetail({ data, id, setView }) {
           <Row label="Containers" value={c.storage.containers ? `${c.storage.containers}${(c.storage.containerNos || []).filter(Boolean).length ? " — " + c.storage.containerNos.filter(Boolean).join(", ") : ""}` : "—"} />
           {c.storage.looseItems && <Row label="Loose items" value={c.storage.looseNote || "Yes"} />}
           {c.storage.value ? <Row label="Storage value" value={`£${Number(c.storage.value).toLocaleString("en-GB")}`} /> : null}
+        </Card>
+      )}
+      {c.storageInv && c.storageInv.length > 0 && (
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Storage inventory sheets</div>
+            <Btn size="sm" onClick={() => setView({ screen: "storageIntake", customerId: c.id })}>+ New</Btn>
+          </div>
+          {c.storageInv.slice().reverse().map(rec => (
+            <div key={rec.id} onClick={() => openSheet(rec)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 4px", borderBottom: "1px solid #EEF3F2", cursor: "pointer" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
+                <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{rec.location || "—"} · {(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
+              </div>
+              <span style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}>{sheetBusy ? "…" : "Open PDF"}</span>
+            </div>
+          ))}
         </Card>
       )}
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
@@ -2792,7 +2821,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B21</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B22</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3729,6 +3758,56 @@ async function buildStorageIntakePdf(rec, c, data) {
   return { bytes, ref: c?.ref || "" };
 }
 
+function SignatureModal({ title, initial, onCancel, onAccept }) {
+  const ref = useRef(null);
+  const drawing = useRef(false);
+  const last = useRef(null);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const ctx = cv.getContext("2d");
+    ctx.lineWidth = 2.8; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#10211E";
+    if (initial) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, cv.width, cv.height); img.src = initial; }
+  }, []);
+  const pos = e => { const cv = ref.current; const r = cv.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: (t.clientX - r.left) * (cv.width / r.width), y: (t.clientY - r.top) * (cv.height / r.height) }; };
+  const start = e => { e.preventDefault(); drawing.current = true; last.current = pos(e); };
+  const move = e => { if (!drawing.current) return; e.preventDefault(); const ctx = ref.current.getContext("2d"); const p = pos(e); ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last.current = p; setDirty(true); };
+  const end = () => { drawing.current = false; };
+  const clear = () => { const cv = ref.current; cv.getContext("2d").clearRect(0, 0, cv.width, cv.height); setDirty(true); };
+  const accept = () => { const cv = ref.current; onAccept(dirty ? cv.toDataURL("image/png") : (initial || "")); };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(16,33,30,.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 660, padding: 16, boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#10211E" }}>{title}</div>
+          <button onClick={clear} style={{ background: "none", border: "none", color: TEAL, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Clear</button>
+        </div>
+        <canvas ref={ref} width={900} height={340}
+          onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+          onTouchStart={start} onTouchMove={move} onTouchEnd={end}
+          style={{ width: "100%", height: 300, border: "1px solid #D9E2E0", borderRadius: 12, background: "#fff", touchAction: "none", display: "block" }} />
+        <div style={{ fontSize: 12, color: "#94A4A0", textAlign: "center", margin: "8px 0 12px" }}>Sign above with your finger or stylus</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn variant="grey" style={{ flex: 1 }} onClick={onCancel}>Cancel</Btn>
+          <Btn style={{ flex: 2 }} onClick={accept}>Accept</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SigField({ label, value, onOpen }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4 }}>{label}</div>
+      <button onClick={onOpen} style={{ width: "100%", minHeight: value ? 90 : 60, border: "1px solid #D9E2E0", borderRadius: 10, background: value ? "#fff" : "#F8FBFA", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 8 }}>
+        {value ? <img src={value} alt="signature" style={{ maxHeight: 90, maxWidth: "100%" }} /> : <span style={{ color: TEAL, fontWeight: 700, fontSize: 13 }}>Tap to sign</span>}
+      </button>
+      {value && <div style={{ textAlign: "right", marginTop: 4 }}><span style={{ color: TEAL, fontSize: 12, fontWeight: 700 }}>Tap to edit / re-sign</span></div>}
+    </div>
+  );
+}
+
 function StorageIntakeForm({ data, setView, presetCustomerId }) {
   const device = useDeviceType();
   const phone = device === "phone";
@@ -3751,6 +3830,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
   const [newCond, setNewCond] = useState("");
   const [poss, setPoss] = useState(getPositions);
   const [newPos, setNewPos] = useState("");
+  const [signing, setSigning] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -3774,6 +3854,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
     if (!cust) { setErr("Customer not found."); return; }
     const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, condition: it.condition || "", position: it.position || "", packedBy: it.packedBy || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
     if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
+    if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy(true);
     const rec = { id: uid(), date, location, crew, containers: cleanContainers, custSig, empSig, empName, createdAt: new Date().toISOString() };
     try {
@@ -3869,10 +3950,18 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
 
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 10 }}>Sign off</div>
-        <SignaturePad label="Customer signature" value={custSig} onChange={setCustSig} />
-        <Field label="Employee name"><Input value={empName} onChange={setEmpName} placeholder="Who took the goods in" /></Field>
-        <SignaturePad label="Employee signature" value={empSig} onChange={setEmpSig} />
+        <SigField label="Customer signature" value={custSig} onOpen={() => setSigning("cust")} />
+        <Field label="Completed by (crew member)">
+          <select value={empName} onChange={e => setEmpName(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
+            <option value="">{crew.length ? "Select crew member…" : "Select crew above first"}</option>
+            {crew.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </Field>
+        <SigField label="Employee signature" value={empSig} onOpen={() => setSigning("emp")} />
       </Card>
+
+      {signing === "cust" && <SignatureModal title="Customer signature" initial={custSig} onCancel={() => setSigning(null)} onAccept={v => { setCustSig(v); setSigning(null); }} />}
+      {signing === "emp" && <SignatureModal title={`Employee signature${empName ? " — " + empName : ""}`} initial={empSig} onCancel={() => setSigning(null)} onAccept={v => { setEmpSig(v); setSigning(null); }} />}
 
       {err && <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
