@@ -2786,7 +2786,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B17</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B18</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3785,7 +3785,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
           <div style={{ flex: 1 }}><Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field></div>
           <div style={{ flex: 1 }}><Field label="Storage location"><Select value={location} onChange={setLocation} options={getStorageLocs()} /></Field></div>
         </div>
-        <Field label="Crew"><PickChips options={crewOpts} selectedIds={crew} onToggle={toggleCrew} empty="No staff — add under Company." /></Field>
+        <Field label="Crew"><PickChips options={crewOpts} selectedIds={crew} takenIds={new Set()} onToggle={toggleCrew} empty="No staff — add under Company." /></Field>
       </Card>
 
       {containers.map((ct, ci) => (
