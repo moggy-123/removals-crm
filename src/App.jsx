@@ -41,6 +41,10 @@ function setRefStart(n) { localStorage.setItem(REF_KEY, String(parseInt(n, 10) |
 const STORLOC_KEY = "removals_storage_locs";
 function getStorageLocs() { try { const a = JSON.parse(localStorage.getItem(STORLOC_KEY) || "null"); return Array.isArray(a) && a.length ? a : ["Wild & Lye"]; } catch { return ["Wild & Lye"]; } }
 function saveStorageLocs(a) { try { localStorage.setItem(STORLOC_KEY, JSON.stringify(a && a.length ? a : ["Wild & Lye"])); } catch {} }
+const COND_KEY = "removals_conditions";
+const DEFAULT_CONDITIONS = ["Scratched", "Dented", "Cracked", "Broken", "Torn", "Soiled", "Rusty", "Loose"];
+function getConditions() { try { const a = JSON.parse(localStorage.getItem(COND_KEY) || "null"); return Array.isArray(a) && a.length ? a : DEFAULT_CONDITIONS.slice(); } catch { return DEFAULT_CONDITIONS.slice(); } }
+function saveConditions(a) { try { localStorage.setItem(COND_KEY, JSON.stringify(a && a.length ? a : DEFAULT_CONDITIONS)); } catch {} }
 function maxCustomerRef(data) { return (data.customers || []).reduce((m, c) => Math.max(m, Number(c.ref) || 0), 0); }
 function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(data) + 1); }
 
@@ -2782,7 +2786,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B16</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B17</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3625,6 +3629,215 @@ function CatalogueEditor({ catalog, onSave, setView }) {
   );
 }
 
+function SignaturePad({ label, value, onChange }) {
+  const ref = useRef(null);
+  const drawing = useRef(false);
+  const last = useRef(null);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const ctx = cv.getContext("2d");
+    ctx.lineWidth = 2.2; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#10211E";
+    if (value) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, cv.width, cv.height); img.src = value; }
+  }, []);
+  const pos = e => { const cv = ref.current; const r = cv.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: (t.clientX - r.left) * (cv.width / r.width), y: (t.clientY - r.top) * (cv.height / r.height) }; };
+  const start = e => { e.preventDefault(); drawing.current = true; last.current = pos(e); };
+  const move = e => { if (!drawing.current) return; e.preventDefault(); const ctx = ref.current.getContext("2d"); const p = pos(e); ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last.current = p; };
+  const end = () => { if (!drawing.current) return; drawing.current = false; onChange(ref.current.toDataURL("image/png")); };
+  const clear = () => { const cv = ref.current; cv.getContext("2d").clearRect(0, 0, cv.width, cv.height); onChange(""); };
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</span>
+        <button onClick={clear} style={{ background: "none", border: "none", color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Clear</button>
+      </div>
+      <canvas ref={ref} width={500} height={150}
+        onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+        onTouchStart={start} onTouchMove={move} onTouchEnd={end}
+        style={{ width: "100%", height: 150, border: "1px solid #D9E2E0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }} />
+    </div>
+  );
+}
+
+async function buildStorageIntakePdf(rec, c, data) {
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const W = 595.28, H = 841.89, M = 44;
+  const teal = rgb(0.055, 0.486, 0.451), navy = rgb(0.059, 0.18, 0.165), grey = rgb(0.42, 0.46, 0.45), white = rgb(1, 1, 1);
+  const clean = s => String(s == null ? "" : s).replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"').replace(/[\u2013\u2014\u2212]/g, "-").replace(/\u2026/g, "...").replace(/\u00A0/g, " ").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
+  let page, y;
+  const np = () => { page = pdf.addPage([W, H]); y = H - M; };
+  const ensure = h => { if (y - h < M) np(); };
+  const at = (t, x, yy, size, f = font, col = navy) => page.drawText(clean(t), { x, y: yy, size, font: f, color: col });
+  const heading = t => { ensure(30); y -= 8; at(t, M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 15; };
+  const kv = (label, value) => { ensure(15); at(label, M, y, 9.5, bold, grey); at(value || "-", M + 92, y, 9.5, font, navy); y -= 15; };
+  const embedSig = async url => { if (!url || url.indexOf("data:image") !== 0) return null; try { const b64 = url.split(",")[1]; const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return await pdf.embedPng(bytes); } catch { return null; } };
+
+  np();
+  page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
+  at("R&J Removals & Storage", M, H - 34, 16, bold, white);
+  at("Storage Inventory & Condition Report", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
+  const ref = c?.ref ? `Ref ${c.ref}` : "";
+  if (ref) { const w = bold.widthOfTextAtSize(ref, 12); at(ref, W - M - w, H - 40, 12, bold, white); }
+  y = H - 88;
+
+  kv("Customer", c?.name || "-");
+  kv("Date", rec.date ? fmtUK(rec.date) : "-");
+  kv("Location", rec.location || "-");
+  kv("Crew", (rec.crew || []).join(", ") || "-");
+
+  (rec.containers || []).forEach(ct => {
+    heading(`Container ${ct.number || "-"}`);
+    const items = (ct.items || []).filter(it => (it.name || "").trim());
+    if (!items.length) { at("No items listed.", M, y, 9.5, font, grey); y -= 14; }
+    else items.forEach(it => {
+      ensure(14);
+      const qty = Number(it.qty) || 1;
+      at(`${qty} x`, M, y, 9.5, bold, navy);
+      at(clean(it.name), M + 34, y, 9.5, font, navy);
+      if (it.condition) { const cw = font.widthOfTextAtSize(clean(it.condition), 9); at(clean(it.condition), W - M - cw, y, 9, font, grey); }
+      y -= 14;
+    });
+  });
+
+  // Signatures
+  ensure(150);
+  heading("Sign off");
+  at("I confirm the above is an accurate record of the goods and their condition at the time of storage.", M, y, 9, font, grey); y -= 22;
+  const custImg = await embedSig(rec.custSig), empImg = await embedSig(rec.empSig);
+  const boxW = (W - 2 * M - 20) / 2, boxH = 70, yTop = y;
+  const drawSig = (x, img, label, name) => {
+    page.drawRectangle({ x, y: yTop - boxH, width: boxW, height: boxH, borderColor: grey, borderWidth: 0.7, color: white });
+    if (img) { const s = Math.min(boxW - 16, (boxH - 26) * (img.width / img.height)); const h = s * (img.height / img.width); page.drawImage(img, { x: x + (boxW - s) / 2, y: yTop - boxH + 22, width: s, height: Math.min(h, boxH - 26) }); }
+    at(label, x + 4, yTop - boxH + 8, 8, bold, grey);
+    if (name) { const nw = font.widthOfTextAtSize(clean(name), 8); at(clean(name), x + boxW - nw - 4, yTop - boxH + 8, 8, font, grey); }
+  };
+  drawSig(M, custImg, "Customer signature", c?.name || "");
+  drawSig(M + boxW + 20, empImg, "Employee signature", rec.empName || "");
+  y = yTop - boxH - 16;
+  at(`Generated ${fmtUK(todayISO())} · R&J Removals & Storage`, M, y, 8, font, grey);
+
+  const bytes = await pdf.save();
+  return { bytes, ref: c?.ref || "" };
+}
+
+function StorageIntakeForm({ data, setView, presetCustomerId }) {
+  const [customerId, setCustomerId] = useState(presetCustomerId || "");
+  const [date, setDate] = useState(todayISO());
+  const [location, setLocation] = useState(getStorageLocs()[0] || "Wild & Lye");
+  const [crew, setCrew] = useState([]);
+  const [containers, setContainers] = useState([{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, condition: "" }] }]);
+  const [custSig, setCustSig] = useState("");
+  const [empSig, setEmpSig] = useState("");
+  const [empName, setEmpName] = useState("");
+  const [conds, setConds] = useState(getConditions);
+  const [newCond, setNewCond] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
+  const setContainerNo = (ci, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, number: v } : c));
+  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, condition: "" }] }]);
+  const removeContainer = ci => setContainers(cs => cs.length > 1 ? cs.filter((_, i) => i !== ci) : cs);
+  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, condition: "" }] } : c));
+  const setItem = (ci, ii, field, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: v } : it) } : c));
+  const removeItem = (ci, ii) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.filter((_, j) => j !== ii) } : c));
+  const toggleCrew = name => setCrew(cr => cr.includes(name) ? cr.filter(z => z !== name) : [...cr, name]);
+  const addCond = () => { const v = newCond.trim(); if (!v || conds.includes(v)) { setNewCond(""); return; } const nx = [...conds, v]; setConds(nx); saveConditions(nx); setNewCond(""); };
+
+  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
+
+  async function saveIntake() {
+    setErr("");
+    if (!customerId) { setErr("Please select a customer."); return; }
+    const cust = (data.customers || []).find(x => x.id === customerId);
+    if (!cust) { setErr("Customer not found."); return; }
+    const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, condition: it.condition || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
+    if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
+    setBusy(true);
+    const rec = { id: uid(), date, location, crew, containers: cleanContainers, custSig, empSig, empName, createdAt: new Date().toISOString() };
+    try {
+      const { bytes } = await buildStorageIntakePdf(rec, cust, data);
+      const file = new File([bytes], `Storage-${cust.ref || "RJ"}-${date}.pdf`, { type: "application/pdf" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: "Storage Inventory" }); } catch (_e) {} }
+      else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
+    } catch (ex) { setErr("PDF failed: " + ((ex && ex.message) || ex)); setBusy(false); return; }
+    const updated = { ...cust, storageInv: [...(cust.storageInv || []), rec], storage: { ...(cust.storage || {}), inStore: true, location, containers: Math.max(Number(cust.storage?.containers) || 0, cleanContainers.length) } };
+    await saveAndReload(upsertLocal(data, "customers", updated));
+  }
+
+  const Lbl = ({ children }) => <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", margin: "0 0 4px" }}>{children}</div>;
+
+  return (
+    <div style={{ maxWidth: 640, margin: "0 auto" }}>
+      <button onClick={() => setView({ screen: "storage" })} style={{ background: "none", border: "none", color: TEAL, fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 6 }}>‹ Back</button>
+      <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>New storage inventory</h2>
+
+      <Card>
+        <Field label="Customer">
+          <select value={customerId} onChange={e => setCustomerId(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
+            <option value="">Select customer…</option>
+            {[...(data.customers || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map(c => <option key={c.id} value={c.id}>{c.ref ? `#${c.ref} ` : ""}{c.name}</option>)}
+          </select>
+        </Field>
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}><Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Storage location"><Select value={location} onChange={setLocation} options={getStorageLocs()} /></Field></div>
+        </div>
+        <Field label="Crew"><PickChips options={crewOpts} selectedIds={crew} onToggle={toggleCrew} empty="No staff — add under Company." /></Field>
+      </Card>
+
+      {containers.map((ct, ci) => (
+        <Card key={ct.id} style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 10 }}>
+            <div style={{ flex: 1 }}><Field label={`Container ${ci + 1} — number`}><Input value={ct.number} onChange={v => setContainerNo(ci, v)} placeholder="e.g. C-102" /></Field></div>
+            {containers.length > 1 && <button onClick={() => removeContainer(ci)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer", paddingBottom: 12 }}>Remove</button>}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 118px 26px", gap: 6, fontSize: 11, color: "#94A4A0", fontWeight: 700, padding: "0 2px 4px" }}>
+            <div style={{ textAlign: "center" }}>Qty</div><div>Item</div><div>Condition</div><div></div>
+          </div>
+          {ct.items.map((it, ii) => (
+            <div key={it.id} style={{ display: "grid", gridTemplateColumns: "48px 1fr 118px 26px", gap: 6, marginBottom: 6, alignItems: "center" }}>
+              <input value={it.qty} inputMode="numeric" onChange={e => setItem(ci, ii, "qty", e.target.value)} style={{ ...inp, textAlign: "center", padding: "9px 2px" }} />
+              <input value={it.name} placeholder="Item" onChange={e => setItem(ci, ii, "name", e.target.value)} style={inp} />
+              <select value={it.condition} onChange={e => setItem(ci, ii, "condition", e.target.value)} style={{ ...inp, padding: "9px 6px" }}>
+                <option value="">Condition…</option>
+                {conds.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button onClick={() => removeItem(ci, ii)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 18, cursor: "pointer", padding: 0 }}>×</button>
+            </div>
+          ))}
+          <button onClick={() => addItem(ci)} style={{ background: "none", border: "1px dashed #CDE7E2", color: TEAL, fontWeight: 700, fontSize: 13, borderRadius: 9, padding: "8px 0", width: "100%", cursor: "pointer", marginTop: 4 }}>+ Add item</button>
+        </Card>
+      ))}
+
+      <Btn variant="grey" style={{ width: "100%", marginTop: 12 }} onClick={addContainer}>+ Add container</Btn>
+
+      <Card style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Add a condition option</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}><input value={newCond} placeholder="e.g. Faded" onChange={e => setNewCond(e.target.value)} style={inp} /></div>
+          <Btn size="sm" onClick={addCond} disabled={!newCond.trim()}>Add</Btn>
+        </div>
+      </Card>
+
+      <Card style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 10 }}>Sign off</div>
+        <SignaturePad label="Customer signature" value={custSig} onChange={setCustSig} />
+        <Field label="Employee name"><Input value={empName} onChange={setEmpName} placeholder="Who took the goods in" /></Field>
+        <SignaturePad label="Employee signature" value={empSig} onChange={setEmpSig} />
+      </Card>
+
+      {err && <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
+      <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+        <Btn variant="grey" onClick={() => setView({ screen: "storage" })}>Cancel</Btn>
+        <Btn style={{ flex: 1 }} disabled={busy} onClick={saveIntake}>{busy ? "Saving…" : "Save & create PDF"}</Btn>
+      </div>
+    </div>
+  );
+}
+
 function StorageView({ data, setView }) {
   const inStore = (data.customers || []).filter(c => c.storage && c.storage.inStore);
   const money = n => `£${Number(n || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
@@ -3649,7 +3862,10 @@ function StorageView({ data, setView }) {
 
   return (
     <div>
-      <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Storage</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#10211E" }}>Storage</h2>
+        <Btn size="sm" onClick={() => setView({ screen: "storageIntake" })}><Icon name="plus" size={14} /> New inventory</Btn>
+      </div>
 
       <Card style={{ background: "#F4FBF9", border: "1px solid #CDE7E2" }}>
         <div style={{ display: "flex", gap: 8 }}>
@@ -3830,6 +4046,7 @@ export default function App() {
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
     if (view.screen === "catalogue") return <CatalogueEditor catalog={catalog} onSave={applyCatalogEdit} setView={setView} />;
     if (view.screen === "storage") return <StorageView data={data} setView={setView} />;
+    if (view.screen === "storageIntake") return <StorageIntakeForm data={data} setView={setView} presetCustomerId={view.customerId} />;
     return null;
   }
 
