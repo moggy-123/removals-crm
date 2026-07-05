@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog } from "./supabase";
+import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog, uploadStorageSheet } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
@@ -2518,12 +2518,16 @@ function CustomerDetail({ data, id, setView }) {
   const [sheetBusy, setSheetBusy] = useState(false);
   async function openSheet(rec) {
     if (sheetBusy) return;
+    // Prefer the stored PDF — just open it to view (no re-save).
+    const openUrl = url => { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); };
+    if (rec.pdfUrl) { openUrl(rec.pdfUrl); return; }
+    if (rec.pdf) { try { const b = atob(rec.pdf.split(",")[1]); const arr = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i); const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" })); openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000); return; } catch {} }
+    // Fallback (older sheets saved before PDFs were stored): rebuild once.
     setSheetBusy(true);
     try {
       const { bytes } = await buildStorageIntakePdf(rec, c, data);
-      const file = new File([bytes], `Storage-${c.ref || "RJ"}-${rec.date || "sheet"}.pdf`, { type: "application/pdf" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: "Storage Inventory" }); } catch (_e) {} }
-      else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000);
     } catch (ex) { alert("Could not open sheet: " + ((ex && ex.message) || ex)); }
     setSheetBusy(false);
   }
@@ -2821,7 +2825,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B22</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B23</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3857,12 +3861,18 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy(true);
     const rec = { id: uid(), date, location, crew, containers: cleanContainers, custSig, empSig, empName, createdAt: new Date().toISOString() };
+    let bytes;
     try {
-      const { bytes } = await buildStorageIntakePdf(rec, cust, data);
+      ({ bytes } = await buildStorageIntakePdf(rec, cust, data));
       const file = new File([bytes], `Storage-${cust.ref || "RJ"}-${date}.pdf`, { type: "application/pdf" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: "Storage Inventory" }); } catch (_e) {} }
       else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
     } catch (ex) { setErr("PDF failed: " + ((ex && ex.message) || ex)); setBusy(false); return; }
+    try {
+      rec.pdfUrl = await uploadStorageSheet(`${cust.id}/${rec.id}.pdf`, bytes);
+    } catch {
+      try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); rec.pdf = "data:application/pdf;base64," + btoa(bin); } catch {}
+    }
     const updated = { ...cust, storageInv: [...(cust.storageInv || []), rec], storage: { ...(cust.storage || {}), inStore: true, location, containers: Math.max(Number(cust.storage?.containers) || 0, cleanContainers.length) } };
     clearDraft();
     await saveAndReload(upsertLocal(data, "customers", updated));
