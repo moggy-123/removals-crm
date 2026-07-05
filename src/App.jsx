@@ -2782,7 +2782,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B15</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B16</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3625,6 +3625,77 @@ function CatalogueEditor({ catalog, onSave, setView }) {
   );
 }
 
+function StorageView({ data, setView }) {
+  const inStore = (data.customers || []).filter(c => c.storage && c.storage.inStore);
+  const money = n => `£${Number(n || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const conts = c => Number(c.storage && c.storage.containers) || 0;
+  const val = c => Number(c.storage && c.storage.value) || 0;
+
+  // group by location
+  const groups = {};
+  inStore.forEach(c => { const loc = (c.storage.location || "Unspecified").trim() || "Unspecified"; (groups[loc] = groups[loc] || []).push(c); });
+  const locNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+
+  const totCustomers = inStore.length;
+  const totContainers = inStore.reduce((n, c) => n + conts(c), 0);
+  const totValue = inStore.reduce((n, c) => n + val(c), 0);
+
+  const Stat = ({ label, value }) => (
+    <div style={{ flex: 1, textAlign: "center" }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color: "#10211E" }}>{value}</div>
+      <div style={{ fontSize: 11, color: "#94A4A0", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Storage</h2>
+
+      <Card style={{ background: "#F4FBF9", border: "1px solid #CDE7E2" }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Stat label="In store" value={totCustomers} />
+          <div style={{ width: 1, background: "#DCEAE7" }} />
+          <Stat label="Containers" value={totContainers} />
+          <div style={{ width: 1, background: "#DCEAE7" }} />
+          <Stat label="Total value" value={money(totValue)} />
+        </div>
+      </Card>
+
+      {totCustomers === 0 && <Empty icon="box" text="No customers in store" />}
+
+      {locNames.map(loc => {
+        const list = groups[loc].slice().sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        const lc = list.reduce((n, c) => n + conts(c), 0);
+        const lv = list.reduce((n, c) => n + val(c), 0);
+        return (
+          <div key={loc} style={{ marginTop: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, padding: "0 2px" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: TEAL_D }}>{loc}</div>
+              <div style={{ fontSize: 12.5, color: "#6A7B77", fontWeight: 600 }}>{list.length} cust · {lc} container{lc !== 1 ? "s" : ""} · {money(lv)}</div>
+            </div>
+            {list.map(c => (
+              <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })} style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}</div>
+                    <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2 }}>
+                      {conts(c)} container{conts(c) !== 1 ? "s" : ""}
+                      {(c.storage.containerNos || []).filter(Boolean).length ? ` · ${c.storage.containerNos.filter(Boolean).join(", ")}` : ""}
+                      {c.storage.dateIn ? ` · in ${fmtUK(c.storage.dateIn)}` : ""}
+                      {c.storage.looseItems ? " · loose items" : ""}
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: 700, color: "#10211E", flexShrink: 0 }}>{val(c) ? money(val(c)) : ""}</div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function App() {
   const [data, setData] = useState(loadData);
   const [view, setViewState] = useState(() => {
@@ -3739,10 +3810,11 @@ export default function App() {
     { id: "enquiries", icon: "enquiries", label: "Enquiries", phone: "Enquiries" },
     { id: "calendar",  icon: "calendar",  label: "Calendar",  phone: "Calendar" },
     { id: "customers", icon: "customers", label: "Customers", phone: "Customers" },
+    { id: "storage",   icon: "box",       label: "Storage",   phone: "Storage" },
     { id: "company",   icon: "company",   label: "Company",   phone: "Company" },
   ];
   const sectionKey = sectionFor(view.screen);
-  const activeTab = ["dashboard", "calendar", "company"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
+  const activeTab = ["dashboard", "calendar", "company", "storage"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
 
   const SyncDot = () => (
     <span title={syncStatus} style={{ width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
@@ -3757,6 +3829,7 @@ export default function App() {
     if (view.screen === "surveyPdf") return <SurveyPdfView data={data} id={view.id} setView={setView} />;
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
     if (view.screen === "catalogue") return <CatalogueEditor catalog={catalog} onSave={applyCatalogEdit} setView={setView} />;
+    if (view.screen === "storage") return <StorageView data={data} setView={setView} />;
     return null;
   }
 
