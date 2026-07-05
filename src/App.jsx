@@ -38,6 +38,9 @@ function slugId(room, name) {
 
 function getRefStart() { const v = parseInt(localStorage.getItem(REF_KEY), 10); return Number.isFinite(v) ? v : 1000; }
 function setRefStart(n) { localStorage.setItem(REF_KEY, String(parseInt(n, 10) || 0)); }
+const STORLOC_KEY = "removals_storage_locs";
+function getStorageLocs() { try { const a = JSON.parse(localStorage.getItem(STORLOC_KEY) || "null"); return Array.isArray(a) && a.length ? a : ["Wild & Lye"]; } catch { return ["Wild & Lye"]; } }
+function saveStorageLocs(a) { try { localStorage.setItem(STORLOC_KEY, JSON.stringify(a && a.length ? a : ["Wild & Lye"])); } catch {} }
 function maxCustomerRef(data) { return (data.customers || []).reduce((m, c) => Math.max(m, Number(c.ref) || 0), 0); }
 function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(data) + 1); }
 
@@ -2358,24 +2361,11 @@ function CustomersList({ data, setView }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Customers</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          <Btn size="sm" variant="grey" onClick={() => { setStartVal(String(getRefStart())); setShowRefPanel(s => !s); }}>Ref #</Btn>
           <Btn size="sm" onClick={() => setShowForm(true)}><Icon name="plus" size={14} /> New</Btn>
         </div>
       </div>
 
-      {showRefPanel && (
-        <Card style={{ background: "#FAFCFB" }}>
-          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Reference numbers</div>
-          <Field label="Start numbering from" hint="New customers count up from here">
-            <Input value={startVal} onChange={setStartVal} type="number" inputMode="numeric" />
-          </Field>
-          <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 10 }}>Next new customer will be <b>#{Math.max(parseInt(startVal, 10) || 0, maxCustomerRef(data) + 1)}</b>.</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn size="sm" onClick={saveStart}>Save start number</Btn>
-            {missing > 0 && <Btn size="sm" variant="grey" disabled={busy} onClick={assignExisting}>{busy ? "Assigning…" : `Assign to ${missing} existing`}</Btn>}
-          </div>
-        </Card>
-      )}
+      {showRefPanel && false && <div />}
 
       <div style={{ marginBottom: 12 }}><Input value={q} onChange={setQ} placeholder="🔍 Search customers…" /></div>
       {customers.length === 0 && <Empty icon="customers" text="No customers yet" />}
@@ -2406,9 +2396,21 @@ function CustomerForm({ data, onClose, editCustomer }) {
     custType: c.custType || "Private", notes: c.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const [st, setSt] = useState(() => { const s = c.storage || {}; return { inStore: !!s.inStore, dateIn: s.dateIn || "", dateOut: s.dateOut || "", containers: s.containers ?? "", containerNos: Array.isArray(s.containerNos) ? s.containerNos : [], looseItems: !!s.looseItems, looseNote: s.looseNote || "", location: s.location || (getStorageLocs()[0] || "Wild & Lye"), value: s.value ?? "" }; });
+  const [mv, setMv] = useState(() => { const m = c.move || {}; return { fromAddress1: m.fromAddress1 || "", fromAddress2: m.fromAddress2 || "", fromTown: m.fromTown || "", fromPostcode: m.fromPostcode || "", fromPropertyType: m.fromPropertyType || "", fromBedrooms: m.fromBedrooms || "", fromFloor: m.fromFloor || "", fromAccess: m.fromAccess || "", toAddress1: m.toAddress1 || "", toAddress2: m.toAddress2 || "", toTown: m.toTown || "", toPostcode: m.toPostcode || "", toPropertyType: m.toPropertyType || "", toFloor: m.toFloor || "", toAccess: m.toAccess || "", preferredDate: m.preferredDate || "", dateFlexible: !!m.dateFlexible }; });
+  const setM = (k, v) => setMv(p => ({ ...p, [k]: v }));
+  const setS = (k, v) => setSt(p => ({ ...p, [k]: v }));
+  const [locs, setLocs] = useState(getStorageLocs);
+  const [newLoc, setNewLoc] = useState("");
+  const contN = Math.max(0, Math.min(50, parseInt(st.containers, 10) || 0));
+  const setContainers = v => setSt(p => { const n = Math.max(0, Math.min(50, parseInt(v, 10) || 0)); const nos = (p.containerNos || []).slice(0, n); while (nos.length < n) nos.push(""); return { ...p, containers: v, containerNos: nos }; });
+  const setContainerNo = (i, v) => setSt(p => { const nos = (p.containerNos || []).slice(); nos[i] = v; return { ...p, containerNos: nos }; });
+  const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); setS("location", v); setNewLoc(""); };
+  const removeLoc = name => { const nx = locs.filter(l => l !== name); const fin = nx.length ? nx : ["Wild & Lye"]; setLocs(fin); saveStorageLocs(fin); if (st.location === name) setS("location", fin[0]); };
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
-    const rec = { id: c.id || uid(), ...f, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
+    const storage = { inStore: st.inStore, dateIn: st.dateIn, dateOut: st.dateOut, containers: parseInt(st.containers, 10) || 0, containerNos: (st.containerNos || []).slice(0, contN), looseItems: st.looseItems, looseNote: st.looseNote, location: st.location, value: Number(st.value) || 0 };
+    const rec = { id: c.id || uid(), ...f, storage, move: mv, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
     if (!c.id) { try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "newEnquiry", customerId: rec.id })); } catch {} }
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
@@ -2427,6 +2429,69 @@ function CustomerForm({ data, onClose, editCustomer }) {
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Town"><Input value={f.town} onChange={v => set("town", v)} /></Field></div>
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.postcode} onChange={v => set("postcode", v)} /></Field></div>
+      </div>
+      <SectionTitle>Moving from</SectionTitle>
+      <Field label="Address"><Input value={mv.fromAddress1} onChange={v => setM("fromAddress1", v)} placeholder="House/flat & street" /></Field>
+      <Field label="Address line 2"><Input value={mv.fromAddress2} onChange={v => setM("fromAddress2", v)} placeholder="(optional)" /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Town"><Input value={mv.fromTown} onChange={v => setM("fromTown", v)} /></Field></div>
+        <div style={{ width: 120 }}><Field label="Postcode"><Input value={mv.fromPostcode} onChange={v => setM("fromPostcode", v)} /></Field></div>
+      </div>
+      <Field label="Property type"><Select value={mv.fromPropertyType} onChange={v => setM("fromPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Bedrooms"><Input type="number" value={mv.fromBedrooms} onChange={v => setM("fromBedrooms", v)} placeholder="e.g. 3" /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Floor / level"><Input value={mv.fromFloor} onChange={v => setM("fromFloor", v)} placeholder="e.g. Ground, 2nd" /></Field></div>
+      </div>
+      <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={mv.fromAccess} onChange={v => setM("fromAccess", v)} rows={2} /></Field>
+
+      <SectionTitle>Moving to</SectionTitle>
+      <Field label="Address"><Input value={mv.toAddress1} onChange={v => setM("toAddress1", v)} placeholder="House/flat & street" /></Field>
+      <Field label="Address line 2"><Input value={mv.toAddress2} onChange={v => setM("toAddress2", v)} placeholder="(optional)" /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Town"><Input value={mv.toTown} onChange={v => setM("toTown", v)} /></Field></div>
+        <div style={{ width: 120 }}><Field label="Postcode"><Input value={mv.toPostcode} onChange={v => setM("toPostcode", v)} /></Field></div>
+      </div>
+      <Field label="Property type"><Select value={mv.toPropertyType} onChange={v => setM("toPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
+      <Field label="Floor / level"><Input value={mv.toFloor} onChange={v => setM("toFloor", v)} placeholder="e.g. Ground, 2nd" /></Field>
+      <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={mv.toAccess} onChange={v => setM("toAccess", v)} rows={2} /></Field>
+
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+        <div style={{ flex: 1 }}><Field label="Preferred move date"><Input type="date" value={mv.preferredDate} onChange={v => setM("preferredDate", v)} /></Field></div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", paddingBottom: 12, whiteSpace: "nowrap" }}>
+          <input type="checkbox" checked={mv.dateFlexible} onChange={e => setM("dateFlexible", e.target.checked)} style={{ width: 16, height: 16 }} /> Flexible
+        </label>
+      </div>
+
+      <div style={{ marginTop: 6, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage</div>
+        <Field label="In store?"><Select value={st.inStore ? "Yes" : "No"} onChange={v => setS("inStore", v === "Yes")} options={["No", "Yes"]} /></Field>
+        {st.inStore && (
+          <>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 1 }}><Field label="Date into store"><Input type="date" value={st.dateIn} onChange={v => setS("dateIn", v)} /></Field></div>
+              <div style={{ flex: 1 }}><Field label="Date out of store"><Input type="date" value={st.dateOut} onChange={v => setS("dateOut", v)} /></Field></div>
+            </div>
+            <Field label="Amount of containers"><Input type="number" inputMode="numeric" value={st.containers} onChange={setContainers} /></Field>
+            {contN > 0 && (
+              <Field label="Container numbers">
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {Array.from({ length: contN }).map((_, i) => (
+                    <Input key={i} value={st.containerNos[i] || ""} onChange={v => setContainerNo(i, v)} placeholder={`Container ${i + 1}`} />
+                  ))}
+                </div>
+              </Field>
+            )}
+            <Field label="Any loose items?" hint="Items that don't fit in a container"><Select value={st.looseItems ? "Yes" : "No"} onChange={v => setS("looseItems", v === "Yes")} options={["No", "Yes"]} /></Field>
+            {st.looseItems && <Field label="Loose items — details"><Textarea value={st.looseNote} onChange={v => setS("looseNote", v)} /></Field>}
+            <Field label="Location of storage"><Select value={st.location} onChange={v => setS("location", v)} options={locs} /></Field>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "flex-end" }}>
+              <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
+              <Btn size="sm" onClick={addLoc} disabled={!newLoc.trim()}>Add</Btn>
+              {locs.length > 1 && <Btn size="sm" variant="grey" onClick={() => removeLoc(st.location)}>Remove</Btn>}
+            </div>
+            <Field label="Storage value (£)"><Input type="number" inputMode="decimal" value={st.value} onChange={v => setS("value", v)} /></Field>
+          </>
+        )}
       </div>
       <Field label="Notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
@@ -2468,6 +2533,29 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
+      {c.move && (c.move.fromAddress1 || c.move.toAddress1 || c.move.preferredDate) && (
+        <Card>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Move details</div>
+          <Row label="Moving from" value={[c.move.fromAddress1, c.move.fromAddress2, c.move.fromTown, c.move.fromPostcode].filter(Boolean).join(", ") || "—"} />
+          {(c.move.fromPropertyType || c.move.fromBedrooms || c.move.fromFloor) && <Row label="From property" value={[c.move.fromPropertyType, c.move.fromBedrooms && `${c.move.fromBedrooms} bed`, c.move.fromFloor].filter(Boolean).join(" · ")} />}
+          {c.move.fromAccess && <Row label="From access" value={c.move.fromAccess} />}
+          <Row label="Moving to" value={[c.move.toAddress1, c.move.toAddress2, c.move.toTown, c.move.toPostcode].filter(Boolean).join(", ") || "—"} />
+          {(c.move.toPropertyType || c.move.toFloor) && <Row label="To property" value={[c.move.toPropertyType, c.move.toFloor].filter(Boolean).join(" · ")} />}
+          {c.move.toAccess && <Row label="To access" value={c.move.toAccess} />}
+          {c.move.preferredDate && <Row label="Preferred date" value={`${fmtUK(c.move.preferredDate)}${c.move.dateFlexible ? " (flexible)" : ""}`} />}
+        </Card>
+      )}
+      {c.storage && c.storage.inStore && (
+        <Card>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage</div>
+          <Row label="Location" value={c.storage.location || "—"} />
+          <Row label="Into store" value={c.storage.dateIn ? fmtUK(c.storage.dateIn) : "—"} />
+          <Row label="Out of store" value={c.storage.dateOut ? fmtUK(c.storage.dateOut) : "—"} />
+          <Row label="Containers" value={c.storage.containers ? `${c.storage.containers}${(c.storage.containerNos || []).filter(Boolean).length ? " — " + c.storage.containerNos.filter(Boolean).join(", ") : ""}` : "—"} />
+          {c.storage.looseItems && <Row label="Loose items" value={c.storage.looseNote || "Yes"} />}
+          {c.storage.value ? <Row label="Storage value" value={`£${Number(c.storage.value).toLocaleString("en-GB")}`} /> : null}
+        </Card>
+      )}
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         {c.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${c.phone}`}>📞 Call</Btn>}
         {c.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${c.email}`}>✉️ Email</Btn>}
@@ -2635,6 +2723,19 @@ function CompanyView({ data, setView }) {
   const restoreRef = useRef(null);
   const [restoring, setRestoring] = useState(false);
   const [wiping, setWiping] = useState(false);
+  const [refStartVal, setRefStartVal] = useState(String(getRefStart()));
+  const [refBusy, setRefBusy] = useState(false);
+  const refMissing = (data.customers || []).filter(c => !c.ref).length;
+  function saveRefStart() { setRefStart(refStartVal); alert("Saved. New customers will number up from " + (parseInt(refStartVal, 10) || 0) + "."); }
+  async function assignRefs() {
+    if (!confirm(`Give a reference number to ${refMissing} customer${refMissing !== 1 ? "s" : ""} that don't have one yet?`)) return;
+    setRefBusy(true);
+    const ordered = [...(data.customers || [])].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    let counter = Math.max(getRefStart(), maxCustomerRef(data) + 1);
+    let d = data;
+    for (const c of ordered) { if (c.ref) continue; d = upsertLocal(d, "customers", { ...c, ref: counter }); counter++; }
+    await saveAndReload(d);
+  }
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   async function doRestore(inc) {
@@ -2681,7 +2782,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B13</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B15</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -2691,6 +2792,18 @@ function CompanyView({ data, setView }) {
               <div style={{ fontSize: 13, color: "#6A7B77" }}>Edit room items, volumes & weights. Syncs to all devices.</div>
             </div>
             <Btn size="sm" onClick={() => setView({ screen: "catalogue" })}>Edit</Btn>
+          </div>
+        </Card>
+
+        <Card style={{ marginBottom: 0 }}>
+          <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Customer reference numbers</h4>
+          <Field label="Start numbering from" hint="New customers count up from here">
+            <Input value={refStartVal} onChange={setRefStartVal} type="number" inputMode="numeric" />
+          </Field>
+          <div style={{ fontSize: 12.5, color: "#6A7B77", margin: "2px 0 10px" }}>Next new customer will be <b>#{Math.max(parseInt(refStartVal, 10) || 0, maxCustomerRef(data) + 1)}</b>.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn size="sm" onClick={saveRefStart}>Save start number</Btn>
+            {refMissing > 0 && <Btn size="sm" variant="grey" disabled={refBusy} onClick={assignRefs}>{refBusy ? "Assigning…" : `Assign to ${refMissing} existing`}</Btn>}
           </div>
         </Card>
 
