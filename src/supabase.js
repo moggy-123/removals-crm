@@ -12,7 +12,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const customerToDb = c => ({
   id: c.id, name: c.name, company: c.company, phone: c.phone, home_phone: c.homePhone || "", email: c.email,
   address1: c.address1, address2: c.address2, town: c.town, county: c.county,
-  postcode: c.postcode, cust_type: c.custType || "Private", ref: c.ref || null, notes: c.notes,
+  postcode: c.postcode, cust_type: c.custType || "Private", notes: c.notes,
   storage: c.storage || null, move: c.move || null, storage_inv: c.storageInv || null,
   updated_at: c.updatedAt || Date.now(),
   created_at: c.createdAt || new Date().toISOString(),
