@@ -9,8 +9,7 @@
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://vpcygvdjfgiwlsdyxhzs.supabase.co";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwY3lndmRqZmdpd2xzZHl4aHpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4OTU0MTQsImV4cCI6MjA5NzQ3MTQxNH0.sk4-r5vvlYuxHcaq8Ee5TXflgQ0fF62rAOP6ZABY51g";
 // CHANGE THIS to your own secret, and use the same value in the ?key= URL.
-const INBOUND_SECRET = process.env.INBOUND_SECRET || "Dave-1966";
-
+const INBOUND_SECRET = process.env.INBOUND_SECRET || "rj-enquiries-2026";
 
 const EMAIL_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 function monthNameToYM(name) {
@@ -155,20 +154,12 @@ export default async function handler(req, res) {
 
     const p = parseEnquiryEmail(String(text));
 
-    // next customer ref (#1000+)
-    let nextRef = 1000;
-    try {
-      const r = await sb("customers?select=ref&order=ref.desc.nullslast&limit=1");
-      const rows = await r.json();
-      if (Array.isArray(rows) && rows[0] && Number(rows[0].ref) >= 1000) nextRef = Number(rows[0].ref) + 1;
-    } catch {}
-
     const now = new Date().toISOString();
     const custId = uid();
     const customer = {
       id: custId, name: p.name || "Website enquiry", company: "", phone: p.phone || "", home_phone: "", email: p.email || "",
       address1: p.fromAddress1 || "", address2: "", town: p.fromTown || "", county: "", postcode: p.fromPostcode || "",
-      cust_type: "Private", ref: nextRef, notes: "", updated_at: Date.now(), created_at: now,
+      cust_type: "Private", notes: "", updated_at: Date.now(), created_at: now,
     };
     const enquiry = {
       id: uid(), customer_id: custId, status: "New",
@@ -190,7 +181,7 @@ export default async function handler(req, res) {
     const er = await sb("enquiries", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(enquiry) });
     if (!er.ok) return send(500, { error: "enquiry insert failed: " + (await er.text()) });
 
-    return send(200, { ok: true, customer: customer.name, ref: nextRef });
+    return send(200, { ok: true, customer: customer.name });
   } catch (err) {
     return send(500, { error: String((err && err.stack) || err) });
   }
