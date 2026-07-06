@@ -90,6 +90,12 @@ function fmtDateShort(iso) {
   if (isNaN(d)) return iso;
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
+function dow(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + (String(iso).length === 10 ? "T00:00" : ""));
+  if (isNaN(d)) return "";
+  return d.toLocaleDateString("en-GB", { weekday: "short" });
+}
 function fmtMonth(ym) {
   if (!ym) return "";
   const [y, m] = String(ym).split("-");
@@ -479,7 +485,7 @@ function Dashboard({ data, setView }) {
             <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "#B45309", textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(e.surveyDate)}{e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "#B45309", textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(e.surveyDate)} ({dow(e.surveyDate)}){e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
                 </div>
@@ -496,7 +502,7 @@ function Dashboard({ data, setView }) {
             <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(st.date)}{st.time ? ` · ${st.time}` : ""}{st.type ? ` · ${st.type}` : ""}</div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(st.date)} ({dow(st.date)}){st.time ? ` · ${st.time}` : ""}{st.type ? ` · ${st.type}` : ""}</div>
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}</div>
                 </div>
@@ -2825,7 +2831,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B23</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B24</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3217,7 +3223,7 @@ function parseTime(t){ if(!t) return null; const m=String(t).match(/(\d{1,2}):(\
 function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"am":"pm"; let H=hh%12; if(H===0)H=12; return mm?`${H}:${String(mm).padStart(2,"0")}${ap}`:`${H}${ap}`; }
 
 function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
-  const [mode, setMode] = useState(initialMode || "week");
+  const [mode, setMode] = useState(initialMode || "agenda");
   const [show, setShow] = useState(initialShow || "all");
   const showMoves = show !== "surveys";
   const showSurveys = show !== "moves";
@@ -3349,7 +3355,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
             {groups.map(g => (
               <div key={g.date}>
-                <div style={{ fontSize:13, fontWeight:800, color: sameDay(new Date(g.date+"T00:00"),today)?AMBER:"#10211E", marginBottom:8, textTransform:"uppercase", letterSpacing:".04em" }}>{fmtDate(g.date)}{sameDay(new Date(g.date+"T00:00"),today)?" · Today":""}</div>
+                <div style={{ fontSize:13, fontWeight:800, color: sameDay(new Date(g.date+"T00:00"),today)?AMBER:"#10211E", marginBottom:8, textTransform:"uppercase", letterSpacing:".04em" }}>{fmtDate(g.date)} ({dow(g.date)}){sameDay(new Date(g.date+"T00:00"),today)?" · Today":""}</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                   {g.items.map((it,ix) => it.type==="survey" ? <SurveyCard key={ix} en={it.en} big /> : <MoveCard key={ix} m={{ job:it.job, stage:it.stage }} big />)}
                 </div>
