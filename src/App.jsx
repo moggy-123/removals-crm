@@ -2854,7 +2854,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B32</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B33</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3515,8 +3515,13 @@ function mergeArrays(cloudArr, localArr, deleted) {
   (cloudArr || []).forEach(x => { if (!deleted.includes(x.id)) byId[x.id] = x; });
   (localArr || []).forEach(x => {
     if (deleted.includes(x.id)) return;
-    if (byId[x.id]) byId[x.id] = (x.updatedAt || 0) >= (byId[x.id].updatedAt || 0) ? x : byId[x.id];
-    else byId[x.id] = x; // local-only: keep (genuine deletes use tombstones)
+    const c = byId[x.id];
+    if (c) {
+      let winner = (x.updatedAt || 0) >= (c.updatedAt || 0) ? x : c;
+      // Never lose a reference the database assigned (its updatedAt doesn't change).
+      const ref = winner.ref != null ? winner.ref : (x.ref != null ? x.ref : (c.ref != null ? c.ref : null));
+      byId[x.id] = (ref != null && ref !== winner.ref) ? { ...winner, ref } : winner;
+    } else byId[x.id] = x; // local-only: keep (genuine deletes use tombstones)
   });
   return Object.values(byId);
 }
@@ -4166,9 +4171,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const onOnline = () => pushChangedOnly(loadData()).catch(() => {});
-    window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
+    const syncNow = async () => {
+      if (SAVING_IN_PROGRESS) return;
+      try {
+        const merged = mergeAll(await pullFromCloud(), loadData());
+        localStorage.setItem(DB_KEY, JSON.stringify(merged));
+        pushChangedOnly(merged).catch(() => {});
+        setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
+        setSyncStatus("synced");
+      } catch { setSyncStatus("offline"); }
+    };
+    const onVis = () => { if (document.visibilityState === "visible") syncNow(); };
+    window.addEventListener("online", syncNow);
+    window.addEventListener("focus", syncNow);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("online", syncNow); window.removeEventListener("focus", syncNow); document.removeEventListener("visibilitychange", onVis); };
   }, []);
 
   useEffect(() => {
@@ -4178,10 +4195,7 @@ export default function App() {
         const merged = mergeAll(await pullFromCloud(), loadData());
         localStorage.setItem(DB_KEY, JSON.stringify(merged));
         pushChangedOnly(merged).catch(() => {});
-        setData(prev => {
-          const count = a => (a.customers?.length || 0) + (a.enquiries?.length || 0) + (a.jobs?.length || 0);
-          return count(prev) !== count(merged) ? merged : prev;
-        });
+        setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
         setSyncStatus("synced");
       } catch { setSyncStatus("offline"); }
     }, 20000);
