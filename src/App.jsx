@@ -2481,8 +2481,6 @@ function CustomerForm({ data, onClose, editCustomer }) {
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const [st, setSt] = useState(() => { const s = c.storage || {}; return { inStore: !!s.inStore, dateIn: s.dateIn || "", dateOut: s.dateOut || "", containers: s.containers ?? "", containerNos: Array.isArray(s.containerNos) ? s.containerNos : [], looseItems: !!s.looseItems, looseNote: s.looseNote || "", location: s.location || (getStorageLocs()[0] || "Wild & Lye"), value: s.value ?? "" }; });
-  const [mv, setMv] = useState(() => { const m = c.move || {}; return { fromAddress1: m.fromAddress1 || "", fromAddress2: m.fromAddress2 || "", fromTown: m.fromTown || "", fromPostcode: m.fromPostcode || "", fromPropertyType: m.fromPropertyType || "", fromBedrooms: m.fromBedrooms || "", fromFloor: m.fromFloor || "", fromAccess: m.fromAccess || "", toAddress1: m.toAddress1 || "", toAddress2: m.toAddress2 || "", toTown: m.toTown || "", toPostcode: m.toPostcode || "", toPropertyType: m.toPropertyType || "", toFloor: m.toFloor || "", toAccess: m.toAccess || "", preferredDate: m.preferredDate || "", dateFlexible: !!m.dateFlexible }; });
-  const setM = (k, v) => setMv(p => ({ ...p, [k]: v }));
   const setS = (k, v) => setSt(p => ({ ...p, [k]: v }));
   const [locs, setLocs] = useState(getStorageLocs);
   const [newLoc, setNewLoc] = useState("");
@@ -2494,8 +2492,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
     const storage = { inStore: st.inStore, dateIn: st.dateIn, dateOut: st.dateOut, containers: parseInt(st.containers, 10) || 0, containerNos: (st.containerNos || []).slice(0, contN), looseItems: st.looseItems, looseNote: st.looseNote, location: st.location, value: Number(st.value) || 0 };
-    const move = { ...mv, fromAddress1: f.address1 || "", fromAddress2: f.address2 || "", fromTown: f.town || "", fromPostcode: f.postcode || "" };
-    const rec = { id: c.id || uid(), ...f, storage, move, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
+    const rec = { id: c.id || uid(), ...f, storage, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
     if (!c.id) { try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "newEnquiry", customerId: rec.id })); } catch {} }
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
@@ -2514,32 +2511,6 @@ function CustomerForm({ data, onClose, editCustomer }) {
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Town"><Input value={f.town} onChange={v => set("town", v)} /></Field></div>
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.postcode} onChange={v => set("postcode", v)} /></Field></div>
-      </div>
-      <SectionTitle>Moving from</SectionTitle>
-      <div style={{ fontSize: 12.5, color: "#6B7280", margin: "-4px 0 10px" }}>Uses the contact address above.</div>
-      <Field label="Property type"><Select value={mv.fromPropertyType} onChange={v => setM("fromPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Bedrooms"><Input type="number" value={mv.fromBedrooms} onChange={v => setM("fromBedrooms", v)} placeholder="e.g. 3" /></Field></div>
-        <div style={{ flex: 1 }}><Field label="Floor / level"><Input value={mv.fromFloor} onChange={v => setM("fromFloor", v)} placeholder="e.g. Ground, 2nd" /></Field></div>
-      </div>
-      <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={mv.fromAccess} onChange={v => setM("fromAccess", v)} rows={2} /></Field>
-
-      <SectionTitle>Moving to</SectionTitle>
-      <Field label="Address"><Input value={mv.toAddress1} onChange={v => setM("toAddress1", v)} placeholder="House/flat & street" /></Field>
-      <Field label="Address line 2"><Input value={mv.toAddress2} onChange={v => setM("toAddress2", v)} placeholder="(optional)" /></Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Town"><Input value={mv.toTown} onChange={v => setM("toTown", v)} /></Field></div>
-        <div style={{ width: 120 }}><Field label="Postcode"><Input value={mv.toPostcode} onChange={v => setM("toPostcode", v)} /></Field></div>
-      </div>
-      <Field label="Property type"><Select value={mv.toPropertyType} onChange={v => setM("toPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
-      <Field label="Floor / level"><Input value={mv.toFloor} onChange={v => setM("toFloor", v)} placeholder="e.g. Ground, 2nd" /></Field>
-      <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={mv.toAccess} onChange={v => setM("toAccess", v)} rows={2} /></Field>
-
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-        <div style={{ flex: 1 }}><Field label="Preferred move date"><Input type="date" value={mv.preferredDate} onChange={v => setM("preferredDate", v)} /></Field></div>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", paddingBottom: 12, whiteSpace: "nowrap" }}>
-          <input type="checkbox" checked={mv.dateFlexible} onChange={e => setM("dateFlexible", e.target.checked)} style={{ width: 16, height: 16 }} /> Flexible
-        </label>
       </div>
 
       <div style={{ marginTop: 6, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
@@ -2629,18 +2600,6 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
-      {c.move && (c.move.fromAddress1 || c.move.toAddress1 || c.move.preferredDate) && (
-        <Card>
-          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Move details</div>
-          <Row label="Moving from" value={[c.move.fromAddress1, c.move.fromAddress2, c.move.fromTown, c.move.fromPostcode].filter(Boolean).join(", ") || "—"} />
-          {(c.move.fromPropertyType || c.move.fromBedrooms || c.move.fromFloor) && <Row label="From property" value={[c.move.fromPropertyType, c.move.fromBedrooms && `${c.move.fromBedrooms} bed`, c.move.fromFloor].filter(Boolean).join(" · ")} />}
-          {c.move.fromAccess && <Row label="From access" value={c.move.fromAccess} />}
-          <Row label="Moving to" value={[c.move.toAddress1, c.move.toAddress2, c.move.toTown, c.move.toPostcode].filter(Boolean).join(", ") || "—"} />
-          {(c.move.toPropertyType || c.move.toFloor) && <Row label="To property" value={[c.move.toPropertyType, c.move.toFloor].filter(Boolean).join(" · ")} />}
-          {c.move.toAccess && <Row label="To access" value={c.move.toAccess} />}
-          {c.move.preferredDate && <Row label="Preferred date" value={`${fmtUK(c.move.preferredDate)}${c.move.dateFlexible ? " (flexible)" : ""}`} />}
-        </Card>
-      )}
       {c.storage && c.storage.inStore && (
         <Card>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage</div>
@@ -2895,7 +2854,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B30</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B31</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
