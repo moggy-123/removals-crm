@@ -381,8 +381,7 @@ function custName(data, id) {
   return c.ref ? `#${c.ref} ${base}` : base;
 }
 function moveSeqOf(data, job) {
-  if (job.moveSeq) return job.moveSeq;
-  const sib = (data.jobs || []).filter(j => j.customerId === job.customerId).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+  const sib = (data.jobs || []).filter(j => j.customerId === job.customerId).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "") || (a.id || "").localeCompare(b.id || ""));
   const i = sib.findIndex(j => j.id === job.id);
   return i >= 0 ? i + 1 : 1;
 }
@@ -2196,14 +2195,28 @@ function EnquiryDetail({ data, id, setView }) {
     await saveAndReload(upsertLocal(data, "enquiries", { ...e, status, ...extra }));
   }
   async function markWon() {
-    const seq = (data.jobs || []).filter(j => j.customerId === e.customerId).length + 1;
+    const existing = (data.jobs || []).find(j => j.enquiryId === e.id);
+    if (existing) {
+      // Re-booking an enquiry that already has a move: don't create a second job.
+      let d0 = upsertLocal(data, "jobs", { ...existing, status: existing.status === "Completed" ? "Provisional" : existing.status });
+      d0 = upsertLocal(d0, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
+      showSavingOverlay(); SAVING_IN_PROGRESS = true;
+      const s0 = stampData(d0);
+      localStorage.setItem(DB_KEY, JSON.stringify(s0));
+      try { await pushChangedOnly(s0); } catch {}
+      SAVING_IN_PROGRESS = false;
+      try { sessionStorage.setItem("removals_open_plan", e.id); } catch {}
+      setView({ screen: "enquiryDetail", id: e.id });
+      window.location.reload();
+      return;
+    }
     const jid = uid();
     const planned = Array.isArray(e.stages) ? e.stages : [];
     const stages = planned.length
       ? planned.map(d => ({ id: uid(), type: d.type || "Move", date: d.date || e.preferredDate || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
       : [{ id: uid(), type: "Move", date: e.preferredDate || "", time: "", vehicleIds: [], crew: [], notes: "" }];
     const job = {
-      id: jid, customerId: e.customerId, enquiryId: e.id, moveSeq: seq,
+      id: jid, customerId: e.customerId, enquiryId: e.id,
       startTime: "",
       fromAddress1: e.fromAddress1, fromAddress2: e.fromAddress2, fromTown: e.fromTown, fromPostcode: e.fromPostcode, fromAccess: e.fromAccess,
       toAddress1: e.toAddress1, toAddress2: e.toAddress2, toTown: e.toTown, toPostcode: e.toPostcode, toAccess: e.toAccess,
@@ -2859,7 +2872,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B27</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B28</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
