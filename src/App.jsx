@@ -2467,7 +2467,8 @@ function CustomerForm({ data, onClose, editCustomer }) {
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
     const storage = { inStore: st.inStore, dateIn: st.dateIn, dateOut: st.dateOut, containers: parseInt(st.containers, 10) || 0, containerNos: (st.containerNos || []).slice(0, contN), looseItems: st.looseItems, looseNote: st.looseNote, location: st.location, value: Number(st.value) || 0 };
-    const rec = { id: c.id || uid(), ...f, storage, move: mv, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
+    const move = { ...mv, fromAddress1: f.address1 || "", fromAddress2: f.address2 || "", fromTown: f.town || "", fromPostcode: f.postcode || "" };
+    const rec = { id: c.id || uid(), ...f, storage, move, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
     if (!c.id) { try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "newEnquiry", customerId: rec.id })); } catch {} }
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
@@ -2488,12 +2489,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.postcode} onChange={v => set("postcode", v)} /></Field></div>
       </div>
       <SectionTitle>Moving from</SectionTitle>
-      <Field label="Address"><Input value={mv.fromAddress1} onChange={v => setM("fromAddress1", v)} placeholder="House/flat & street" /></Field>
-      <Field label="Address line 2"><Input value={mv.fromAddress2} onChange={v => setM("fromAddress2", v)} placeholder="(optional)" /></Field>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Town"><Input value={mv.fromTown} onChange={v => setM("fromTown", v)} /></Field></div>
-        <div style={{ width: 120 }}><Field label="Postcode"><Input value={mv.fromPostcode} onChange={v => setM("fromPostcode", v)} /></Field></div>
-      </div>
+      <div style={{ fontSize: 12.5, color: "#6B7280", margin: "-4px 0 10px" }}>Uses the contact address above.</div>
       <Field label="Property type"><Select value={mv.fromPropertyType} onChange={v => setM("fromPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Bedrooms"><Input type="number" value={mv.fromBedrooms} onChange={v => setM("fromBedrooms", v)} placeholder="e.g. 3" /></Field></div>
@@ -2872,7 +2868,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B28</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B29</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
