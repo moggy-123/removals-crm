@@ -587,7 +587,7 @@ function Dashboard({ data, setView }) {
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.type || "Move"}{st.time ? ` · ${st.time}` : ""}</div>
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
-                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(st.date)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
+                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(st.date)} ({dow(st.date)}) · {j.fromTown || "—"} → {j.toTown || "—"}</div>
                 </div>
                 <StatusBadge status={j.status} />
               </div>
@@ -1992,7 +1992,7 @@ async function buildSurveyPdf(e, c, data, forStaff = false) {
   if (!stages.length) { at("To be confirmed.", M, y, 9.5, font, navy); y -= 16; }
   else stages.forEach((d, i) => {
     ensure(40);
-    const when = [d.date ? fmtUK(d.date) : "Date TBC", d.time].filter(Boolean).join(" · ");
+    const when = [d.date ? `${fmtUK(d.date)} (${dow(d.date)})` : "Date TBC", d.time].filter(Boolean).join(" · ");
     at(`Day ${i + 1}`, M, y, 9.5, bold, navy); at(`${d.type || "Move"}  —  ${when}`, M + 50, y, 9.5, font, navy); y -= 14;
     if (forStaff) {
       const crew = (d.crew || []).join(", "); const vehs = (d.vehicleIds || []).map(vName).filter(Boolean).join(", ");
@@ -2273,7 +2273,7 @@ function EnquiryDetail({ data, id, setView }) {
               <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
                 {e.stages.map((d, i) => (
                   <div key={d.id || i} style={{ fontSize: 13, color: "#374151" }}>
-                    <b style={{ color: "#10211E" }}>Day {i + 1}:</b> {d.type || "—"} · {d.date ? fmtDate(d.date) : "Date TBC"}
+                    <b style={{ color: "#10211E" }}>Day {i + 1}:</b> {d.type || "—"} · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}
                     {(d.crew && d.crew.length) ? ` · ${d.crew.length} crew` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
                     {(d.vehicleIds && d.vehicleIds.length) ? ` · ${d.vehicleIds.map(vname).filter(Boolean).join(", ")}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
                   </div>
@@ -2629,7 +2629,7 @@ function CustomerDetail({ data, id, setView }) {
       {jobs.filter(j => j.status !== "Completed").sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || "")).map(j => (
         <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} · {gbp(j.price)}</div>
+            <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}</div>
             <StatusBadge status={j.status} />
           </div>
         </Card>
@@ -2641,7 +2641,7 @@ function CustomerDetail({ data, id, setView }) {
           {jobs.filter(j => j.status === "Completed").sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || "")).map(j => (
             <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} · {gbp(j.price)}</div>
+                <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}</div>
                 <StatusBadge status={j.status} />
               </div>
             </Card>
@@ -2675,7 +2675,7 @@ function JobsList({ data, setView }) {
             <div>
               <div style={{ fontSize: 12, fontWeight: 800, color: TEAL_D }}>{moveRef(data, j)}</div>
               <div style={{ fontWeight: 700, color: "#111827", marginTop: 1 }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{fmtDate(j.moveDate)} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {j.fromTown || "—"} → {j.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{j.vehicle || "—"} · {gbp(j.price)}{j.deposit ? ` · dep ${gbp(j.deposit)}${j.depositPaid ? " ✓" : ""}` : ""}</div>
             </div>
             <StatusBadge status={j.status} />
@@ -2831,7 +2831,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B24</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B26</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
