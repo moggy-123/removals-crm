@@ -439,6 +439,18 @@ function Dashboard({ data, setView }) {
     .sort((a, b) => ((jobStages(a).find(st => st.date === todayIso) || {}).time || "").localeCompare((jobStages(b).find(st => st.date === todayIso) || {}).time || ""));
   const bookedVehToday = new Set(todayStages.flatMap(st => st.vehicleIds || []));
   const todaysMovesList = todaysMoves.map(j => ({ j, st: jobStages(j).find(s => s.date === todayIso) || {} }));
+  const jobLatestDate = j => { const ds = jobStages(j).map(s => s.date).filter(Boolean); return ds.length ? ds.slice().sort().slice(-1)[0] : (j.moveDate || ""); };
+  const pastProvisional = jobs.filter(j => j.status === "Provisional").map(j => ({ j, last: jobLatestDate(j) })).filter(x => x.last && x.last < todayIso).sort((a, b) => a.last.localeCompare(b.last));
+  const changeDate = j => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id });
+  async function removeBooking(j) {
+    const nDays = jobStages(j).length;
+    if (!confirm(`Remove this provisional booking for ${custName(data, j.customerId)} and its ${nDays} day${nDays !== 1 ? "s" : ""}?\n\nThe move (and its days) will be deleted. If it came from an enquiry, that enquiry goes back to "Quoted".`)) return;
+    addTombstone(j.id);
+    try { await deleteRecord("jobs", j.id); } catch {}
+    let d = { ...data, jobs: (data.jobs || []).filter(x => x.id !== j.id) };
+    if (j.enquiryId) { const en = (data.enquiries || []).find(e => e.id === j.enquiryId); if (en) d = upsertLocal(d, "enquiries", { ...en, stages: [], status: en.status === "Won" ? "Quoted" : en.status }); }
+    await saveAndReload(d);
+  }
   const upcomingSurveys = enquiries
     .filter(e => e.surveyDate && e.status !== "Lost" && e.surveyDate >= todayIso)
     .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
@@ -461,6 +473,22 @@ function Dashboard({ data, setView }) {
 
   return (
     <div>
+      {pastProvisional.length > 0 && (
+        <Card style={{ border: "1px solid #FDE68A", background: "#FFFBEB", marginBottom: 14 }}>
+          <div style={{ fontWeight: 800, color: "#92400E", marginBottom: 6, fontSize: 14 }}>Provisional bookings past their date</div>
+          <div style={{ fontSize: 12.5, color: "#92400E", marginBottom: 6 }}>These moves are still provisional and their date has passed. Change the date or remove the booking.</div>
+          {pastProvisional.map(({ j, last }) => (
+            <div key={j.id} style={{ padding: "10px 0 4px", borderTop: "1px solid #FDE68A" }}>
+              <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
+              <div style={{ fontSize: 12.5, color: "#92400E", marginBottom: 8 }}>Was {fmtDate(last)} ({dow(last)}) · {jobStages(j).length} day{jobStages(j).length !== 1 ? "s" : ""}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn size="sm" onClick={() => changeDate(j)}>Change date</Btn>
+                <Btn size="sm" variant="grey" onClick={() => removeBooking(j)} style={{ color: "#B91C1C", borderColor: "#FCA5A5" }}>Remove booking</Btn>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
       <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
         <Stat label="Open enquiries" value={open.length} color={TEAL} onClick={() => setView({ screen: "enquiries", filter: "Open" })} />
         <Stat label="Quoted" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
@@ -2831,7 +2859,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B26</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B27</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
