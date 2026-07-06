@@ -935,7 +935,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
       cid = uid();
-      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, custType: "Private", ref: nextCustomerRef(data2), createdAt: new Date().toISOString() };
+      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, custType: "Private", ref: null, createdAt: new Date().toISOString() };
       data2 = upsertLocal(data2, "customers", customer);
     }
     const rec = {
@@ -2492,7 +2492,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
     const storage = { inStore: st.inStore, dateIn: st.dateIn, dateOut: st.dateOut, containers: parseInt(st.containers, 10) || 0, containerNos: (st.containerNos || []).slice(0, contN), looseItems: st.looseItems, looseNote: st.looseNote, location: st.location, value: Number(st.value) || 0 };
-    const rec = { id: c.id || uid(), ...f, storage, ref: c.ref || nextCustomerRef(data), createdAt: c.createdAt || new Date().toISOString() };
+    const rec = { id: c.id || uid(), ...f, storage, ref: c.ref || null, createdAt: c.createdAt || new Date().toISOString() };
     if (!c.id) { try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "newEnquiry", customerId: rec.id })); } catch {} }
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
@@ -2592,7 +2592,7 @@ function CustomerDetail({ data, id, setView }) {
         <StatusBadge status={c.custType} />
       </div>
       <Card>
-        {c.ref && <Row label="Reference" value={`#${c.ref}`} />}
+        <Row label="Reference" value={c.ref ? `#${c.ref}` : "Pending — assigned on next sync"} />
         <Row label="Mobile" value={c.phone} />
         {c.homePhone && <Row label="Home phone" value={c.homePhone} />}
         <Row label="Email" value={c.email} />
@@ -2854,7 +2854,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B31</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B32</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -2869,14 +2869,7 @@ function CompanyView({ data, setView }) {
 
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Customer reference numbers</h4>
-          <Field label="Start numbering from" hint="New customers count up from here">
-            <Input value={refStartVal} onChange={setRefStartVal} type="number" inputMode="numeric" />
-          </Field>
-          <div style={{ fontSize: 12.5, color: "#6A7B77", margin: "2px 0 10px" }}>Next new customer will be <b>#{Math.max(parseInt(refStartVal, 10) || 0, maxCustomerRef(data) + 1)}</b>.</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn size="sm" onClick={saveRefStart}>Save start number</Btn>
-            {refMissing > 0 && <Btn size="sm" variant="grey" disabled={refBusy} onClick={assignRefs}>{refBusy ? "Assigning…" : `Assign to ${refMissing} existing`}</Btn>}
-          </div>
+          <div style={{ fontSize: 13, color: "#6A7B77", lineHeight: 1.5 }}>Reference numbers are now assigned automatically by the cloud when a new customer syncs — so they can't clash, even if two devices add customers offline at the same time. A new customer added offline shows no number until it reconnects.</div>
         </Card>
 
         <Card style={{ marginBottom: 0 }}>
