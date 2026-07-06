@@ -697,7 +697,19 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
   const [q, setQ] = useState("");
   const customers = [...(data.customers || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   const selected = customers.find(c => c.id === customerId);
-  const filtered = q.trim() ? customers.filter(c => `${c.name || ""} ${c.company || ""} ${c.phone || ""} ${c.homePhone || ""} ${c.town || ""} ${c.postcode || ""}`.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 10) : [];
+  const listRef = useRef(null);
+  const norm = s => (s || "").toLowerCase();
+  const filtered = q.trim() ? customers.filter(c => `${c.name || ""} ${c.company || ""} ${c.phone || ""} ${c.homePhone || ""} ${c.town || ""} ${c.postcode || ""} ${c.ref ? "#" + c.ref + " " + c.ref : ""}`.toLowerCase().includes(norm(q.trim()))).slice(0, 50) : [];
+  const groups = {};
+  customers.forEach(c => { const ch = (c.name || "#").trim().charAt(0).toUpperCase(); const key = /[A-Z]/.test(ch) ? ch : "#"; (groups[key] = groups[key] || []).push(c); });
+  const letters = Object.keys(groups).sort();
+  const jumpTo = L => { const el = listRef.current && listRef.current.querySelector(`[data-letter="${L}"]`); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); };
+  const Row = ({ c }) => (
+    <div onClick={() => { onPick(c.id); setQ(""); }} style={{ padding: "9px 11px", borderRadius: 8, cursor: "pointer", background: "#fff", border: "1px solid #EFF2F1", marginBottom: 6 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}</div>
+      <div style={{ fontSize: 12, color: "#9CA3AF" }}>{[c.company, c.phone, c.town, c.postcode].filter(Boolean).join(" · ") || "—"}</div>
+    </div>
+  );
   return (
     <div style={{ background: "#F9FAFB", borderRadius: 10, padding: 12, marginBottom: 14, border: "1px solid #F3F4F6" }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -715,16 +727,28 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
           </div>
         ) : (
           <div>
-            <Input value={q} onChange={setQ} placeholder="Search name, company, phone or postcode…" />
-            {q.trim() && (
-              <div style={{ marginTop: 8, maxHeight: 240, overflowY: "auto" }}>
+            <Input value={q} onChange={setQ} placeholder="Search name, ref #, phone, postcode…" />
+            {q.trim() ? (
+              <div style={{ marginTop: 8, maxHeight: 300, overflowY: "auto" }}>
                 {filtered.length === 0 ? <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>No matches</div>
-                  : filtered.map(c => (
-                    <div key={c.id} onClick={() => { onPick(c.id); setQ(""); }} style={{ padding: "9px 11px", borderRadius: 8, cursor: "pointer", background: "#fff", border: "1px solid #EFF2F1", marginBottom: 6 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{c.name}</div>
-                      <div style={{ fontSize: 12, color: "#9CA3AF" }}>{[c.company, c.phone, c.town].filter(Boolean).join(" · ") || "—"}</div>
-                    </div>
-                  ))}
+                  : filtered.map(c => <Row key={c.id} c={c} />)}
+              </div>
+            ) : (
+              <div style={{ position: "relative", marginTop: 8 }}>
+                <div ref={listRef} style={{ maxHeight: 320, overflowY: "auto", paddingRight: 20 }}>
+                  {customers.length === 0 ? <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>No customers yet</div>
+                    : letters.map(L => (
+                      <div key={L} data-letter={L}>
+                        <div style={{ position: "sticky", top: 0, background: "#F9FAFB", fontSize: 11, fontWeight: 800, color: "#94A4A0", padding: "4px 6px", zIndex: 1 }}>{L}</div>
+                        {groups[L].map(c => <Row key={c.id} c={c} />)}
+                      </div>
+                    ))}
+                </div>
+                {letters.length > 1 && (
+                  <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1 }}>
+                    {letters.map(L => <button key={L} onClick={() => jumpTo(L)} style={{ fontSize: 10, color: TEAL, fontWeight: 800, lineHeight: 1.05, padding: "1px 3px", background: "none", border: "none", cursor: "pointer" }}>{L}</button>)}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2299,7 +2323,10 @@ function EnquiryDetail({ data, id, setView }) {
             </div>
             {e.volumeCuFt > 0 && <div style={{ fontSize: 13, color: TEAL, fontWeight: 600, marginTop: 2 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads}` : ""}</div>}
           </div>
-          <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
+            <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
+            {e.surveyDate && <Btn size="sm" variant={(e.surveyDone || e.status === "Surveyed") ? "grey" : "primary"} onClick={async () => { const done = !(e.surveyDone || e.status === "Surveyed"); await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{(e.surveyDone || e.status === "Surveyed") ? "✓ Surveyed" : "Mark surveyed"}</Btn>}
+          </div>
         </div>
       </Card>
 
@@ -2868,7 +2895,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B29</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B30</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3310,14 +3337,17 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
     );
   };
 
-  const SurveyCard = ({ en, big }) => (
+  const SurveyCard = ({ en, big }) => {
+    const done = en.surveyDone || en.status === "Surveyed";
+    return (
     <div onClick={() => setView({ screen:"enquiryDetail", id:en.id })}
-      style={{ background:"#FFFBF2", border:"1px solid #FBE3B3", borderLeft:`4px solid ${AMBER}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
-      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:AMBER, textTransform:"uppercase", letterSpacing:".05em" }}>Survey{en.surveyTime ? ` · ${en.surveyTime}` : ""}</div>
+      style={{ background: done?"#F1F9F4":"#FFFBF2", border:`1px solid ${done?"#BBE6C9":"#FBE3B3"}`, borderLeft:`4px solid ${done?"#22C55E":AMBER}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
+      <div style={{ fontSize: big?11:9.5, fontWeight:800, color: done?"#15803D":AMBER, textTransform:"uppercase", letterSpacing:".05em" }}>{done?"✓ Surveyed":"Survey"}{en.surveyTime ? ` · ${en.surveyTime}` : ""}</div>
       <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, en.customerId)}</div>
       <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:1, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{en.fromTown || "—"} → {en.toTown || "—"}</div>
     </div>
-  );
+    );
+  };
 
   const availChip = (label, booked) => (    <span style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:99, fontSize:12.5, fontWeight:700,
       background: booked ? "#F2F5F4" : "#E7F2F0", color: booked ? "#B7C3C0" : TEAL_D,
