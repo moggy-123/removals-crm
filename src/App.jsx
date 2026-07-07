@@ -2887,7 +2887,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B37</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B38</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3470,6 +3470,27 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           🔧 Vehicle servicing {showVeh ? "on" : "off"}
         </button>
       </div>
+
+      {showVeh && (() => {
+        const nowIso = isoOf(today);
+        const up = [];
+        (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start && isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }) >= nowIso) up.push({ v, b }); }));
+        up.sort((a, c) => (a.b.start || "").localeCompare(c.b.start || ""));
+        if (!up.length) return null;
+        return (
+          <div style={{ background: "#F3F6FA", border: "1px solid #D3DEEA", borderRadius: 12, padding: "10px 12px", marginBottom: 14 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "#475569", marginBottom: 8 }}>🔧 Upcoming servicing</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {up.slice(0, 8).map(({ v, b }, ix) => (
+                <div key={ix} onClick={() => { setAnchor(new Date(b.start + "T00:00")); setMode("day"); }} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontSize: 13 }}>
+                  <span style={{ fontWeight: 700, color: "#10211E", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name} · {b.type}</span>
+                  <span style={{ color: "#475569", fontWeight: 600, flexShrink: 0, marginLeft: 8 }}>{fmtDate(b.start)} ({dow(b.start)}){b.days > 1 ? ` –${b.days}d` : ""}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Availability chips component (used in Day + Week) */}
 
