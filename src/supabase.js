@@ -102,12 +102,12 @@ const jobFromDb = r => ({
 
 const vehicleToDb = v => ({
   id: v.id, name: v.name, reg: v.reg || "", vtype: v.vtype || "",
-  capacity_cuft: v.capacityCuFt || 0,
+  capacity_cuft: v.capacityCuFt || 0, maintenance: v.maint || null,
   updated_at: v.updatedAt || Date.now(), created_at: v.createdAt || new Date().toISOString(),
 });
 const vehicleFromDb = r => ({
   id: r.id, name: r.name, reg: r.reg || "", vtype: r.vtype || "",
-  capacityCuFt: r.capacity_cuft || 0, updatedAt: r.updated_at, createdAt: r.created_at,
+  capacityCuFt: r.capacity_cuft || 0, maint: r.maintenance || null, updatedAt: r.updated_at, createdAt: r.created_at,
 });
 const staffToDb = s => ({
   id: s.id, name: s.name, role: s.role || "", phone: s.phone || "", active: s.active !== false,
