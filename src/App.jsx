@@ -2887,7 +2887,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B36</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B37</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3192,6 +3192,7 @@ function JobDetail({ data, id, setView }) {
     if (!date) return { veh, crew };
     (data.jobs || []).filter(x => x.id !== j.id).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     f.stages.forEach((st, i) => { if (i !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
+    (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
     return { veh, crew };
   }
 
