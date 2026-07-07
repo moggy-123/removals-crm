@@ -2887,7 +2887,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B38</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B39</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3349,7 +3349,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const jobsOn = d => showMoves ? rawJobsOn(d) : [];
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
-  const bookedVehiclesOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.vehicleIds || []));
+  const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
   const bookedStaffOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.crew || []));
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
@@ -3425,7 +3425,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         <div style={{ fontSize:11.5, fontWeight:800, textTransform:"uppercase", letterSpacing:".06em", color:"#94A4A0", marginBottom:10 }}>Availability</div>
         {vehicles.length>0 && <>
           <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Vehicles</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom: staffActive.length?12:0 }}>{vehicles.map(v => <span key={v.id}>{availChip(v.name, bv.has(v.id))}</span>)}</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom: staffActive.length?12:0 }}>{vehicles.map(v => { const out = vehOutOn(v, isoOf(d)); return <span key={v.id}>{availChip(out ? `${v.name} · servicing` : v.name, bv.has(v.id))}</span>; })}</div>
         </>}
         {staffActive.length>0 && <>
           <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Staff</div>
