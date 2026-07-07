@@ -2887,7 +2887,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B35</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B36</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3036,10 +3036,10 @@ function VehicleForm({ data, onClose, editVehicle }) {
         <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 6 }}>Booking a date marks the vehicle unavailable for those days.</div>
 
         <Field label="Service interval (weeks)" hint="e.g. 18t = 6, 3.5t = 26"><Input type="number" value={m.serviceWeeks} onChange={x => setMv("serviceWeeks", x)} placeholder="weeks" /></Field>
-        <DueRow label="Service" last={m.serviceLast} onLast={x => setMv("serviceLast", x)} due={nS} days={1} onBook={(due, days) => book("Service", due, days)} />
-        <DueRow label="MOT (annual)" last={m.motLast} onLast={x => setMv("motLast", x)} due={nM} days={Number(m.motDays) || 1} onBook={(due, days) => book("MOT", due, days)}
-          extra={<div style={{ width: 92 }}><div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 3 }}>Days out</div><input type="number" value={m.motDays} onChange={e => setMv("motDays", e.target.value)} style={inp} /></div>} />
-        <DueRow label="Tacho calibration (every 2 years)" last={m.tachoLast} onLast={x => setMv("tachoLast", x)} due={nT} days={1} onBook={(due, days) => book("Tacho", due, days)} />
+        {DueRow({ label: "Service — Tuesdays", last: m.serviceLast, onLast: x => setMv("serviceLast", x), due: nS, days: 1, onBook: (due, days) => book("Service", due, days) })}
+        {DueRow({ label: "MOT — Mon to Wed", last: m.motLast, onLast: x => setMv("motLast", x), due: nM, days: Number(m.motDays) || 1, onBook: (due, days) => book("MOT", due, days),
+          extra: <div style={{ width: 92 }}><div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 3 }}>Days out</div><input type="number" value={m.motDays} onChange={e => setMv("motDays", e.target.value)} style={inp} /></div> })}
+        {DueRow({ label: "Tacho — weekdays (every 2 years)", last: m.tachoLast, onLast: x => setMv("tachoLast", x), due: nT, days: 1, onBook: (due, days) => book("Tacho", due, days) })}
 
         {m.bookings.length > 0 && (
           <div style={{ marginTop: 12 }}>
@@ -3338,6 +3338,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const [show, setShow] = useState(initialShow || "all");
   const showMoves = show !== "surveys";
   const showSurveys = show !== "moves";
+  const [showVeh, setShowVeh] = useState(true);
   const [anchor, setAnchor] = useState(() => initialDate ? new Date(initialDate + "T00:00") : new Date());
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
@@ -3350,7 +3351,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const bookedVehiclesOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.vehicleIds || []));
   const bookedStaffOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.crew || []));
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
-  const maintOn = d => showMoves ? maintOnIso(isoOf(d)) : [];
+  const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
 
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
@@ -3463,6 +3464,12 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         ))}
       </div>
 
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <button onClick={() => setShowVeh(s => !s)} style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${showVeh ? "#B7C6D6" : "#E1E7E6"}`, background: showVeh ? "#EEF2F7" : "#fff", color: showVeh ? "#475569" : "#9CA3AF", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+          🔧 Vehicle servicing {showVeh ? "on" : "off"}
+        </button>
+      </div>
+
       {/* Availability chips component (used in Day + Week) */}
 
 
@@ -3471,7 +3478,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const items = [];
         if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (st.date && st.date >= startIso && st.crew && st.crew.length) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
         if (showSurveys) (data.enquiries||[]).forEach(en => { if (en.surveyDate && en.surveyDate >= startIso && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
-        if (showMoves) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso) items.push({ type:"maint", date: b.start < startIso ? startIso : b.start, time:"00", v, b }); }));
+        if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso) items.push({ type:"maint", date: b.start < startIso ? startIso : b.start, time:"00", v, b }); }));
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
         if (!items.length) return <Empty icon="calendar" text="Nothing coming up" />;
         const groups = [];
@@ -4282,6 +4289,8 @@ export default function App() {
   useEffect(() => {
     const syncNow = async () => {
       if (SAVING_IN_PROGRESS) return;
+      const ae = document.activeElement;
+      if (ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return; // don't disrupt an open picker/field
       try {
         const merged = mergeAll(await pullFromCloud(), loadData());
         localStorage.setItem(DB_KEY, JSON.stringify(merged));
@@ -4300,6 +4309,8 @@ export default function App() {
   useEffect(() => {
     const iv = setInterval(async () => {
       if (SAVING_IN_PROGRESS) return;
+      const ae = document.activeElement;
+      if (ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;
       try {
         const merged = mergeAll(await pullFromCloud(), loadData());
         localStorage.setItem(DB_KEY, JSON.stringify(merged));
