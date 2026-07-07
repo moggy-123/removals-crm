@@ -96,6 +96,23 @@ function dow(iso) {
   if (isNaN(d)) return "";
   return d.toLocaleDateString("en-GB", { weekday: "short" });
 }
+function isoAdd(iso, { days = 0, weeks = 0, months = 0 }) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00");
+  if (isNaN(d)) return "";
+  if (months) d.setMonth(d.getMonth() + months);
+  d.setDate(d.getDate() + days + weeks * 7);
+  return d.toISOString().slice(0, 10);
+}
+// Next-due dates from the last-done date + interval
+function nextService(m) { return m && m.serviceLast && m.serviceWeeks ? isoAdd(m.serviceLast, { weeks: Number(m.serviceWeeks) || 0 }) : ""; }
+function nextMOT(m) { return m && m.motLast ? isoAdd(m.motLast, { months: 12 }) : ""; }
+function nextTacho(m) { return m && m.tachoLast ? isoAdd(m.tachoLast, { months: 24 }) : ""; }
+// Is a vehicle booked out for maintenance on a given date?
+function vehOutOn(v, dateISO) {
+  const b = (v && v.maint && v.maint.bookings) || [];
+  return b.some(x => { if (!x.start) return false; const end = isoAdd(x.start, { days: Math.max(1, Number(x.days) || 1) - 1 }); return dateISO >= x.start && dateISO <= end; });
+}
 function fmtMonth(ym) {
   if (!ym) return "";
   const [y, m] = String(ym).split("-");
@@ -1577,6 +1594,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
     if (!date) return { veh, crew };
     (data.jobs || []).filter(x => !linkedJob || x.id !== linkedJob.id).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     days.forEach((st, ix) => { if (ix !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
+    if (date) (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
     return { veh, crew };
   }
   async function save() {
@@ -2854,7 +2872,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B33</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B34</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -2884,6 +2902,12 @@ function CompanyView({ data, setView }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E" }}>{v.name}</div>
                 <div style={{ fontSize: 12, color: "#6A7B77" }}>{[v.reg, v.vtype, v.capacityCuFt ? `${v.capacityCuFt} cu ft` : ""].filter(Boolean).join(" · ") || "—"}</div>
+                {(() => {
+                  const items = [["Service", nextService(v.maint)], ["MOT", nextMOT(v.maint)], ["Tacho", nextTacho(v.maint)]].filter(x => x[1]);
+                  if (!items.length) return null;
+                  const soon = iso => { const days = Math.round((new Date(iso + "T00:00") - new Date()) / 86400000); return days < 0 ? "#DC2626" : days <= 14 ? "#B45309" : "#9CA3AF"; };
+                  return <div style={{ fontSize: 11.5, marginTop: 3, display: "flex", flexWrap: "wrap", gap: 8 }}>{items.map(([label, due]) => <span key={label} style={{ color: soon(due) }}>{label}: {fmtUK(due)}</span>)}</div>;
+                })()}
               </div>
             </div>
           ))}
@@ -2946,11 +2970,21 @@ function CompanyView({ data, setView }) {
 function VehicleForm({ data, onClose, editVehicle }) {
   const v = editVehicle || {};
   const [f, setF] = useState({ reg: v.reg || "", vtype: v.vtype || "", capacityCuFt: v.capacityCuFt || "" });
+  const defWeeks = vt => /18/.test(vt) ? "6" : /3\.?5/.test(vt) ? "26" : "";
+  const m0 = v.maint || {};
+  const [m, setM] = useState({ serviceWeeks: m0.serviceWeeks ?? defWeeks(v.vtype || ""), serviceLast: m0.serviceLast || "", motLast: m0.motLast || "", motDays: m0.motDays ?? (/18/.test(v.vtype || "") ? 3 : 1), tachoLast: m0.tachoLast || "", bookings: Array.isArray(m0.bookings) ? m0.bookings : [] });
   const set = (k, val) => setF(p => ({ ...p, [k]: val }));
+  const setMv = (k, val) => setM(p => ({ ...p, [k]: val }));
+  const book = (type, start, days) => { if (!start) { alert("Set the last-done date first so a due date can be worked out."); return; } setM(p => ({ ...p, bookings: [...p.bookings.filter(b => !(b.type === type && b.start === start)), { id: uid(), type, start, days: Math.max(1, Number(days) || 1) }] })); };
+  const unbook = id => setM(p => ({ ...p, bookings: p.bookings.filter(b => b.id !== id) }));
+  const nS = nextService(m), nM = nextMOT(m), nT = nextTacho(m);
+  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
+
   async function save() {
     if (!f.reg.trim() && !f.vtype) { alert("Add a registration or a type so you can tell vehicles apart."); return; }
     const label = [f.vtype, f.reg.trim()].filter(Boolean).join(" · ") || "Vehicle";
-    const rec = { id: v.id || uid(), name: label, reg: f.reg.trim(), vtype: f.vtype, capacityCuFt: Number(f.capacityCuFt) || 0, createdAt: v.createdAt || new Date().toISOString() };
+    const maint = { serviceWeeks: Number(m.serviceWeeks) || 0, serviceLast: m.serviceLast || "", motLast: m.motLast || "", motDays: Number(m.motDays) || 1, tachoLast: m.tachoLast || "", bookings: m.bookings || [] };
+    const rec = { id: v.id || uid(), name: label, reg: f.reg.trim(), vtype: f.vtype, capacityCuFt: Number(f.capacityCuFt) || 0, maint, createdAt: v.createdAt || new Date().toISOString() };
     await saveAndReload(upsertLocal(data, "vehicles", rec));
   }
   async function del() {
@@ -2960,12 +2994,51 @@ function VehicleForm({ data, onClose, editVehicle }) {
     const d2 = { ...data, vehicles: (data.vehicles || []).filter(x => x.id !== v.id) };
     localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
   }
+
+  const DueRow = ({ label, last, onLast, due, days, onBook, extra }) => (
+    <div style={{ borderTop: "1px solid #EEF3F2", paddingTop: 10, marginTop: 10 }}>
+      <div style={{ fontWeight: 700, fontSize: 13.5, color: "#10211E", marginBottom: 6 }}>{label}</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 130 }}><div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 3 }}>Last done</div><input type="date" value={last} onChange={e => onLast(e.target.value)} style={inp} /></div>
+        {extra}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 8 }}>
+        <div style={{ fontSize: 12.5, color: due ? "#0F766E" : "#9CA3AF" }}>{due ? <>Next due: <b>{fmtUK(due)} ({dow(due)})</b></> : "Set last done to see due date"}</div>
+        {due && <Btn size="sm" variant="grey" onClick={() => onBook(due, days)}>Book {days} day{days !== 1 ? "s" : ""} out</Btn>}
+      </div>
+    </div>
+  );
+
   return (
     <Modal title={v.id ? "Edit Vehicle" : "Add Vehicle"} onClose={onClose}>
-      <Field label="Type"><Select value={f.vtype} onChange={x => set("vtype", x)} options={VEHICLE_TYPES} placeholder="Select…" /></Field>
+      <Field label="Type"><Select value={f.vtype} onChange={x => { set("vtype", x); if (!m.serviceWeeks) setMv("serviceWeeks", defWeeks(x)); if (m.motDays == null) setMv("motDays", /18/.test(x) ? 3 : 1); }} options={VEHICLE_TYPES} placeholder="Select…" /></Field>
       <Field label="Reg / plate"><Input value={f.reg} onChange={x => set("reg", x)} placeholder="e.g. WX19 ABC" /></Field>
       <Field label="Capacity (cu ft)" hint="Roughly how much it holds"><Input type="number" value={f.capacityCuFt} onChange={x => set("capacityCuFt", x)} placeholder="e.g. 600" /></Field>
-      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+
+      <div style={{ marginTop: 10, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 4 }}>Servicing & maintenance</div>
+        <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 6 }}>Booking a date marks the vehicle unavailable for those days.</div>
+
+        <Field label="Service interval (weeks)" hint="e.g. 18t = 6, 3.5t = 26"><Input type="number" value={m.serviceWeeks} onChange={x => setMv("serviceWeeks", x)} placeholder="weeks" /></Field>
+        <DueRow label="Service" last={m.serviceLast} onLast={x => setMv("serviceLast", x)} due={nS} days={1} onBook={(due, days) => book("Service", due, days)} />
+        <DueRow label="MOT (annual)" last={m.motLast} onLast={x => setMv("motLast", x)} due={nM} days={Number(m.motDays) || 1} onBook={(due, days) => book("MOT", due, days)}
+          extra={<div style={{ width: 92 }}><div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 3 }}>Days out</div><input type="number" value={m.motDays} onChange={e => setMv("motDays", e.target.value)} style={inp} /></div>} />
+        <DueRow label="Tacho calibration (every 2 years)" last={m.tachoLast} onLast={x => setMv("tachoLast", x)} due={nT} days={1} onBook={(due, days) => book("Tacho", due, days)} />
+
+        {m.bookings.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 6 }}>Booked out</div>
+            {m.bookings.slice().sort((a, b) => (a.start || "").localeCompare(b.start || "")).map(b => (
+              <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F0F4F3" }}>
+                <div style={{ fontSize: 13, color: "#10211E" }}><b>{b.type}</b> · {fmtUK(b.start)} ({dow(b.start)}){b.days > 1 ? ` – ${fmtUK(isoAdd(b.start, { days: b.days - 1 }))}` : ""}</div>
+                <button onClick={() => unbook(b.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         {v.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
         <Btn style={{ flex: 2 }} onClick={save}>{v.id ? "Save" : "Add vehicle"}</Btn>
