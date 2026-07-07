@@ -108,6 +108,21 @@ function isoAdd(iso, { days = 0, weeks = 0, months = 0 }) {
 function nextService(m) { return m && m.serviceLast && m.serviceWeeks ? isoAdd(m.serviceLast, { weeks: Number(m.serviceWeeks) || 0 }) : ""; }
 function nextMOT(m) { return m && m.motLast ? isoAdd(m.motLast, { months: 12 }) : ""; }
 function nextTacho(m) { return m && m.tachoLast ? isoAdd(m.tachoLast, { months: 24 }) : ""; }
+// Snap a date to the nearest given weekday (0=Sun..6=Sat), within ±3 days.
+function nearestDow(iso, target) {
+  const d = new Date(iso + "T00:00"); if (isNaN(d)) return iso;
+  let diff = target - d.getDay();
+  if (diff > 3) diff -= 7; else if (diff < -3) diff += 7;
+  return isoAdd(iso, { days: diff });
+}
+// Push a weekend date to the following Monday.
+function nextWeekday(iso) {
+  const d = new Date(iso + "T00:00"); if (isNaN(d)) return iso;
+  const g = d.getDay();
+  if (g === 0) return isoAdd(iso, { days: 1 });
+  if (g === 6) return isoAdd(iso, { days: 2 });
+  return iso;
+}
 // Is a vehicle booked out for maintenance on a given date?
 function vehOutOn(v, dateISO) {
   const b = (v && v.maint && v.maint.bookings) || [];
@@ -2872,7 +2887,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B34</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B35</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -2975,7 +2990,8 @@ function VehicleForm({ data, onClose, editVehicle }) {
   const [m, setM] = useState({ serviceWeeks: m0.serviceWeeks ?? defWeeks(v.vtype || ""), serviceLast: m0.serviceLast || "", motLast: m0.motLast || "", motDays: m0.motDays ?? (/18/.test(v.vtype || "") ? 3 : 1), tachoLast: m0.tachoLast || "", bookings: Array.isArray(m0.bookings) ? m0.bookings : [] });
   const set = (k, val) => setF(p => ({ ...p, [k]: val }));
   const setMv = (k, val) => setM(p => ({ ...p, [k]: val }));
-  const book = (type, start, days) => { if (!start) { alert("Set the last-done date first so a due date can be worked out."); return; } setM(p => ({ ...p, bookings: [...p.bookings.filter(b => !(b.type === type && b.start === start)), { id: uid(), type, start, days: Math.max(1, Number(days) || 1) }] })); };
+  const book = (type, start, days) => { if (!start) { alert("Set the last-done date first so a due date can be worked out."); return; } const snapped = type === "Service" ? nearestDow(start, 2) : type === "MOT" ? nearestDow(start, 1) : nextWeekday(start); setM(p => ({ ...p, bookings: [...p.bookings.filter(b => !(b.type === type && b.start === snapped)), { id: uid(), type, start: snapped, days: Math.max(1, Number(days) || 1) }] })); };
+  const editBooking = (id, k, val) => setM(p => ({ ...p, bookings: p.bookings.map(b => b.id === id ? { ...b, [k]: k === "days" ? Math.max(1, Number(val) || 1) : val } : b) }));
   const unbook = id => setM(p => ({ ...p, bookings: p.bookings.filter(b => b.id !== id) }));
   const nS = nextService(m), nM = nextMOT(m), nT = nextTacho(m);
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
@@ -3029,9 +3045,15 @@ function VehicleForm({ data, onClose, editVehicle }) {
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 6 }}>Booked out</div>
             {m.bookings.slice().sort((a, b) => (a.start || "").localeCompare(b.start || "")).map(b => (
-              <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F0F4F3" }}>
-                <div style={{ fontSize: 13, color: "#10211E" }}><b>{b.type}</b> · {fmtUK(b.start)} ({dow(b.start)}){b.days > 1 ? ` – ${fmtUK(isoAdd(b.start, { days: b.days - 1 }))}` : ""}</div>
-                <button onClick={() => unbook(b.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+              <div key={b.id} style={{ padding: "8px 0", borderBottom: "1px solid #F0F4F3" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#10211E" }}>{b.type} <span style={{ color: "#6A7B77", fontWeight: 600 }}>· {dow(b.start)}{b.days > 1 ? ` – ${dow(isoAdd(b.start, { days: b.days - 1 }))}` : ""}</span></div>
+                  <button onClick={() => unbook(b.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                  <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#94A4A0", marginBottom: 3 }}>Date</div><input type="date" value={b.start} onChange={e => editBooking(b.id, "start", e.target.value)} style={inp} /></div>
+                  <div style={{ width: 80 }}><div style={{ fontSize: 11, color: "#94A4A0", marginBottom: 3 }}>Days</div><input type="number" value={b.days} onChange={e => editBooking(b.id, "days", e.target.value)} style={inp} /></div>
+                </div>
               </div>
             ))}
           </div>
@@ -3327,6 +3349,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
   const bookedVehiclesOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.vehicleIds || []));
   const bookedStaffOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.crew || []));
+  const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
+  const maintOn = d => showMoves ? maintOnIso(isoOf(d)) : [];
 
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
@@ -3362,6 +3386,14 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
     );
   };
 
+  const MaintCard = ({ v, b, big }) => (
+    <div onClick={() => setView({ screen: "company" })}
+      style={{ background:"#F3F6FA", border:"1px solid #D3DEEA", borderLeft:"4px solid #64748B", borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer" }}>
+      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:"#475569", textTransform:"uppercase", letterSpacing:".05em" }}>🔧 Vehicle out · {b.type}</div>
+      <div style={{ fontSize: big?14:12.5, fontWeight:800, color:"#10211E", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{v.name}</div>
+      {b.days > 1 && <div style={{ fontSize: big?12:10.5, color:"#6A7B77", marginTop:1, fontWeight:600 }}>{fmtUK(b.start)} – {fmtUK(isoAdd(b.start, { days: b.days - 1 }))}</div>}
+    </div>
+  );
   const SurveyCard = ({ en, big }) => {
     const done = en.surveyDone || en.status === "Surveyed";
     return (
@@ -3439,6 +3471,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const items = [];
         if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (st.date && st.date >= startIso && st.crew && st.crew.length) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
         if (showSurveys) (data.enquiries||[]).forEach(en => { if (en.surveyDate && en.surveyDate >= startIso && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
+        if (showMoves) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso) items.push({ type:"maint", date: b.start < startIso ? startIso : b.start, time:"00", v, b }); }));
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
         if (!items.length) return <Empty icon="calendar" text="Nothing coming up" />;
         const groups = [];
@@ -3449,7 +3482,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
               <div key={g.date}>
                 <div style={{ fontSize:13, fontWeight:800, color: sameDay(new Date(g.date+"T00:00"),today)?AMBER:"#10211E", marginBottom:8, textTransform:"uppercase", letterSpacing:".04em" }}>{fmtDate(g.date)} ({dow(g.date)}){sameDay(new Date(g.date+"T00:00"),today)?" · Today":""}</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {g.items.map((it,ix) => it.type==="survey" ? <SurveyCard key={ix} en={it.en} big /> : <MoveCard key={ix} m={{ job:it.job, stage:it.stage }} big />)}
+                  {g.items.map((it,ix) => it.type==="survey" ? <SurveyCard key={ix} en={it.en} big /> : it.type==="maint" ? <MaintCard key={ix} v={it.v} b={it.b} big /> : <MoveCard key={ix} m={{ job:it.job, stage:it.stage }} big />)}
                 </div>
               </div>
             ))}
@@ -3463,13 +3496,14 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const cells = [];
         for (let i=0;i<42;i++) {
           const d = addDays(start,i); const out = d.getMonth()!==anchor.getMonth();
-          const evs = jobsOn(d); const svs = surveysOn(d);
-          const total = evs.length + svs.length;
+          const evs = jobsOn(d); const svs = surveysOn(d); const mnt = maintOn(d);
+          const total = evs.length + svs.length + mnt.length;
           cells.push(
             <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:92, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
               <div style={{ alignSelf:"flex-start", fontSize:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
               {svs.slice(0,2).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color:"#92591A", background:"#FFF6E6", borderLeft:`3px solid ${AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>📋 {custName(data,en.customerId)}</div>)}
               {evs.slice(0,3).map((m,ix) => <div key={ix} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(m)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data,m.job.customerId)}{m.stage.type?` · ${m.stage.type}`:""}</div>)}
+              {mnt.slice(0,2).map((mm,ix) => <div key={"m"+ix} style={{ fontSize:10.5, fontWeight:700, color:"#475569", background:"#EEF2F7", borderLeft:"3px solid #64748B", borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>🔧 {mm.v.name} · {mm.b.type}</div>)}
               {total>5 && <div style={{ fontSize:10, color:"#94A4A0", fontWeight:700 }}>+{total-5} more</div>}
             </div>
           );
@@ -3500,6 +3534,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
                     </div>
                     <div style={{ padding:7, display:"flex", flexDirection:"column", gap:6, minHeight:90 }}>
                       {surveysOn(d).map(en => <SurveyCard key={en.id} en={en} />)}
+                      {maintOn(d).map((mm,ix) => <MaintCard key={"m"+ix} v={mm.v} b={mm.b} />)}
                       {evs.map((m,ix) => <MoveCard key={m.job.id+'-'+ix} m={m} />)}
                     </div>
                     {showMoves && ((data.vehicles||[]).length>0 || (data.staff||[]).filter(s=>s.active!==false).length>0) && (() => {
@@ -3526,8 +3561,9 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
             <AvailPanel d={anchor} />
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {svs.map(en => <SurveyCard key={en.id} en={en} big />)}
+              {maintOn(anchor).map((mm,ix) => <MaintCard key={"m"+ix} v={mm.v} b={mm.b} big />)}
               {evs.map((m,ix) => <MoveCard key={m.job.id+'-'+ix} m={m} big />)}
-              {evs.length===0 && svs.length===0 && <Empty icon="truck" text="Nothing booked this day" />}
+              {evs.length===0 && svs.length===0 && maintOn(anchor).length===0 && <Empty icon="truck" text="Nothing booked this day" />}
             </div>
           </div>
         );
