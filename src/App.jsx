@@ -472,6 +472,11 @@ function Dashboard({ data, setView }) {
   const todaysMovesList = todaysMoves.map(j => ({ j, st: jobStages(j).find(s => s.date === todayIso) || {} }));
   const jobLatestDate = j => { const ds = jobStages(j).map(s => s.date).filter(Boolean); return ds.length ? ds.slice().sort().slice(-1)[0] : (j.moveDate || ""); };
   const upcomingServicing = (data.vehicles || []).flatMap(v => ((v.maint && v.maint.bookings) || []).map(b => ({ v, b }))).filter(({ b }) => b.start && isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }) >= todayIso).sort((a, c) => (a.b.start || "").localeCompare(c.b.start || ""));
+  const _dNow = new Date();
+  const _thisYM = `${_dNow.getFullYear()}-${String(_dNow.getMonth() + 1).padStart(2, "0")}`;
+  const _nd = new Date(_dNow.getFullYear(), _dNow.getMonth() + 1, 1);
+  const _nextYM = `${_nd.getFullYear()}-${String(_nd.getMonth() + 1).padStart(2, "0")}`;
+  const inWindow = iso => { const ym = (iso || "").slice(0, 7); return ym === _thisYM || ym === _nextYM; };
   const pastProvisional = jobs.filter(j => j.status === "Provisional").map(j => ({ j, last: jobLatestDate(j) })).filter(x => x.last && x.last < todayIso).sort((a, b) => a.last.localeCompare(b.last));
   const changeDate = j => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id });
   async function removeBooking(j) {
@@ -536,13 +541,15 @@ function Dashboard({ data, setView }) {
 
       <div style={{ display: "flex", gap: 8, marginBottom: dashShow ? 12 : 18 }}>
         <Btn variant={dashShow === "surveys" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")}>Surveys</Btn>
-        <Btn variant={dashShow === "moves" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")}><Icon name="truck" size={15} /> Moves</Btn>
-        <Btn variant={dashShow === "servicing" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "servicing" ? "" : "servicing")}>🔧 Servicing</Btn>
+        <Btn variant={dashShow === "moves" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")}>Moves</Btn>
+        <Btn variant={dashShow === "servicing" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "servicing" ? "" : "servicing")}>Servicing</Btn>
       </div>
 
-      {(dashShow === "" || dashShow === "surveys") && (
+      {(dashShow === "" || dashShow === "surveys") && (() => {
+        const list = upcomingSurveys.filter(e => inWindow(e.surveyDate));
+        return (
         <div style={{ marginBottom: 18 }}>
-          {upcomingSurveys.length === 0 ? <Empty icon="calendar" text="No upcoming surveys" /> : upcomingSurveys.map(e => (
+          {list.length === 0 ? <Empty icon="calendar" text="No surveys this month or next" /> : list.map(e => (
             <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -555,7 +562,8 @@ function Dashboard({ data, setView }) {
             </Card>
           ))}
         </div>
-      )}
+        );
+      })()}
 
       {dashShow === "moves" && (
         <div style={{ marginBottom: 18 }}>
@@ -574,15 +582,18 @@ function Dashboard({ data, setView }) {
         </div>
       )}
 
-      {(dashShow === "" || dashShow === "servicing") && (dashShow === "servicing" || upcomingServicing.length > 0) && (
+      {(dashShow === "" || dashShow === "servicing") && (() => {
+        const list = upcomingServicing.filter(({ b }) => inWindow(b.start));
+        if (dashShow === "" && list.length === 0) return null;
+        return (
         <>
           {dashShow === "" && <SectionTitle>Upcoming servicing</SectionTitle>}
           <div style={{ marginBottom: 18 }}>
-            {upcomingServicing.length === 0 ? <Empty icon="truck" text="No upcoming servicing" /> : upcomingServicing.map(({ v, b }, ix) => (
+            {list.length === 0 ? <Empty icon="truck" text="No servicing this month or next" /> : list.map(({ v, b }, ix) => (
               <Card key={ix} onClick={() => setView({ screen: "calendar", calMode: "day", date: b.start })} style={{ borderColor: "#D3DEEA", background: "#F3F6FA" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>🔧 {b.type}{b.days > 1 ? ` · ${b.days} days` : ""}</div>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>{b.type}{b.days > 1 ? ` · ${b.days} days` : ""}</div>
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{v.name}</div>
                     <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(b.start)} ({dow(b.start)})</div>
                   </div>
@@ -591,23 +602,8 @@ function Dashboard({ data, setView }) {
             ))}
           </div>
         </>
-      )}
-
-      {dashShow !== "surveys" && dashShow !== "servicing" && (vehicles.length > 0 || staffActive.length > 0) && (
-        <>
-          <SectionTitle>Available today</SectionTitle>
-          <Card>
-            {vehicles.length > 0 && <>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 7 }}>Vehicles</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: staffActive.length ? 13 : 0 }}>{vehicles.map(v => availChip(v.name, bookedVehToday.has(v.id)))}</div>
-            </>}
-            {staffActive.length > 0 && <>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 7 }}>Staff</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>{staffActive.map(s => availChip(s.name, bookedStaffToday.has(s.name)))}</div>
-            </>}
-          </Card>
-        </>
-      )}
+        );
+      })()}
 
       {toCall.length > 0 && (
         <>
@@ -657,11 +653,13 @@ function Dashboard({ data, setView }) {
         </>
       )}
 
-      {dashShow !== "surveys" && dashShow !== "servicing" && (
+      {dashShow !== "surveys" && dashShow !== "servicing" && (() => {
+        const list = upcoming.filter(({ st }) => inWindow(st.date));
+        return (
         <>
           <SectionTitle>Upcoming moves</SectionTitle>
-          {upcoming.length === 0 && <Empty icon="truck" text="No moves coming up" />}
-          {upcoming.map(({ j, st }, ix) => (
+          {list.length === 0 && <Empty icon="truck" text="No moves this month or next" />}
+          {list.map(({ j, st }, ix) => (
             <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
@@ -674,7 +672,8 @@ function Dashboard({ data, setView }) {
             </Card>
           ))}
         </>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -2912,7 +2911,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B44</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B45</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
