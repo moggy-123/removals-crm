@@ -102,7 +102,7 @@ function isoAdd(iso, { days = 0, weeks = 0, months = 0 }) {
   if (isNaN(d)) return "";
   if (months) d.setMonth(d.getMonth() + months);
   d.setDate(d.getDate() + days + weeks * 7);
-  return d.toISOString().slice(0, 10);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 // Next-due dates from the last-done date + interval
 function nextService(m) { return m && m.serviceLast && m.serviceWeeks ? isoAdd(m.serviceLast, { weeks: Number(m.serviceWeeks) || 0 }) : ""; }
@@ -2891,7 +2891,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B40</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B42</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3216,9 +3216,16 @@ function JobDetail({ data, id, setView }) {
       ...extra,
     };
   }
-  async function save() { await saveAndReload(upsertLocal(data, "jobs", buildRec())); }
+  function maintClash() {
+    const out = [];
+    (f.stages || []).forEach((st, i) => { if (st.date) (st.vehicleIds || []).forEach(vid => { const vv = (data.vehicles || []).find(x => x.id === vid); if (vv && vehOutOn(vv, st.date)) out.push(`${vv.name} on day ${i + 1} (${fmtUK(st.date)})`); }); });
+    if (out.length) { alert(`These vehicles are booked out for servicing/MOT and can't be on this move:\n\n${out.join("\n")}\n\nRemove them or change the maintenance date.`); return true; }
+    return false;
+  }
+  async function save() { if (maintClash()) return; await saveAndReload(upsertLocal(data, "jobs", buildRec())); }
   async function completeMove() { await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: "Completed", balancePaid: true }))); }
   async function confirmMove() {
+    if (maintClash()) return;
     const price = Number(f.price) || 0;
     const dep = Math.round(price * 0.6);
     setF(p => ({ ...p, status: "Confirmed", deposit: dep, depositPaid: true }));
