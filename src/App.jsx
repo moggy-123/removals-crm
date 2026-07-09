@@ -1617,6 +1617,10 @@ function MovePlanModal({ data, enquiry, onClose }) {
       const badDays = days.map((d, i) => (!(d.crew && d.crew.length) || !(d.vehicleIds && d.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
       if (badDays.length) { alert(`Please assign at least one staff member and one vehicle to every day before saving. Still needed on day ${badDays.join(", ")}.`); return; }
     }
+    // Safety net: no vehicle that's booked out for maintenance can be on a move that day.
+    const clashes = [];
+    days.forEach((d, i) => { if (d.date) (d.vehicleIds || []).forEach(vid => { const vv = (data.vehicles || []).find(x => x.id === vid); if (vv && vehOutOn(vv, d.date)) clashes.push(`${vv.name} on day ${i + 1} (${fmtUK(d.date)})`); }); });
+    if (clashes.length) { alert(`These vehicles are booked out for servicing/MOT and can't be used:\n\n${clashes.join("\n")}\n\nRemove them or move the maintenance date.`); return; }
     let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days });
     if (linkedJob) {
       const newStages = days.map((day, i) => {
@@ -2887,7 +2891,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B39</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B40</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
