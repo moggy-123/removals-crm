@@ -2911,7 +2911,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B45</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B46</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3388,7 +3388,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
   let rangeLabel = "";
-  if (mode==="agenda") rangeLabel = "Upcoming";
+  if (mode==="agenda") rangeLabel = "This month & next";
   else if (mode==="month") rangeLabel = `${CAL_MON[anchor.getMonth()]} ${anchor.getFullYear()}`;
   else if (mode==="week") { const s=startOfWeek(anchor), e=addDays(s,6); rangeLabel = `${s.getDate()} ${CAL_MON[s.getMonth()].slice(0,3)} – ${e.getDate()} ${CAL_MON[e.getMonth()].slice(0,3)}`; }
   else rangeLabel = `${CAL_DOW[(anchor.getDay()+6)%7]} ${anchor.getDate()} ${CAL_MON[anchor.getMonth()]}`;
@@ -3528,12 +3528,15 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
 
       {mode==="agenda" && (() => {
         const startIso = isoOf(today);
+        const _nd = new Date(today.getFullYear(), today.getMonth() + 2, 0); // last day of next month
+        const endIso = isoOf(_nd);
+        const inRange = d => d && d >= startIso && d <= endIso;
         const items = [];
-        if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (st.date && st.date >= startIso && st.crew && st.crew.length) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
-        if (showSurveys) (data.enquiries||[]).forEach(en => { if (en.surveyDate && en.surveyDate >= startIso && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
-        if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso) items.push({ type:"maint", date: b.start < startIso ? startIso : b.start, time:"00", v, b }); }));
+        if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (inRange(st.date) && st.crew && st.crew.length) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
+        if (showSurveys) (data.enquiries||[]).forEach(en => { if (inRange(en.surveyDate) && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
+        if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso && b.start <= endIso) items.push({ type:"maint", date: b.start < startIso ? startIso : b.start, time:"00", v, b }); }));
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
-        if (!items.length) return <Empty icon="calendar" text="Nothing coming up" />;
+        if (!items.length) return <Empty icon="calendar" text="Nothing this month or next" />;
         const groups = [];
         items.forEach(it => { const g = groups[groups.length-1]; if (g && g.date===it.date) g.items.push(it); else groups.push({ date:it.date, items:[it] }); });
         return (
