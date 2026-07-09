@@ -471,6 +471,7 @@ function Dashboard({ data, setView }) {
   const bookedVehToday = new Set(todayStages.flatMap(st => st.vehicleIds || []));
   const todaysMovesList = todaysMoves.map(j => ({ j, st: jobStages(j).find(s => s.date === todayIso) || {} }));
   const jobLatestDate = j => { const ds = jobStages(j).map(s => s.date).filter(Boolean); return ds.length ? ds.slice().sort().slice(-1)[0] : (j.moveDate || ""); };
+  const upcomingServicing = (data.vehicles || []).flatMap(v => ((v.maint && v.maint.bookings) || []).map(b => ({ v, b }))).filter(({ b }) => b.start && isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }) >= todayIso).sort((a, c) => (a.b.start || "").localeCompare(c.b.start || ""));
   const pastProvisional = jobs.filter(j => j.status === "Provisional").map(j => ({ j, last: jobLatestDate(j) })).filter(x => x.last && x.last < todayIso).sort((a, b) => a.last.localeCompare(b.last));
   const changeDate = j => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id });
   async function removeBooking(j) {
@@ -533,12 +534,13 @@ function Dashboard({ data, setView }) {
         <Icon name="plus" size={16} /> New Enquiry
       </Btn>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: dashShow ? 12 : 18 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: dashShow ? 12 : 18 }}>
         <Btn variant={dashShow === "surveys" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")}>Surveys</Btn>
         <Btn variant={dashShow === "moves" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")}><Icon name="truck" size={15} /> Moves</Btn>
+        <Btn variant={dashShow === "servicing" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "servicing" ? "" : "servicing")}>🔧 Servicing</Btn>
       </div>
 
-      {dashShow !== "moves" && (
+      {(dashShow === "" || dashShow === "surveys") && (
         <div style={{ marginBottom: 18 }}>
           {upcomingSurveys.length === 0 ? <Empty icon="calendar" text="No upcoming surveys" /> : upcomingSurveys.map(e => (
             <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
@@ -572,7 +574,23 @@ function Dashboard({ data, setView }) {
         </div>
       )}
 
-      {dashShow !== "surveys" && (vehicles.length > 0 || staffActive.length > 0) && (
+      {dashShow === "servicing" && (
+        <div style={{ marginBottom: 18 }}>
+          {upcomingServicing.length === 0 ? <Empty icon="truck" text="No upcoming servicing" /> : upcomingServicing.map(({ v, b }, ix) => (
+            <Card key={ix} onClick={() => setView({ screen: "calendar", calMode: "day", date: b.start })} style={{ borderColor: "#D3DEEA", background: "#F3F6FA" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>🔧 {b.type}{b.days > 1 ? ` · ${b.days} days` : ""}</div>
+                  <div style={{ fontWeight: 700, color: "#10211E" }}>{v.name}</div>
+                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(b.start)} ({dow(b.start)})</div>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {dashShow !== "surveys" && dashShow !== "servicing" && (vehicles.length > 0 || staffActive.length > 0) && (
         <>
           <SectionTitle>Available today</SectionTitle>
           <Card>
@@ -2891,7 +2909,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B42</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B43</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
