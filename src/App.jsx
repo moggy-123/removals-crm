@@ -2155,8 +2155,21 @@ function SurveyPdfView({ data, id, setView }) {
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState("");
   const [mode, setMode] = useState("customer");
+  const [storeMsg, setStoreMsg] = useState("");
   const staff = mode === "staff";
   if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
+  const ensureStorageFromMove = () => {
+    if (!staff || !c) return;
+    const storeDay = (e.stages || []).find(s => /store/i.test(s.type || ""));
+    if (!storeDay) return;
+    if (c.storage && c.storage.inStore) return; // already in store — leave their details alone
+    const dateIn = storeDay.date || e.preferredDate || "";
+    const updated = { ...c, storage: { ...(c.storage || {}), inStore: true, dateIn, location: (c.storage && c.storage.location) || (getStorageLocs()[0] || "Wild & Lye") }, updatedAt: Date.now() };
+    const d2 = upsertLocal(data, "customers", updated);
+    try { localStorage.setItem(DB_KEY, JSON.stringify(d2)); } catch {}
+    pushChangedOnly(d2).catch(() => {});
+    setStoreMsg(`${c.name} marked as In store${dateIn ? ` from ${fmtUK(dateIn)}` : ""}. Add the location & containers in their Storage section.`);
+  };
   const copy = (which, val) => { if (!val || !navigator.clipboard) return; navigator.clipboard.writeText(val).then(() => { setCopied(which); setTimeout(() => setCopied(""), 1500); }).catch(() => {}); };
   const firstName = (() => { const n = (c?.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim(); return (n.split(/\s+/)[0] || "there"); })();
   const makeFile = async () => { const { bytes, ref } = await buildSurveyPdf(e, c, data, staff); return { file: new File([bytes], `${staff ? "MovePlan-STAFF" : "Survey"}-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref }; };
@@ -2170,10 +2183,11 @@ function SurveyPdfView({ data, id, setView }) {
         : `Hi ${firstName}, please find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
       if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: staff ? "Move Plan — Staff copy" : "Survey & Move Plan", text });
       else downloadFile(file);
+      ensureStorageFromMove();
     } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
     setBusy(false);
   };
-  const download = async () => { setErr(""); setBusy(true); try { const { file } = await makeFile(); downloadFile(file); } catch (ex) { setErr(ex.message || "Could not build the PDF."); } setBusy(false); setTimeout(resetZoom, 200); };
+  const download = async () => { setErr(""); setBusy(true); try { const { file } = await makeFile(); downloadFile(file); ensureStorageFromMove(); } catch (ex) { setErr(ex.message || "Could not build the PDF."); } setBusy(false); setTimeout(resetZoom, 200); };
   const emailCustomer = () => {
     const subject = "Your survey & move plan";
     const body = `Hi ${firstName},\n\nPlease find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
@@ -2198,6 +2212,10 @@ function SurveyPdfView({ data, id, setView }) {
         </div>
         <Btn style={{ marginTop: 4 }} disabled={busy} onClick={share}><Icon name="quote" size={16} /> {busy ? "Building…" : (staff ? "Create staff copy" : "Create & send")}</Btn>
         <Btn variant="grey" style={{ marginTop: 8 }} disabled={busy} onClick={download}><Icon name="quote" size={14} /> Download PDF only</Btn>
+        {staff && (e.stages || []).some(s => /store/i.test(s.type || "")) && !storeMsg && (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: "#475569", background: "#F3F6FA", border: "1px solid #D3DEEA", borderRadius: 8, padding: "8px 11px" }}>This move has an "Into store" day — creating the staff copy will mark {c?.name || "the customer"} as in store.</div>
+        )}
+        {storeMsg && <div style={{ marginTop: 10, fontSize: 12.5, color: "#15803D", background: "#F1F9F4", border: "1px solid #BBE6C9", borderRadius: 8, padding: "8px 11px" }}>✓ {storeMsg}</div>}
         {!staff && c?.email ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> Email {firstName} (pre-addressed)</Btn> : null}
         {(c?.email || c?.phone) && (
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
@@ -2911,7 +2929,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B49</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B50</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3128,7 +3146,7 @@ function StaffForm({ data, onClose, editStaff }) {
   );
 }
 
-const DEFAULT_DAY_TYPES = ["Move", "Full Pack", "7 Hour Pack", "Load", "Unload", "Load Travel (Night Out)"];
+const DEFAULT_DAY_TYPES = ["Move", "Full Pack", "7 Hour Pack", "Load", "Unload", "Load Travel (Night Out)", "Into store"];
 const PLAN_VEHICLE_TYPES = ["18t", "7.5t", "3.5t", "Van"];
 function vehTypesSummary(m) {
   if (!m) return "";
