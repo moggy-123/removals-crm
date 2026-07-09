@@ -574,20 +574,23 @@ function Dashboard({ data, setView }) {
         </div>
       )}
 
-      {dashShow === "servicing" && (
-        <div style={{ marginBottom: 18 }}>
-          {upcomingServicing.length === 0 ? <Empty icon="truck" text="No upcoming servicing" /> : upcomingServicing.map(({ v, b }, ix) => (
-            <Card key={ix} onClick={() => setView({ screen: "calendar", calMode: "day", date: b.start })} style={{ borderColor: "#D3DEEA", background: "#F3F6FA" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>🔧 {b.type}{b.days > 1 ? ` · ${b.days} days` : ""}</div>
-                  <div style={{ fontWeight: 700, color: "#10211E" }}>{v.name}</div>
-                  <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(b.start)} ({dow(b.start)})</div>
+      {(dashShow === "" || dashShow === "servicing") && (dashShow === "servicing" || upcomingServicing.length > 0) && (
+        <>
+          {dashShow === "" && <SectionTitle>Upcoming servicing</SectionTitle>}
+          <div style={{ marginBottom: 18 }}>
+            {upcomingServicing.length === 0 ? <Empty icon="truck" text="No upcoming servicing" /> : upcomingServicing.map(({ v, b }, ix) => (
+              <Card key={ix} onClick={() => setView({ screen: "calendar", calMode: "day", date: b.start })} style={{ borderColor: "#D3DEEA", background: "#F3F6FA" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>🔧 {b.type}{b.days > 1 ? ` · ${b.days} days` : ""}</div>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{v.name}</div>
+                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(b.start)} ({dow(b.start)})</div>
+                  </div>
                 </div>
-              </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+        </>
       )}
 
       {dashShow !== "surveys" && dashShow !== "servicing" && (vehicles.length > 0 || staffActive.length > 0) && (
@@ -654,7 +657,7 @@ function Dashboard({ data, setView }) {
         </>
       )}
 
-      {dashShow !== "surveys" && (
+      {dashShow !== "surveys" && dashShow !== "servicing" && (
         <>
           <SectionTitle>Upcoming moves</SectionTitle>
           {upcoming.length === 0 && <Empty icon="truck" text="No moves coming up" />}
@@ -2909,7 +2912,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B43</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B44</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
