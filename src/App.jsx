@@ -2940,7 +2940,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B57</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B58</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4281,39 +4281,68 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
   );
 }
 
-async function buildCollectionPdf(collection, rec, c, data) {
+async function buildCollectionPdf(collection, rec, c, data, allColl) {
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const W = 595.28, H = 841.89, M = 44;
-  const teal = rgb(0.055, 0.486, 0.451), navy = rgb(0.059, 0.18, 0.165), grey = rgb(0.42, 0.46, 0.45), white = rgb(1, 1, 1);
+  const teal = rgb(0.055, 0.486, 0.451), navy = rgb(0.059, 0.18, 0.165), grey = rgb(0.42, 0.46, 0.45), amber = rgb(0.62, 0.29, 0.03), white = rgb(1, 1, 1);
   const clean = s => String(s == null ? "" : s).replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"').replace(/[\u2013\u2014\u2212]/g, "-").replace(/\u2026/g, "...").replace(/\u00A0/g, " ").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
   let page = pdf.addPage([W, H]); let y = H - M;
   const at = (t, x, yy, size, f = font, col = navy) => page.drawText(clean(t), { x, y: yy, size, font: f, color: col });
+  const newPageIf = need => { if (y < M + need) { page = pdf.addPage([W, H]); y = H - M; } };
   const embedSig = async url => { if (!url || url.indexOf("data:image") !== 0) return null; try { const b64 = url.split(",")[1]; const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return await pdf.embedPng(bytes); } catch { return null; } };
+  const allC = allColl || (rec.collections || []);
 
   page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
   at("R&J Removals & Storage", M, H - 34, 16, bold, white);
-  at("Storage — Items Collected by Customer", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
+  at("Storage - Items Collected by Customer", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
   const ref = c?.ref ? `Ref ${c.ref}` : "";
   if (ref) { const w = bold.widthOfTextAtSize(ref, 12); at(ref, W - M - w, H - 40, 12, bold, white); }
   y = H - 92;
-
   const kv = (label, value) => { at(label, M, y, 9.5, bold, grey); at(value || "-", M + 110, y, 9.5, font, navy); y -= 16; };
   kv("Customer", c?.name || "-");
   kv("Collection date", collection.date ? fmtUK(collection.date) : "-");
-  kv("From inventory", rec.date ? fmtUK(rec.date) + (rec.location ? " · " + rec.location : "") : (rec.location || "-"));
-  y -= 6;
-  at("Items collected", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
-  (collection.items || []).forEach(it => {
-    at(`${it.qty} x`, M, y, 9.5, bold, navy);
-    at(clean(it.name), M + 34, y, 9.5, font, navy);
-    if (it.container) { const t = `Container ${it.container}`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, font, grey); }
-    y -= 15;
+  kv("From inventory", rec.date ? fmtUK(rec.date) + (rec.location ? " - " + rec.location : "") : (rec.location || "-"));
+  y -= 4;
+
+  // Collected totals + latest date per item across all collections up to now
+  const collectedInfo = (containerNo, name) => {
+    let qty = 0, last = "";
+    allC.forEach(col => (col.items || []).forEach(ci => { if (ci.container === containerNo && ci.name === name) { qty += Number(ci.qty) || 0; if (!last || (col.date || "") > last) last = col.date || ""; } }));
+    return { qty, last };
+  };
+
+  at("Storage inventory", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
+  (rec.containers || []).forEach(ct => {
+    newPageIf(40);
+    at(`Container ${ct.number || "-"}`, M, y, 10, bold, navy); y -= 15;
+    (ct.items || []).forEach(it => {
+      newPageIf(16);
+      const info = collectedInfo(ct.number || "", it.name);
+      const full = info.qty >= (Number(it.qty) || 0) && info.qty > 0;
+      const label = `${it.qty} x ${clean(it.name)}`;
+      const col = full ? grey : navy;
+      at(label, M + 10, y, 9.5, font, col);
+      if (full) { const w = font.widthOfTextAtSize(label, 9.5); page.drawLine({ start: { x: M + 10, y: y + 3 }, end: { x: M + 10 + w, y: y + 3 }, thickness: 0.8, color: amber }); }
+      if (info.qty > 0) { const note = full ? `collected ${info.last ? fmtUK(info.last) : ""}` : `${info.qty} of ${it.qty} collected`; const w = font.widthOfTextAtSize(note, 8.5); at(note, W - M - w, y, 8.5, font, amber); }
+      y -= 14;
+    });
+    y -= 6;
   });
 
-  y -= 20;
+  y -= 4; newPageIf(60);
+  at("Collected this visit", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
+  at(collection.date ? fmtUK(collection.date) : "", M, y, 9, bold, navy); y -= 14;
+  (collection.items || []).forEach(it => {
+    newPageIf(14);
+    at(`${it.qty} x ${clean(it.name)}`, M + 10, y, 9.5, font, navy);
+    if (it.container) { const t = `Container ${it.container}`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, font, grey); }
+    y -= 14;
+  });
+
+  y -= 16; newPageIf(120);
   at("Received the above items in good order.", M, y, 9, font, grey); y -= 26;
   const img = await embedSig(collection.sig);
   const boxW = 260, boxH = 70;
@@ -4321,7 +4350,7 @@ async function buildCollectionPdf(collection, rec, c, data) {
   if (img) { const s = Math.min(boxW - 16, (boxH - 26) * (img.width / img.height)); page.drawImage(img, { x: M + (boxW - s) / 2, y: y - boxH + 22, width: s, height: Math.min(s * (img.height / img.width), boxH - 26) }); }
   at("Customer signature", M + 4, y - boxH + 8, 8, bold, grey);
   y -= boxH + 16;
-  at(`Generated ${fmtUK(todayISO())} · R&J Removals & Storage`, M, y, 8, font, grey);
+  at(`Generated ${fmtUK(todayISO())} - R&J Removals & Storage`, M, y, 8, font, grey);
 
   return await pdf.save();
 }
@@ -4357,7 +4386,7 @@ function PartCollectionForm({ data, setView, recId }) {
     // Separate signed receipt for this collection — the original inventory sheet is left untouched.
     let bytes;
     try {
-      bytes = await buildCollectionPdf(collection, rec, cust, data);
+      bytes = await buildCollectionPdf(collection, rec, cust, data, [...(rec.collections || []), collection]);
       const file = new File([bytes], `Collection-${cust.ref || "RJ"}-${date}.pdf`, { type: "application/pdf" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: "Storage — items collected" }); } catch (_e) {} }
       else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
