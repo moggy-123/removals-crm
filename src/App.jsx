@@ -51,6 +51,10 @@ function getPositions() { try { const a = JSON.parse(localStorage.getItem(POS_KE
 function savePositions(a) { try { localStorage.setItem(POS_KEY, JSON.stringify(a && a.length ? a : DEFAULT_POSITIONS)); } catch {} }
 const BOX_RE = /\b(box(es|'s|’s)?|container(s)?|bag(s)?)\b/i;
 const isBoxItem = name => BOX_RE.test(name || "");
+const APPLIANCE_RE = /\b(washing machine|washer|dish ?washer|tumble dryer|dryer|fridge freezer|fridge|freezer|oven|cooker|range cooker|hob|microwave|television|tv|computer|monitor|printer|kettle|toaster|hoover|vacuum|extractor|dishwasher)\b/i;
+const AMERICAN_FRIDGE_RE = /american\s+(fridge|style)/i;
+// Show dismantle only for furniture: not boxes/bags, not electrical/appliances — except American fridge freezers.
+const canDismantle = name => !isBoxItem(name) && (!APPLIANCE_RE.test(name || "") || AMERICAN_FRIDGE_RE.test(name || ""));
 function maxCustomerRef(data) { return (data.customers || []).reduce((m, c) => Math.max(m, Number(c.ref) || 0), 0); }
 function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(data) + 1); }
 
@@ -2911,7 +2915,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B52</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B53</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3940,7 +3944,9 @@ async function buildStorageIntakePdf(rec, c, data) {
       at(clean(it.name), M + 34, y, 9.5, font, navy);
       const condStr = Array.isArray(it.conditions) ? it.conditions.join(", ") : (it.condition || "");
       const posStr = Array.isArray(it.positions) ? it.positions.join(", ") : (it.position || "");
-      const cp = it.packedBy ? it.packedBy : [condStr, posStr].filter(Boolean).join(" — ");
+      const parts = [condStr, posStr].filter(Boolean);
+      if (it.dismantle) parts.push("Dismantle/reassemble");
+      const cp = it.packedBy ? it.packedBy : parts.join(" — ");
       if (cp) { const cw = font.widthOfTextAtSize(clean(cp), 9); at(clean(cp), W - M - cw, y, 9, font, grey); }
       y -= 14;
     });
@@ -4026,7 +4032,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
   const [date, setDate] = useState(saved?.date ?? todayISO());
   const [location, setLocation] = useState(saved?.location ?? (getStorageLocs()[0] || "Wild & Lye"));
   const [crew, setCrew] = useState(saved?.crew ?? []);
-  const [containers, setContainers] = useState(saved?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "" }] }]);
+  const [containers, setContainers] = useState(saved?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: false }] }]);
   const [custSig, setCustSig] = useState(saved?.custSig ?? "");
   const [empSig, setEmpSig] = useState(saved?.empSig ?? "");
   const [empName, setEmpName] = useState(saved?.empName ?? "");
@@ -4061,9 +4067,9 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
 
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
   const setContainerNo = (ci, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, number: v } : c));
-  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "" }] }]);
+  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: false }] }]);
   const removeContainer = ci => setContainers(cs => cs.length > 1 ? cs.filter((_, i) => i !== ci) : cs);
-  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "" }] } : c));
+  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: false }] } : c));
   const setItem = (ci, ii, field, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: v } : it) } : c));
   const addTag = (ci, ii, field, val) => { if (!val) return; setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: Array.from(new Set([...(it[field] || []), val])) } : it) } : c)); };
   const removeTag = (ci, ii, field, val) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: (it[field] || []).filter(x => x !== val) } : it) } : c));
@@ -4079,7 +4085,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
     if (!customerId) { setErr("Please select a customer."); return; }
     const cust = (data.customers || []).find(x => x.id === customerId);
     if (!cust) { setErr("Customer not found."); return; }
-    const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, conditions: it.conditions || [], positions: it.positions || [], packedBy: it.packedBy || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
+    const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, conditions: it.conditions || [], positions: it.positions || [], packedBy: it.packedBy || "", dismantle: !!it.dismantle })) })).filter(c => (c.number || "").trim() || c.items.length);
     if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy(true);
@@ -4171,6 +4177,12 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
                           {poss.filter(p => !(it.positions || []).includes(p)).map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </div>
+                      {canDismantle(it.name) && (
+                        <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, fontSize: 13, color: "#374151", cursor: "pointer", gridColumn: phone ? undefined : "1 / -1" }}>
+                          <input type="checkbox" checked={!!it.dismantle} onChange={e => setItem(ci, ii, "dismantle", e.target.checked)} style={{ width: 17, height: 17, accentColor: TEAL }} />
+                          Dismantle / reassemble
+                        </label>
+                      )}
                     </div>
                   )}
                 </div>
