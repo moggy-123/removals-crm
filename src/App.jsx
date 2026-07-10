@@ -2940,7 +2940,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B61</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B62</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -2951,6 +2951,14 @@ function CompanyView({ data, setView }) {
             </div>
             <Btn size="sm" onClick={() => setView({ screen: "catalogue" })}>Edit</Btn>
           </div>
+        </Card>
+
+        <Card style={{ marginBottom: 0 }}>
+          <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Tablet layout</h4>
+          <div style={{ fontSize: 13, color: "#6A7B77", lineHeight: 1.5, marginBottom: 10 }}>Trial the compact iPhone-style layout on iPad. Turn it off any time to go back to the normal tablet layout.</div>
+          {(() => { const on = (() => { try { return localStorage.getItem("removals_force_phone") === "1"; } catch { return false; } })();
+            return <Btn variant={on ? "primary" : "grey"} onClick={() => { try { if (on) localStorage.removeItem("removals_force_phone"); else localStorage.setItem("removals_force_phone", "1"); } catch {} window.location.reload(); }}>{on ? "Compact layout ON — tap to revert" : "Use iPhone layout on this device"}</Btn>;
+          })()}
         </Card>
 
         <Card style={{ marginBottom: 0 }}>
@@ -3671,6 +3679,7 @@ const navBtn = { width:36, height:36, borderRadius:11, border:"1px solid #E3E9E8
 // ── Device responsiveness ───────────────────────────────────────────────────
 function useDeviceType() {
   const get = () => {
+    try { if (localStorage.getItem("removals_force_phone") === "1") return "phone"; } catch {}
     const w = typeof window !== "undefined" ? window.innerWidth : 520;
     if (w >= 1024) return "desktop";
     if (w >= 768) return "tablet";
