@@ -2679,12 +2679,15 @@ function CustomerDetail({ data, id, setView }) {
             <Btn size="sm" onClick={() => setView({ screen: "storageIntake", customerId: c.id })}>+ New</Btn>
           </div>
           {c.storageInv.slice().reverse().map(rec => (
-            <div key={rec.id} onClick={() => openSheet(rec)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 4px", borderBottom: "1px solid #EEF3F2", cursor: "pointer" }}>
-              <div style={{ minWidth: 0 }}>
+            <div key={rec.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 4px", borderBottom: "1px solid #EEF3F2", gap: 10 }}>
+              <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer", flex: 1 }}>
                 <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
                 <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{rec.location || "—"} · {(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
               </div>
-              <span style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}>{sheetBusy ? "…" : "Open PDF"}</span>
+              <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
+                <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
+                <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : "PDF"}</span>
+              </div>
             </div>
           ))}
         </Card>
@@ -2915,7 +2918,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B53</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B54</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3945,7 +3948,7 @@ async function buildStorageIntakePdf(rec, c, data) {
       const condStr = Array.isArray(it.conditions) ? it.conditions.join(", ") : (it.condition || "");
       const posStr = Array.isArray(it.positions) ? it.positions.join(", ") : (it.position || "");
       const parts = [condStr, posStr].filter(Boolean);
-      if (it.dismantle) parts.push("Dismantle/reassemble");
+      if (it.dismantle) parts.push(`Dismantle by ${it.dismantle}`);
       const cp = it.packedBy ? it.packedBy : parts.join(" — ");
       if (cp) { const cw = font.widthOfTextAtSize(clean(cp), 9); at(clean(cp), W - M - cw, y, 9, font, grey); }
       y -= 14;
@@ -4023,19 +4026,23 @@ function SigField({ label, value, onOpen }) {
   );
 }
 
-function StorageIntakeForm({ data, setView, presetCustomerId }) {
+function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
   const device = useDeviceType();
   const phone = device === "phone";
-  const DRAFT_KEY = "storageIntakeDraft";
+  const editCust = editRecId ? (data.customers || []).find(c => (c.storageInv || []).some(r => r.id === editRecId)) : null;
+  const editRec = editCust ? (editCust.storageInv || []).find(r => r.id === editRecId) : null;
+  const loadConts = rec => { const cs = (rec.containers || []).map(c => ({ id: uid(), number: c.number || "", items: (c.items || []).map(it => ({ id: uid(), name: it.name || "", qty: it.qty || 1, conditions: Array.isArray(it.conditions) ? it.conditions : (it.condition ? [it.condition] : []), positions: Array.isArray(it.positions) ? it.positions : (it.position ? [it.position] : []), packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })); return cs.length ? cs : [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: "" }] }]; };
+  const DRAFT_KEY = editRecId ? "storageIntakeDraft_" + editRecId : "storageIntakeDraft";
   const saved = (() => { try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; } })();
-  const [customerId, setCustomerId] = useState(saved?.customerId ?? (presetCustomerId || ""));
-  const [date, setDate] = useState(saved?.date ?? todayISO());
-  const [location, setLocation] = useState(saved?.location ?? (getStorageLocs()[0] || "Wild & Lye"));
-  const [crew, setCrew] = useState(saved?.crew ?? []);
-  const [containers, setContainers] = useState(saved?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: false }] }]);
-  const [custSig, setCustSig] = useState(saved?.custSig ?? "");
-  const [empSig, setEmpSig] = useState(saved?.empSig ?? "");
-  const [empName, setEmpName] = useState(saved?.empName ?? "");
+  const src = saved || (editRec ? { customerId: editCust.id, date: editRec.date, location: editRec.location, crew: editRec.crew, containers: loadConts(editRec), custSig: editRec.custSig, empSig: editRec.empSig, empName: editRec.empName } : null);
+  const [customerId, setCustomerId] = useState(src?.customerId ?? (presetCustomerId || ""));
+  const [date, setDate] = useState(src?.date ?? todayISO());
+  const [location, setLocation] = useState(src?.location ?? (getStorageLocs()[0] || "Wild & Lye"));
+  const [crew, setCrew] = useState(src?.crew ?? []);
+  const [containers, setContainers] = useState(src?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: "" }] }]);
+  const [custSig, setCustSig] = useState(src?.custSig ?? "");
+  const [empSig, setEmpSig] = useState(src?.empSig ?? "");
+  const [empName, setEmpName] = useState(src?.empName ?? "");
   useEffect(() => {
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ customerId, date, location, crew, containers, custSig, empSig, empName })); } catch {}
   }, [customerId, date, location, crew, containers, custSig, empSig, empName]);
@@ -4067,9 +4074,9 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
 
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
   const setContainerNo = (ci, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, number: v } : c));
-  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: false }] }]);
+  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: "" }] }]);
   const removeContainer = ci => setContainers(cs => cs.length > 1 ? cs.filter((_, i) => i !== ci) : cs);
-  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: false }] } : c));
+  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: "" }] } : c));
   const setItem = (ci, ii, field, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: v } : it) } : c));
   const addTag = (ci, ii, field, val) => { if (!val) return; setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: Array.from(new Set([...(it[field] || []), val])) } : it) } : c)); };
   const removeTag = (ci, ii, field, val) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: (it[field] || []).filter(x => x !== val) } : it) } : c));
@@ -4085,11 +4092,11 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
     if (!customerId) { setErr("Please select a customer."); return; }
     const cust = (data.customers || []).find(x => x.id === customerId);
     if (!cust) { setErr("Customer not found."); return; }
-    const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, conditions: it.conditions || [], positions: it.positions || [], packedBy: it.packedBy || "", dismantle: !!it.dismantle })) })).filter(c => (c.number || "").trim() || c.items.length);
+    const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, conditions: it.conditions || [], positions: it.positions || [], packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
     if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy(true);
-    const rec = { id: uid(), date, location, crew, containers: cleanContainers, custSig, empSig, empName, createdAt: new Date().toISOString() };
+    const rec = { id: editRec ? editRec.id : uid(), date, location, crew, containers: cleanContainers, custSig, empSig, empName, createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
     let bytes;
     try {
       ({ bytes } = await buildStorageIntakePdf(rec, cust, data));
@@ -4102,7 +4109,8 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
     } catch {
       try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); rec.pdf = "data:application/pdf;base64," + btoa(bin); } catch {}
     }
-    const updated = { ...cust, storageInv: [...(cust.storageInv || []), rec], storage: { ...(cust.storage || {}), inStore: true, location, containers: Math.max(Number(cust.storage?.containers) || 0, cleanContainers.length) } };
+    const list = editRec ? (cust.storageInv || []).map(r => r.id === rec.id ? rec : r) : [...(cust.storageInv || []), rec];
+    const updated = { ...cust, storageInv: list, storage: { ...(cust.storage || {}), inStore: true, location, containers: Math.max(Number(cust.storage?.containers) || 0, cleanContainers.length) } };
     clearDraft();
     await saveAndReload(upsertLocal(data, "customers", updated));
   }
@@ -4112,11 +4120,11 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       <button onClick={leave} style={{ background: "none", border: "none", color: TEAL, fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 6 }}>‹ Back</button>
-      <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>New storage inventory</h2>
+      <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{editRec ? "Edit storage inventory" : "New storage inventory"}</h2>
 
       <Card>
         <Field label="Customer">
-          <select value={customerId} onChange={e => pickCustomer(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
+          <select value={customerId} disabled={!!editRec} onChange={e => pickCustomer(e.target.value)} style={{ ...inp, appearance: "none", cursor: editRec ? "default" : "pointer", opacity: editRec ? 0.7 : 1 }}>
             <option value="">Select customer…</option>
             {[...(data.customers || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map(c => <option key={c.id} value={c.id}>{c.ref ? `#${c.ref} ` : ""}{c.name}</option>)}
           </select>
@@ -4178,10 +4186,19 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
                         </select>
                       </div>
                       {canDismantle(it.name) && (
-                        <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, fontSize: 13, color: "#374151", cursor: "pointer", gridColumn: phone ? undefined : "1 / -1" }}>
-                          <input type="checkbox" checked={!!it.dismantle} onChange={e => setItem(ci, ii, "dismantle", e.target.checked)} style={{ width: 17, height: 17, accentColor: TEAL }} />
-                          Dismantle / reassemble
-                        </label>
+                        <div style={{ marginTop: 8, gridColumn: phone ? undefined : "1 / -1" }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#374151", cursor: "pointer" }}>
+                            <input type="checkbox" checked={!!it.dismantle} onChange={e => setItem(ci, ii, "dismantle", e.target.checked ? "Mover" : "")} style={{ width: 17, height: 17, accentColor: TEAL }} />
+                            Dismantle / reassemble
+                          </label>
+                          {it.dismantle && (
+                            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                              {["Mover", "Customer"].map(who => (
+                                <button key={who} onClick={() => setItem(ci, ii, "dismantle", who)} style={{ flex: 1, padding: "6px 0", borderRadius: 8, border: `1px solid ${it.dismantle === who ? TEAL : "#D9E2E0"}`, background: it.dismantle === who ? "#E8F5F3" : "#fff", color: it.dismantle === who ? TEAL_D : "#6A7B77", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>By {who}</button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -4453,7 +4470,7 @@ export default function App() {
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
     if (view.screen === "catalogue") return <CatalogueEditor catalog={catalog} onSave={applyCatalogEdit} setView={setView} />;
     if (view.screen === "storage") return <StorageView data={data} setView={setView} />;
-    if (view.screen === "storageIntake") return <StorageIntakeForm data={data} setView={setView} presetCustomerId={view.customerId} />;
+    if (view.screen === "storageIntake") return <StorageIntakeForm data={data} setView={setView} presetCustomerId={view.customerId} editRecId={view.editRecId} />;
     return null;
   }
 
