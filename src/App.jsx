@@ -65,6 +65,13 @@ function jobContainerCount(c, job) {
   sheetsForJob(c, job).forEach(s => (s.containers || []).forEach(ct => { const key = (ct.number || "").trim(); if (key) { if (!seen.has(key)) { seen.add(key); n++; } } else n++; }));
   return n;
 }
+// Loose items are captured on the inventory sheets; gather any notes for the job.
+function jobLoose(c, job) {
+  const notes = [];
+  sheetsForJob(c, job).forEach(s => { if (s.looseItems && (s.looseNote || "").trim()) notes.push(s.looseNote.trim()); });
+  const any = sheetsForJob(c, job).some(s => s.looseItems);
+  return { any, notes };
+}
 function saveStorageLocs(a) { try { localStorage.setItem(STORLOC_KEY, JSON.stringify(a && a.length ? a : ["Wild & Lye"])); } catch {} }
 const COND_KEY = "removals_conditions";
 const DEFAULT_CONDITIONS = ["OK", "Scratched", "Dented", "Cracked", "Broken", "Torn", "Soiled", "Rusty", "Loose"];
@@ -2667,7 +2674,7 @@ function CustomerDetail({ data, id, setView }) {
               <div style={{ fontSize: 12.5, color: "#6A7B77" }}>
                 {j.dateIn ? `In ${fmtUK(j.dateIn)}` : ""}{j.dateOut ? ` · Out ${fmtUK(j.dateOut)}` : ""}{jobContainerCount(c, j) ? ` · ${jobContainerCount(c, j)} container${jobContainerCount(c, j) != 1 ? "s" : ""}` : ""}{jobContainerNos(c, j).length ? ` (${jobContainerNos(c, j).join(", ")})` : ""}
               </div>
-              {j.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {j.looseNote || "Yes"}</div>}
+              {jobLoose(c, j).any && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {jobLoose(c, j).notes.join("; ") || "Yes"}</div>}
             </div>
             <span onClick={() => setJobForm(j)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Edit</span>
           </div>
@@ -2900,7 +2907,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B67</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B68</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3946,6 +3953,12 @@ async function buildStorageIntakePdf(rec, c, data) {
     });
   });
 
+  if (rec.looseItems) {
+    ensure(30);
+    heading("Loose items");
+    at(clean(rec.looseNote || "Yes"), M, y, 9.5, font, navy); y -= 16;
+  }
+
   if ((rec.collections || []).length) {
     heading("Items collected by customer");
     rec.collections.forEach(col => {
@@ -4045,8 +4058,10 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   const [custSig, setCustSig] = useState(src?.custSig ?? "");
   const [empSig, setEmpSig] = useState(src?.empSig ?? "");
   const [empName, setEmpName] = useState(src?.empName ?? "");
+  const [looseItems, setLooseItems] = useState(src?.looseItems ?? (editRec ? !!editRec.looseItems : false));
+  const [looseNote, setLooseNote] = useState(src?.looseNote ?? (editRec ? (editRec.looseNote || "") : ""));
   useEffect(() => {
-    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ customerId, date, location, crew, containers, custSig, empSig, empName })); } catch {}
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ customerId, date, location, crew, containers, custSig, empSig, empName, looseItems, looseNote })); } catch {}
   }, [customerId, date, location, crew, containers, custSig, empSig, empName]);
   const clearDraft = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch {} };
   const leave = () => { clearDraft(); setView({ screen: "storage" }); };
@@ -4098,7 +4113,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
     if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy(true);
-    const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
+    const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, looseItems, looseNote, createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
     let bytes;
     try {
       ({ bytes } = await buildStorageIntakePdf(rec, cust, data));
@@ -4223,6 +4238,12 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
       ))}
 
       <Btn variant="grey" style={{ width: "100%", marginTop: 12 }} onClick={addContainer}>+ Add container</Btn>
+
+      <Card style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Loose items</div>
+        <Field label="Any loose items?" hint="Items not in a container"><Select value={looseItems ? "Yes" : "No"} onChange={v => setLooseItems(v === "Yes")} options={["No", "Yes"]} /></Field>
+        {looseItems && <Field label="Loose items — details"><Textarea value={looseNote} onChange={setLooseNote} placeholder="e.g. Sofa, bike, garden bench" /></Field>}
+      </Card>
 
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Add a condition option</div>
@@ -4473,7 +4494,7 @@ function StorageJobForm({ data, customer, job, onClose }) {
   const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); set("location", v); setNewLoc(""); };
 
   async function save() {
-    const jrec = { id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", looseItems: !!f.looseItems, looseNote: f.looseNote || "", inStore: !f.dateOut };
+    const jrec = { id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", inStore: !f.dateOut };
     const existing = getStorageJobs(customer).map(j => ({ ...j, id: j.id === "legacy" ? uid() : j.id }));
     const jobs = existing.some(j => j.id === jrec.id) ? existing.map(j => j.id === jrec.id ? jrec : j) : [...existing, jrec];
     await saveAndReload(upsertLocal(data, "customers", { ...customer, storageJobs: jobs, storage: null }));
@@ -4496,9 +4517,7 @@ function StorageJobForm({ data, customer, job, onClose }) {
         <div style={{ flex: 1 }}><Field label="Date into store"><Input type="date" value={f.dateIn} onChange={v => set("dateIn", v)} /></Field></div>
         <div style={{ flex: 1 }}><Field label="Date out" hint="Blank while in store"><Input type="date" value={f.dateOut} onChange={v => set("dateOut", v)} /></Field></div>
       </div>
-      <div style={{ fontSize: 12, color: "#9CA3AF", margin: "0 0 10px" }}>Container count is worked out automatically from this job's inventory sheets.</div>
-      <Field label="Any loose items?"><Select value={f.looseItems ? "Yes" : "No"} onChange={v => set("looseItems", v === "Yes")} options={["No", "Yes"]} /></Field>
-      {f.looseItems && <Field label="Loose items — details"><Textarea value={f.looseNote} onChange={v => set("looseNote", v)} /></Field>}
+      <div style={{ fontSize: 12, color: "#9CA3AF", margin: "0 0 10px" }}>Container count and loose items are worked out automatically from this job's inventory sheets.</div>
       <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
         {!isNew && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
@@ -4547,7 +4566,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
           <div style={{ fontSize: 12.5, color: "#6A7B77" }}>
             {job.dateIn ? `In ${fmtUK(job.dateIn)}` : ""}{job.dateOut ? ` · Out ${fmtUK(job.dateOut)}` : ""}{jobContainerCount(c, job) ? ` · ${jobContainerCount(c, job)} container${jobContainerCount(c, job) != 1 ? "s" : ""}` : ""}{jobContainerNos(c, job).length ? ` (${jobContainerNos(c, job).join(", ")})` : ""}
           </div>
-          {job.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {job.looseNote || "Yes"}</div>}
+          {jobLoose(c, job).any && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {jobLoose(c, job).notes.join("; ") || "Yes"}</div>}
         </Card>
       )}
       {editing && job && <StorageJobForm data={data} customer={c} job={job} onClose={() => setEditing(false)} />}
@@ -4653,7 +4672,7 @@ function StorageView({ data, setView }) {
                       {jobContainerCount(c, j)} container{jobContainerCount(c, j) !== 1 ? "s" : ""}
                       {jobContainerNos(c, j).length ? ` · ${jobContainerNos(c, j).join(", ")}` : ""}
                       {j.dateIn ? ` · in ${fmtUK(j.dateIn)}` : ""}
-                      {j.looseItems ? " · loose items" : ""}
+                      {jobLoose(c, j).any ? " · loose items" : ""}
                     </div>
                   </div>
                   <div style={{ fontWeight: 700, color: "#10211E", flexShrink: 0 }}>{Number(j.value) ? money(j.value) : ""}</div>
