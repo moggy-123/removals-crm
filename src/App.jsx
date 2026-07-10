@@ -2685,6 +2685,7 @@ function CustomerDetail({ data, id, setView }) {
                 <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{rec.location || "—"} · {(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
               </div>
               <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
+                <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>
                 <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
                 <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : "PDF"}</span>
               </div>
@@ -2918,7 +2919,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B54</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B55</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3955,6 +3956,16 @@ async function buildStorageIntakePdf(rec, c, data) {
     });
   });
 
+  if ((rec.collections || []).length) {
+    heading("Items collected by customer");
+    rec.collections.forEach(col => {
+      ensure(24);
+      at(`${col.date ? fmtUK(col.date) : ""}${col.sig ? "   (signed)" : ""}`, M, y, 9.5, bold, navy); y -= 13;
+      (col.items || []).forEach(ci => { ensure(12); at(`${ci.qty} x ${clean(ci.name)}${ci.container ? ` (Container ${ci.container})` : ""}`, M + 12, y, 9, font, navy); y -= 12; });
+      y -= 6;
+    });
+  }
+
   // Signatures
   ensure(150);
   heading("Sign off");
@@ -4249,6 +4260,99 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
   );
 }
 
+function PartCollectionForm({ data, setView, recId }) {
+  const cust = (data.customers || []).find(c => (c.storageInv || []).some(r => r.id === recId));
+  const rec = cust ? (cust.storageInv || []).find(r => r.id === recId) : null;
+  const [date, setDate] = useState(todayISO());
+  const [taking, setTaking] = useState({});
+  const [sig, setSig] = useState("");
+  const [signing, setSigning] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!rec) return <div style={{ padding: 20 }}>Storage sheet not found.</div>;
+  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
+  const setTake = (k, val, max) => setTaking(p => ({ ...p, [k]: Math.max(0, Math.min(Number(max) || 0, Math.floor(Number(val) || 0))) }));
+  const totalTaking = Object.values(taking).reduce((a, b) => a + (Number(b) || 0), 0);
+
+  async function save() {
+    setErr("");
+    if (totalTaking <= 0) { setErr("Enter a quantity for at least one item being collected."); return; }
+    if (!sig) { setErr("Please capture the customer's signature."); return; }
+    setBusy(true);
+    const collItems = [];
+    const newContainers = (rec.containers || []).map((c, ci) => ({
+      ...c,
+      items: (c.items || []).map((it, ii) => {
+        const k = ci + "_" + ii; const take = Number(taking[k]) || 0;
+        if (take > 0) collItems.push({ container: c.number || "", name: it.name, qty: take });
+        return { ...it, qty: Math.max(0, (Number(it.qty) || 0) - take) };
+      }).filter(it => (Number(it.qty) || 0) > 0),
+    }));
+    const collection = { id: uid(), date, sig, items: collItems };
+    const newRec = { ...rec, containers: newContainers, collections: [...(rec.collections || []), collection] };
+    let bytes;
+    try {
+      ({ bytes } = await buildStorageIntakePdf(newRec, cust, data));
+      const file = new File([bytes], `Storage-${cust.ref || "RJ"}-${rec.date || "sheet"}.pdf`, { type: "application/pdf" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: "Storage — items collected" }); } catch (_e) {} }
+    } catch (ex) { setErr("PDF failed: " + ((ex && ex.message) || ex)); setBusy(false); return; }
+    try { newRec.pdfUrl = await uploadStorageSheet(`${cust.id}/${rec.id}.pdf`, bytes); }
+    catch { try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); newRec.pdf = "data:application/pdf;base64," + btoa(bin); } catch {} }
+    const list = (cust.storageInv || []).map(r => r.id === rec.id ? newRec : r);
+    const remaining = newContainers.reduce((n, c) => n + (c.items || []).reduce((m, it) => m + (Number(it.qty) || 0), 0), 0);
+    const storage = remaining === 0 ? { ...(cust.storage || {}), inStore: false, dateOut: date } : (cust.storage || {});
+    await saveAndReload(upsertLocal(data, "customers", { ...cust, storageInv: list, storage }));
+  }
+
+  return (
+    <div style={{ maxWidth: 640, margin: "0 auto" }}>
+      <button onClick={() => setView({ screen: "customerDetail", id: cust.id })} style={{ background: "none", border: "none", color: TEAL, fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 6 }}>‹ Back</button>
+      <h2 style={{ margin: "0 0 2px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Items collected by customer</h2>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 14 }}>{cust.name} · sheet {rec.date ? fmtUK(rec.date) : ""}</div>
+
+      <Card>
+        <Field label="Collection date"><Input type="date" value={date} onChange={setDate} /></Field>
+      </Card>
+
+      {(rec.containers || []).map((c, ci) => (
+        <Card key={ci} style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 800, color: "#10211E", marginBottom: 8 }}>Container {c.number || "—"}</div>
+          {(c.items || []).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Empty</div>}
+          {(c.items || []).map((it, ii) => {
+            const k = ci + "_" + ii; const max = Number(it.qty) || 0;
+            return (
+              <div key={ii} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #F0F4F3" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: "#10211E" }}>{it.name}</div>
+                  <div style={{ fontSize: 12, color: "#94A4A0" }}>{max} in store</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, color: "#6A7B77" }}>take</span>
+                  <input type="number" inputMode="numeric" value={taking[k] || ""} placeholder="0" onChange={e => setTake(k, e.target.value, max)} style={{ ...inp, width: 64, textAlign: "center", padding: "8px 4px" }} />
+                </div>
+              </div>
+            );
+          })}
+        </Card>
+      ))}
+
+      <Card style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 10 }}>Customer sign-off</div>
+        <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>Taking {totalTaking} item{totalTaking !== 1 ? "s" : ""} today.</div>
+        <SigField label="Customer signature" value={sig} onOpen={() => setSigning(true)} />
+      </Card>
+
+      {err && <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
+      <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+        <Btn variant="grey" onClick={() => setView({ screen: "customerDetail", id: cust.id })}>Cancel</Btn>
+        <Btn style={{ flex: 1 }} disabled={busy} onClick={save}>{busy ? "Saving…" : "Confirm collection"}</Btn>
+      </div>
+
+      {signing && <SignatureModal title="Customer signature" initial={sig} onCancel={() => setSigning(false)} onAccept={v => { setSig(v); setSigning(false); }} />}
+    </div>
+  );
+}
+
 function StorageView({ data, setView }) {
   const inStore = (data.customers || []).filter(c => c.storage && c.storage.inStore);
   const money = n => `£${Number(n || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
@@ -4471,6 +4575,7 @@ export default function App() {
     if (view.screen === "catalogue") return <CatalogueEditor catalog={catalog} onSave={applyCatalogEdit} setView={setView} />;
     if (view.screen === "storage") return <StorageView data={data} setView={setView} />;
     if (view.screen === "storageIntake") return <StorageIntakeForm data={data} setView={setView} presetCustomerId={view.customerId} editRecId={view.editRecId} />;
+    if (view.screen === "storageCollect") return <PartCollectionForm data={data} setView={setView} recId={view.recId} />;
     return null;
   }
 
