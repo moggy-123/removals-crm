@@ -48,6 +48,23 @@ function getStorageJobs(c) {
   return [];
 }
 const jobInStore = j => !!j && !j.dateOut;
+// Inventory sheets belonging to a storage job (legacy sheets fall under the first job).
+function sheetsForJob(c, job) {
+  const jobs = getStorageJobs(c);
+  const isFirst = jobs[0] && job && jobs[0].id === job.id;
+  return ((c && c.storageInv) || []).filter(s => (job && s.jobId === job.id) || (!s.jobId && isFirst));
+}
+// Container count + numbers are derived from the job's inventory sheets, not typed in.
+function jobContainerNos(c, job) {
+  const nos = []; const seen = new Set();
+  sheetsForJob(c, job).forEach(s => (s.containers || []).forEach(ct => { const key = (ct.number || "").trim(); if (key && !seen.has(key)) { seen.add(key); nos.push(key); } }));
+  return nos;
+}
+function jobContainerCount(c, job) {
+  let n = 0; const seen = new Set();
+  sheetsForJob(c, job).forEach(s => (s.containers || []).forEach(ct => { const key = (ct.number || "").trim(); if (key) { if (!seen.has(key)) { seen.add(key); n++; } } else n++; }));
+  return n;
+}
 function saveStorageLocs(a) { try { localStorage.setItem(STORLOC_KEY, JSON.stringify(a && a.length ? a : ["Wild & Lye"])); } catch {} }
 const COND_KEY = "removals_conditions";
 const DEFAULT_CONDITIONS = ["OK", "Scratched", "Dented", "Cracked", "Broken", "Torn", "Soiled", "Rusty", "Loose"];
@@ -2648,7 +2665,7 @@ function CustomerDetail({ data, id, setView }) {
                 <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(j) ? "#0F766E" : "#9CA3AF", background: jobInStore(j) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px" }}>{jobInStore(j) ? "In store" : "Out"}</span>
               </div>
               <div style={{ fontSize: 12.5, color: "#6A7B77" }}>
-                {j.dateIn ? `In ${fmtUK(j.dateIn)}` : ""}{j.dateOut ? ` · Out ${fmtUK(j.dateOut)}` : ""}{j.containers ? ` · ${j.containers} container${j.containers != 1 ? "s" : ""}` : ""}{(j.containerNos || []).filter(Boolean).length ? ` (${j.containerNos.filter(Boolean).join(", ")})` : ""}
+                {j.dateIn ? `In ${fmtUK(j.dateIn)}` : ""}{j.dateOut ? ` · Out ${fmtUK(j.dateOut)}` : ""}{jobContainerCount(c, j) ? ` · ${jobContainerCount(c, j)} container${jobContainerCount(c, j) != 1 ? "s" : ""}` : ""}{jobContainerNos(c, j).length ? ` (${jobContainerNos(c, j).join(", ")})` : ""}
               </div>
               {j.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {j.looseNote || "Yes"}</div>}
             </div>
@@ -2883,7 +2900,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B66</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B67</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4456,8 +4473,7 @@ function StorageJobForm({ data, customer, job, onClose }) {
   const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); set("location", v); setNewLoc(""); };
 
   async function save() {
-    const n = parseInt(f.containers, 10) || 0;
-    const jrec = { id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", containers: n, containerNos: (f.containerNos || []).slice(0, n), looseItems: !!f.looseItems, looseNote: f.looseNote || "", inStore: !f.dateOut };
+    const jrec = { id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", looseItems: !!f.looseItems, looseNote: f.looseNote || "", inStore: !f.dateOut };
     const existing = getStorageJobs(customer).map(j => ({ ...j, id: j.id === "legacy" ? uid() : j.id }));
     const jobs = existing.some(j => j.id === jrec.id) ? existing.map(j => j.id === jrec.id ? jrec : j) : [...existing, jrec];
     await saveAndReload(upsertLocal(data, "customers", { ...customer, storageJobs: jobs, storage: null }));
@@ -4480,14 +4496,7 @@ function StorageJobForm({ data, customer, job, onClose }) {
         <div style={{ flex: 1 }}><Field label="Date into store"><Input type="date" value={f.dateIn} onChange={v => set("dateIn", v)} /></Field></div>
         <div style={{ flex: 1 }}><Field label="Date out" hint="Blank while in store"><Input type="date" value={f.dateOut} onChange={v => set("dateOut", v)} /></Field></div>
       </div>
-      <Field label="Amount of containers"><Input type="number" inputMode="numeric" value={f.containers} onChange={setContainers} /></Field>
-      {cn > 0 && (
-        <Field label="Container numbers">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {Array.from({ length: cn }).map((_, i) => <Input key={i} value={(f.containerNos || [])[i] || ""} onChange={v => setContainerNo(i, v)} placeholder={`Container ${i + 1}`} />)}
-          </div>
-        </Field>
-      )}
+      <div style={{ fontSize: 12, color: "#9CA3AF", margin: "0 0 10px" }}>Container count is worked out automatically from this job's inventory sheets.</div>
       <Field label="Any loose items?"><Select value={f.looseItems ? "Yes" : "No"} onChange={v => set("looseItems", v === "Yes")} options={["No", "Yes"]} /></Field>
       {f.looseItems && <Field label="Loose items — details"><Textarea value={f.looseNote} onChange={v => set("looseNote", v)} /></Field>}
       <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
@@ -4536,7 +4545,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
             </div>
           </div>
           <div style={{ fontSize: 12.5, color: "#6A7B77" }}>
-            {job.dateIn ? `In ${fmtUK(job.dateIn)}` : ""}{job.dateOut ? ` · Out ${fmtUK(job.dateOut)}` : ""}{job.containers ? ` · ${job.containers} container${job.containers != 1 ? "s" : ""}` : ""}{(job.containerNos || []).filter(Boolean).length ? ` (${job.containerNos.filter(Boolean).join(", ")})` : ""}
+            {job.dateIn ? `In ${fmtUK(job.dateIn)}` : ""}{job.dateOut ? ` · Out ${fmtUK(job.dateOut)}` : ""}{jobContainerCount(c, job) ? ` · ${jobContainerCount(c, job)} container${jobContainerCount(c, job) != 1 ? "s" : ""}` : ""}{jobContainerNos(c, job).length ? ` (${jobContainerNos(c, job).join(", ")})` : ""}
           </div>
           {job.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {job.looseNote || "Yes"}</div>}
         </Card>
@@ -4596,7 +4605,7 @@ function StorageView({ data, setView }) {
   const locNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
 
   const totJobs = jobsList.length;
-  const totContainers = jobsList.reduce((n, { j }) => n + (Number(j.containers) || 0), 0);
+  const totContainers = jobsList.reduce((n, { c, j }) => n + jobContainerCount(c, j), 0);
   const totValue = jobsList.reduce((n, { j }) => n + (Number(j.value) || 0), 0);
 
   const Stat = ({ label, value }) => (
@@ -4627,7 +4636,7 @@ function StorageView({ data, setView }) {
 
       {locNames.map(loc => {
         const list = groups[loc].slice().sort((a, b) => (a.c.name || "").localeCompare(b.c.name || ""));
-        const lc = list.reduce((n, { j }) => n + (Number(j.containers) || 0), 0);
+        const lc = list.reduce((n, { c, j }) => n + jobContainerCount(c, j), 0);
         const lv = list.reduce((n, { j }) => n + (Number(j.value) || 0), 0);
         return (
           <div key={loc} style={{ marginTop: 18 }}>
@@ -4641,8 +4650,8 @@ function StorageView({ data, setView }) {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}</div>
                     <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2 }}>
-                      {(Number(j.containers) || 0)} container{(Number(j.containers) || 0) !== 1 ? "s" : ""}
-                      {(j.containerNos || []).filter(Boolean).length ? ` · ${j.containerNos.filter(Boolean).join(", ")}` : ""}
+                      {jobContainerCount(c, j)} container{jobContainerCount(c, j) !== 1 ? "s" : ""}
+                      {jobContainerNos(c, j).length ? ` · ${jobContainerNos(c, j).join(", ")}` : ""}
                       {j.dateIn ? ` · in ${fmtUK(j.dateIn)}` : ""}
                       {j.looseItems ? " · loose items" : ""}
                     </div>
