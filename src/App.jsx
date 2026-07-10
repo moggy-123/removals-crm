@@ -2940,7 +2940,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B60</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B61</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4335,7 +4335,7 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
 
   y -= 4; newPageIf(60);
   at("Collected this visit", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
-  at(collection.date ? fmtUK(collection.date) : "", M, y, 9, bold, navy); y -= 14;
+  at((collection.date ? fmtUK(collection.date) : "") + (collection.collectedBy ? ` - by ${clean(collection.collectedBy)}` : ""), M, y, 9, bold, navy); y -= 14;
   (collection.items || []).forEach(it => {
     newPageIf(14);
     at(`${it.qty} x ${clean(it.name)}`, M + 10, y, 9.5, font, navy);
