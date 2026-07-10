@@ -2549,19 +2549,9 @@ function CustomerForm({ data, onClose, editCustomer }) {
     custType: c.custType || "Private", notes: c.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  const [jobs, setJobs] = useState(() => getStorageJobs(c).map(j => ({ ...j, id: j.id && j.id !== "legacy" ? j.id : uid(), containers: j.containers ?? "", value: j.value ?? "" })));
-  const [locs, setLocs] = useState(getStorageLocs);
-  const [newLoc, setNewLoc] = useState("");
-  const addJob = () => setJobs(p => [...p, { id: uid(), dateIn: todayISO(), dateOut: "", containers: "", containerNos: [], looseItems: false, looseNote: "", location: getStorageLocs()[0] || "Wild & Lye", value: "" }]);
-  const setJob = (id, k, v) => setJobs(p => p.map(j => j.id === id ? { ...j, [k]: v } : j));
-  const removeJob = id => setJobs(p => p.filter(j => j.id !== id));
-  const setJobContainers = (id, v) => setJobs(p => p.map(j => { if (j.id !== id) return j; const n = Math.max(0, Math.min(50, parseInt(v, 10) || 0)); const nos = (j.containerNos || []).slice(0, n); while (nos.length < n) nos.push(""); return { ...j, containers: v, containerNos: nos }; }));
-  const setJobContainerNo = (id, i, v) => setJobs(p => p.map(j => { if (j.id !== id) return j; const nos = (j.containerNos || []).slice(); nos[i] = v; return { ...j, containerNos: nos }; }));
-  const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); setNewLoc(""); };
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
-    const storageJobs = jobs.map(j => { const n = parseInt(j.containers, 10) || 0; return { id: j.id, dateIn: j.dateIn || "", dateOut: j.dateOut || "", containers: n, containerNos: (j.containerNos || []).slice(0, n), looseItems: !!j.looseItems, looseNote: j.looseNote || "", location: j.location || "", value: Number(j.value) || 0, inStore: !j.dateOut }; });
-    const rec = { id: c.id || uid(), ...f, storageJobs, storage: null, ref: c.ref || null, createdAt: c.createdAt || new Date().toISOString() };
+    const rec = { ...c, ...f, id: c.id || uid(), ref: c.ref || null, createdAt: c.createdAt || new Date().toISOString() };
     if (!c.id) { try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "newEnquiry", customerId: rec.id })); } catch {} }
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
@@ -2582,39 +2572,6 @@ function CustomerForm({ data, onClose, editCustomer }) {
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.postcode} onChange={v => set("postcode", v)} /></Field></div>
       </div>
 
-      <div style={{ marginTop: 6, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage jobs</div>
-        {jobs.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>No storage jobs. Add one if this customer has goods in store.</div>}
-        {jobs.map((j, idx) => { const cn = Math.max(0, Math.min(50, parseInt(j.containers, 10) || 0)); return (
-          <div key={j.id} style={{ border: "1px solid #E1E7E6", borderRadius: 12, padding: 12, marginBottom: 10, background: "#FAFCFC" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ fontWeight: 800, color: "#10211E", fontSize: 13.5 }}>Job {idx + 1}{j.dateOut ? " · out" : " · in store"}</div>
-              <button onClick={() => removeJob(j.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Remove</button>
-            </div>
-            <Field label="Location of storage"><Select value={j.location} onChange={v => setJob(j.id, "location", v)} options={locs} /></Field>
-            <Field label="Storage value (£)"><Input type="number" inputMode="decimal" value={j.value} onChange={v => setJob(j.id, "value", v)} /></Field>
-            <div style={{ display: "flex", gap: 10 }}>
-              <div style={{ flex: 1 }}><Field label="Date into store"><Input type="date" value={j.dateIn} onChange={v => setJob(j.id, "dateIn", v)} /></Field></div>
-              <div style={{ flex: 1 }}><Field label="Date out" hint="Leave blank while in store"><Input type="date" value={j.dateOut} onChange={v => setJob(j.id, "dateOut", v)} /></Field></div>
-            </div>
-            <Field label="Amount of containers"><Input type="number" inputMode="numeric" value={j.containers} onChange={v => setJobContainers(j.id, v)} /></Field>
-            {cn > 0 && (
-              <Field label="Container numbers">
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {Array.from({ length: cn }).map((_, i) => <Input key={i} value={(j.containerNos || [])[i] || ""} onChange={v => setJobContainerNo(j.id, i, v)} placeholder={`Container ${i + 1}`} />)}
-                </div>
-              </Field>
-            )}
-            <Field label="Any loose items?"><Select value={j.looseItems ? "Yes" : "No"} onChange={v => setJob(j.id, "looseItems", v === "Yes")} options={["No", "Yes"]} /></Field>
-            {j.looseItems && <Field label="Loose items — details"><Textarea value={j.looseNote} onChange={v => setJob(j.id, "looseNote", v)} /></Field>}
-          </div>
-        ); })}
-        <Btn size="sm" variant="grey" onClick={addJob}>+ Add storage job</Btn>
-        <div style={{ display: "flex", gap: 8, margin: "10px 0 0", alignItems: "flex-end" }}>
-          <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
-          <Btn size="sm" onClick={addLoc} disabled={!newLoc.trim()}>Add location</Btn>
-        </div>
-      </div>
       <Field label="Notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
@@ -2627,6 +2584,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
 function CustomerDetail({ data, id, setView }) {
   const c = (data.customers || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
+  const [jobForm, setJobForm] = useState(null);
   const [sheetBusy, setSheetBusy] = useState(false);
   async function openSheet(rec) {
     if (sheetBusy) return;
@@ -2676,11 +2634,15 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
-      {getStorageJobs(c).length > 0 && (
-        <Card>
-          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage jobs</div>
-          {getStorageJobs(c).map((j, idx) => (
-            <div key={j.id || idx} onClick={() => setView({ screen: "storageJob", customerId: c.id, jobId: j.id })} style={{ padding: "8px 0", borderBottom: idx < getStorageJobs(c).length - 1 ? "1px solid #F0F4F3" : "none", cursor: "pointer" }}>
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: getStorageJobs(c).length ? 8 : 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Storage jobs</div>
+          <Btn size="sm" onClick={() => setJobForm("new")}>+ Add storage job</Btn>
+        </div>
+        {getStorageJobs(c).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 8 }}>No storage jobs yet.</div>}
+        {getStorageJobs(c).map((j, idx) => (
+          <div key={j.id || idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: idx < getStorageJobs(c).length - 1 ? "1px solid #F0F4F3" : "none" }}>
+            <div onClick={() => setView({ screen: "storageJob", customerId: c.id, jobId: j.id })} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
                 <div style={{ fontWeight: 700, color: "#10211E" }}>{j.location || "—"}{j.value ? ` · £${Number(j.value).toLocaleString("en-GB")}` : ""}</div>
                 <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(j) ? "#0F766E" : "#9CA3AF", background: jobInStore(j) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px" }}>{jobInStore(j) ? "In store" : "Out"}</span>
@@ -2690,9 +2652,10 @@ function CustomerDetail({ data, id, setView }) {
               </div>
               {j.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {j.looseNote || "Yes"}</div>}
             </div>
-          ))}
-        </Card>
-      )}
+            <span onClick={() => setJobForm(j)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Edit</span>
+          </div>
+        ))}
+      </Card>
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         {c.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${c.phone}`}>📞 Call</Btn>}
         {c.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${c.email}`}>✉️ Email</Btn>}
@@ -2737,6 +2700,7 @@ function CustomerDetail({ data, id, setView }) {
         </>
       )}
       {showEdit && <CustomerForm data={data} editCustomer={c} onClose={() => setShowEdit(false)} />}
+      {jobForm && <StorageJobForm data={data} customer={c} job={jobForm === "new" ? null : jobForm} onClose={() => setJobForm(null)} />}
     </div>
   );
 }
@@ -2919,7 +2883,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B65</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B66</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4478,9 +4442,67 @@ function PartCollectionForm({ data, setView, recId }) {
   );
 }
 
+function StorageJobForm({ data, customer, job, onClose }) {
+  const isNew = !job;
+  const [f, setF] = useState(() => job
+    ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "", containers: job.containers ?? "", containerNos: job.containerNos || [], looseItems: !!job.looseItems, looseNote: job.looseNote || "" }
+    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: todayISO(), dateOut: "", containers: "", containerNos: [], looseItems: false, looseNote: "" });
+  const [locs, setLocs] = useState(getStorageLocs);
+  const [newLoc, setNewLoc] = useState("");
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const cn = Math.max(0, Math.min(50, parseInt(f.containers, 10) || 0));
+  const setContainers = v => setF(p => { const n = Math.max(0, Math.min(50, parseInt(v, 10) || 0)); const nos = (p.containerNos || []).slice(0, n); while (nos.length < n) nos.push(""); return { ...p, containers: v, containerNos: nos }; });
+  const setContainerNo = (i, v) => setF(p => { const nos = (p.containerNos || []).slice(); nos[i] = v; return { ...p, containerNos: nos }; });
+  const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); set("location", v); setNewLoc(""); };
+
+  async function save() {
+    const n = parseInt(f.containers, 10) || 0;
+    const jrec = { id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", containers: n, containerNos: (f.containerNos || []).slice(0, n), looseItems: !!f.looseItems, looseNote: f.looseNote || "", inStore: !f.dateOut };
+    const existing = getStorageJobs(customer).map(j => ({ ...j, id: j.id === "legacy" ? uid() : j.id }));
+    const jobs = existing.some(j => j.id === jrec.id) ? existing.map(j => j.id === jrec.id ? jrec : j) : [...existing, jrec];
+    await saveAndReload(upsertLocal(data, "customers", { ...customer, storageJobs: jobs, storage: null }));
+  }
+  async function del() {
+    if (!confirm("Delete this storage job? (Inventory sheets are kept.)")) return;
+    const jobs = getStorageJobs(customer).filter(j => j.id !== f.id).map(j => ({ ...j, id: j.id === "legacy" ? uid() : j.id }));
+    await saveAndReload(upsertLocal(data, "customers", { ...customer, storageJobs: jobs, storage: null }));
+  }
+
+  return (
+    <Modal title={isNew ? "Add storage job" : "Edit storage job"} onClose={onClose}>
+      <Field label="Location of storage"><Select value={f.location} onChange={v => set("location", v)} options={locs} /></Field>
+      <div style={{ display: "flex", gap: 8, margin: "0 0 10px", alignItems: "flex-end" }}>
+        <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
+        <Btn size="sm" onClick={addLoc} disabled={!newLoc.trim()}>Add location</Btn>
+      </div>
+      <Field label="Storage value (£)"><Input type="number" inputMode="decimal" value={f.value} onChange={v => set("value", v)} /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Date into store"><Input type="date" value={f.dateIn} onChange={v => set("dateIn", v)} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Date out" hint="Blank while in store"><Input type="date" value={f.dateOut} onChange={v => set("dateOut", v)} /></Field></div>
+      </div>
+      <Field label="Amount of containers"><Input type="number" inputMode="numeric" value={f.containers} onChange={setContainers} /></Field>
+      {cn > 0 && (
+        <Field label="Container numbers">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {Array.from({ length: cn }).map((_, i) => <Input key={i} value={(f.containerNos || [])[i] || ""} onChange={v => setContainerNo(i, v)} placeholder={`Container ${i + 1}`} />)}
+          </div>
+        </Field>
+      )}
+      <Field label="Any loose items?"><Select value={f.looseItems ? "Yes" : "No"} onChange={v => set("looseItems", v === "Yes")} options={["No", "Yes"]} /></Field>
+      {f.looseItems && <Field label="Loose items — details"><Textarea value={f.looseNote} onChange={v => set("looseNote", v)} /></Field>}
+      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+        {!isNew && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
+        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
+        <Btn style={{ flex: 2 }} onClick={save}>{isNew ? "Add job" : "Save"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function StorageJobDetail({ data, setView, customerId, jobId }) {
   const c = (data.customers || []).find(x => x.id === customerId);
   const [sheetBusy, setSheetBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   if (!c) return <div style={{ padding: 20 }}>Customer not found.</div>;
   const jobs = getStorageJobs(c);
   const job = jobs.find(j => j.id === jobId) || jobs[0];
@@ -4508,7 +4530,10 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontWeight: 800, color: "#10211E" }}>{job.value ? money(job.value) : "No value set"}</div>
-            <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(job) ? "#0F766E" : "#9CA3AF", background: jobInStore(job) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px" }}>{jobInStore(job) ? "In store" : "Out"}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span onClick={() => setEditing(true)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(job) ? "#0F766E" : "#9CA3AF", background: jobInStore(job) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px" }}>{jobInStore(job) ? "In store" : "Out"}</span>
+            </div>
           </div>
           <div style={{ fontSize: 12.5, color: "#6A7B77" }}>
             {job.dateIn ? `In ${fmtUK(job.dateIn)}` : ""}{job.dateOut ? ` · Out ${fmtUK(job.dateOut)}` : ""}{job.containers ? ` · ${job.containers} container${job.containers != 1 ? "s" : ""}` : ""}{(job.containerNos || []).filter(Boolean).length ? ` (${job.containerNos.filter(Boolean).join(", ")})` : ""}
@@ -4516,6 +4541,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
           {job.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {job.looseNote || "Yes"}</div>}
         </Card>
       )}
+      {editing && job && <StorageJobForm data={data} customer={c} job={job} onClose={() => setEditing(false)} />}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "16px 0 8px" }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Inventory sheets</div>
