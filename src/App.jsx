@@ -2680,7 +2680,7 @@ function CustomerDetail({ data, id, setView }) {
         <Card>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage jobs</div>
           {getStorageJobs(c).map((j, idx) => (
-            <div key={j.id || idx} style={{ padding: "8px 0", borderBottom: idx < getStorageJobs(c).length - 1 ? "1px solid #F0F4F3" : "none" }}>
+            <div key={j.id || idx} onClick={() => setView({ screen: "storageJob", customerId: c.id, jobId: j.id })} style={{ padding: "8px 0", borderBottom: idx < getStorageJobs(c).length - 1 ? "1px solid #F0F4F3" : "none", cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
                 <div style={{ fontWeight: 700, color: "#10211E" }}>{j.location || "—"}{j.value ? ` · £${Number(j.value).toLocaleString("en-GB")}` : ""}</div>
                 <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(j) ? "#0F766E" : "#9CA3AF", background: jobInStore(j) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px" }}>{jobInStore(j) ? "In store" : "Out"}</span>
@@ -2689,43 +2689,6 @@ function CustomerDetail({ data, id, setView }) {
                 {j.dateIn ? `In ${fmtUK(j.dateIn)}` : ""}{j.dateOut ? ` · Out ${fmtUK(j.dateOut)}` : ""}{j.containers ? ` · ${j.containers} container${j.containers != 1 ? "s" : ""}` : ""}{(j.containerNos || []).filter(Boolean).length ? ` (${j.containerNos.filter(Boolean).join(", ")})` : ""}
               </div>
               {j.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {j.looseNote || "Yes"}</div>}
-            </div>
-          ))}
-        </Card>
-      )}
-      {c.storageInv && c.storageInv.length > 0 && (
-        <Card>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Storage inventory sheets</div>
-            <Btn size="sm" onClick={() => setView({ screen: "storageIntake", customerId: c.id })}>+ New</Btn>
-          </div>
-          {c.storageInv.slice().reverse().map(rec => (
-            <div key={rec.id} style={{ borderBottom: "1px solid #EEF3F2", padding: "4px 0" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 4px", gap: 10 }}>
-                <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer", flex: 1 }}>
-                  <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
-                  <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{rec.location || "—"} · {(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
-                </div>
-                <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
-                  <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>
-                  <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
-                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : "PDF"}</span>
-                </div>
-              </div>
-              {(rec.collections || []).length > 0 && (
-                <div style={{ margin: "2px 4px 8px", padding: "8px 10px", background: "#FFFBF2", border: "1px solid #FBE3B3", borderRadius: 8 }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "#B45309", marginBottom: 5 }}>Items collected</div>
-                  {rec.collections.slice().reverse().map(col => (
-                    <div key={col.id} style={{ marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.collectedBy ? ` · ${col.collectedBy}` : ""}{col.sig ? " · signed" : ""}</div>
-                        <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", ") || "—"}</div>
-                      </div>
-                      {(col.pdfUrl || col.pdf) && <span onClick={() => openCollection(col)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Receipt</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           ))}
         </Card>
@@ -2956,7 +2919,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B63</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B64</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4083,7 +4046,7 @@ function SigField({ label, value, onOpen }) {
   );
 }
 
-function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
+function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJobId }) {
   const device = useDeviceType();
   const phone = device === "phone";
   const editCust = editRecId ? (data.customers || []).find(c => (c.storageInv || []).some(r => r.id === editRecId)) : null;
@@ -4093,6 +4056,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
   const saved = (() => { try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; } })();
   const src = saved || (editRec ? { customerId: editCust.id, date: editRec.date, location: editRec.location, crew: editRec.crew, containers: loadConts(editRec), custSig: editRec.custSig, empSig: editRec.empSig, empName: editRec.empName } : null);
   const [customerId, setCustomerId] = useState(src?.customerId ?? (presetCustomerId || ""));
+  const [jobId, setJobId] = useState((editRec && editRec.jobId) || presetJobId || "");
   const [date, setDate] = useState(src?.date ?? todayISO());
   const [location, setLocation] = useState(src?.location ?? (getStorageLocs()[0] || "Wild & Lye"));
   const [crew, setCrew] = useState(src?.crew ?? []);
@@ -4153,7 +4117,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
     if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy(true);
-    const rec = { id: editRec ? editRec.id : uid(), date, location, crew, containers: cleanContainers, custSig, empSig, empName, createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
+    const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
     let bytes;
     try {
       ({ bytes } = await buildStorageIntakePdf(rec, cust, data));
@@ -4169,6 +4133,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
     const list = editRec ? (cust.storageInv || []).map(r => r.id === rec.id ? rec : r) : [...(cust.storageInv || []), rec];
     const updated = { ...cust, storageInv: list };
     clearDraft();
+    try { const rj = rec.jobId; sessionStorage.setItem("removals_view", JSON.stringify(rj ? { screen: "storageJob", customerId: cust.id, jobId: rj } : { screen: "customerDetail", id: cust.id })); } catch {}
     await saveAndReload(upsertLocal(data, "customers", updated));
   }
 
@@ -4187,6 +4152,15 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
           </select>
         </Field>
         {prefillMsg && <div style={{ fontSize: 12, color: "#15803D", background: "#F1F9F4", border: "1px solid #BBE6C9", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>✓ {prefillMsg}</div>}
+        {customerId && (() => {
+          const cc = (data.customers || []).find(x => x.id === customerId);
+          const cjobs = cc ? getStorageJobs(cc) : [];
+          if (!cjobs.length) return <div style={{ fontSize: 12, color: "#B45309", background: "#FFFBF2", border: "1px solid #FBE3B3", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>No storage job yet — add one on the customer's page (Edit → Storage jobs). You can still save this inventory and link it later.</div>;
+          return <Field label="Storage job"><select value={jobId} onChange={e => setJobId(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
+            <option value="">Select storage job…</option>
+            {cjobs.map(j => <option key={j.id} value={j.id}>{(j.location || "Job")}{j.value ? ` · £${Number(j.value).toLocaleString("en-GB")}` : ""}{j.dateOut ? " (out)" : ""}</option>)}
+          </select></Field>;
+        })()}
         <div style={{ display: "flex", gap: 10 }}>
           <div style={{ flex: 1 }}><Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field></div>
           <div style={{ flex: 1 }}><Field label="Storage location"><Select value={location} onChange={setLocation} options={getStorageLocs()} /></Field></div>
@@ -4475,6 +4449,87 @@ function PartCollectionForm({ data, setView, recId }) {
   );
 }
 
+function StorageJobDetail({ data, setView, customerId, jobId }) {
+  const c = (data.customers || []).find(x => x.id === customerId);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  if (!c) return <div style={{ padding: 20 }}>Customer not found.</div>;
+  const jobs = getStorageJobs(c);
+  const job = jobs.find(j => j.id === jobId) || jobs[0];
+  const isFirst = jobs[0] && job && jobs[0].id === job.id;
+  const sheets = (c.storageInv || []).filter(s => (job && s.jobId === job.id) || (!s.jobId && isFirst));
+  const money = n => `£${Number(n || 0).toLocaleString("en-GB")}`;
+  const openUrl = url => { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); };
+  async function openSheet(rec) {
+    if (sheetBusy) return;
+    if (rec.pdfUrl) { openUrl(rec.pdfUrl); return; }
+    if (rec.pdf) { try { const b = atob(rec.pdf.split(",")[1]); const arr = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i); const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" })); openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000); return; } catch {} }
+    setSheetBusy(true);
+    try { const { bytes } = await buildStorageIntakePdf(rec, c, data); const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })); openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000); } catch (ex) { alert("Could not open sheet: " + ((ex && ex.message) || ex)); }
+    setSheetBusy(false);
+  }
+  const openCollection = col => { if (col.pdfUrl) { openUrl(col.pdfUrl); return; } if (col.pdf) { try { const b = atob(col.pdf.split(",")[1]); const arr = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i); const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" })); openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000); } catch {} } };
+
+  return (
+    <div style={{ maxWidth: 640, margin: "0 auto" }}>
+      <button onClick={() => setView({ screen: "storage" })} style={{ background: "none", border: "none", color: TEAL, fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 6 }}>‹ Storage</button>
+      <h2 style={{ margin: "0 0 2px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{job ? (job.location || "Storage job") : "Storage job"}</h2>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 14 }} onClick={() => setView({ screen: "customerDetail", id: c.id })}>{c.ref ? `#${c.ref} · ` : ""}<span style={{ color: TEAL, fontWeight: 700 }}>{c.name}</span></div>
+
+      {job && (
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontWeight: 800, color: "#10211E" }}>{job.value ? money(job.value) : "No value set"}</div>
+            <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(job) ? "#0F766E" : "#9CA3AF", background: jobInStore(job) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px" }}>{jobInStore(job) ? "In store" : "Out"}</span>
+          </div>
+          <div style={{ fontSize: 12.5, color: "#6A7B77" }}>
+            {job.dateIn ? `In ${fmtUK(job.dateIn)}` : ""}{job.dateOut ? ` · Out ${fmtUK(job.dateOut)}` : ""}{job.containers ? ` · ${job.containers} container${job.containers != 1 ? "s" : ""}` : ""}{(job.containerNos || []).filter(Boolean).length ? ` (${job.containerNos.filter(Boolean).join(", ")})` : ""}
+          </div>
+          {job.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {job.looseNote || "Yes"}</div>}
+        </Card>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "16px 0 8px" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Inventory sheets</div>
+        <Btn size="sm" onClick={() => setView({ screen: "storageIntake", customerId: c.id, jobId: job ? job.id : undefined })}>+ New inventory</Btn>
+      </div>
+      {sheets.length === 0 && <Empty icon="box" text="No inventory sheets yet" />}
+      {sheets.length > 0 && (
+        <Card>
+          {sheets.slice().reverse().map(rec => (
+            <div key={rec.id} style={{ borderBottom: "1px solid #EEF3F2", padding: "4px 0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 4px", gap: 10 }}>
+                <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer", flex: 1 }}>
+                  <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
+                  <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
+                </div>
+                <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
+                  <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>
+                  <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
+                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : "PDF"}</span>
+                </div>
+              </div>
+              {(rec.collections || []).length > 0 && (
+                <div style={{ margin: "2px 4px 8px", padding: "8px 10px", background: "#FFFBF2", border: "1px solid #FBE3B3", borderRadius: 8 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "#B45309", marginBottom: 5 }}>Items collected</div>
+                  {rec.collections.slice().reverse().map(col => (
+                    <div key={col.id} style={{ marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.collectedBy ? ` · ${col.collectedBy}` : ""}{col.sig ? " · signed" : ""}</div>
+                        <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", ") || "—"}</div>
+                      </div>
+                      {(col.pdfUrl || col.pdf) && <span onClick={() => openCollection(col)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Receipt</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function StorageView({ data, setView }) {
   const money = n => `£${Number(n || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
   // Every in-store storage job across all customers (a customer can have several).
@@ -4526,7 +4581,7 @@ function StorageView({ data, setView }) {
               <div style={{ fontSize: 12.5, color: "#6A7B77", fontWeight: 600 }}>{list.length} job{list.length !== 1 ? "s" : ""} · {lc} container{lc !== 1 ? "s" : ""} · {money(lv)}</div>
             </div>
             {list.map(({ c, j }) => (
-              <Card key={c.id + (j.id || "")} onClick={() => setView({ screen: "customerDetail", id: c.id })} style={{ marginBottom: 8 }}>
+              <Card key={c.id + (j.id || "")} onClick={() => setView({ screen: "storageJob", customerId: c.id, jobId: j.id })} style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}</div>
@@ -4695,8 +4750,9 @@ export default function App() {
     if (view.screen === "company") return <CompanyView data={data} setView={setView} />;
     if (view.screen === "catalogue") return <CatalogueEditor catalog={catalog} onSave={applyCatalogEdit} setView={setView} />;
     if (view.screen === "storage") return <StorageView data={data} setView={setView} />;
-    if (view.screen === "storageIntake") return <StorageIntakeForm data={data} setView={setView} presetCustomerId={view.customerId} editRecId={view.editRecId} />;
+    if (view.screen === "storageIntake") return <StorageIntakeForm data={data} setView={setView} presetCustomerId={view.customerId} editRecId={view.editRecId} presetJobId={view.jobId} />;
     if (view.screen === "storageCollect") return <PartCollectionForm data={data} setView={setView} recId={view.recId} />;
+    if (view.screen === "storageJob") return <StorageJobDetail data={data} setView={setView} customerId={view.customerId} jobId={view.jobId} />;
     return null;
   }
 
