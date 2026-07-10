@@ -40,6 +40,14 @@ function getRefStart() { const v = parseInt(localStorage.getItem(REF_KEY), 10); 
 function setRefStart(n) { localStorage.setItem(REF_KEY, String(parseInt(n, 10) || 0)); }
 const STORLOC_KEY = "removals_storage_locs";
 function getStorageLocs() { try { const a = JSON.parse(localStorage.getItem(STORLOC_KEY) || "null"); return Array.isArray(a) && a.length ? a : ["Wild & Lye"]; } catch { return ["Wild & Lye"]; } }
+// A customer can have several storage jobs. Migrate an old single `storage` object into one job.
+function getStorageJobs(c) {
+  if (Array.isArray(c && c.storageJobs)) return c.storageJobs;
+  const s = c && c.storage;
+  if (s && (s.inStore || s.location || s.value || s.containers)) return [{ id: "legacy", dateIn: s.dateIn || "", dateOut: s.dateOut || "", containers: s.containers || 0, containerNos: s.containerNos || [], looseItems: !!s.looseItems, looseNote: s.looseNote || "", location: s.location || "", value: s.value || 0, inStore: s.dateOut ? false : !!s.inStore }];
+  return [];
+}
+const jobInStore = j => !!j && !j.dateOut;
 function saveStorageLocs(a) { try { localStorage.setItem(STORLOC_KEY, JSON.stringify(a && a.length ? a : ["Wild & Lye"])); } catch {} }
 const COND_KEY = "removals_conditions";
 const DEFAULT_CONDITIONS = ["OK", "Scratched", "Dented", "Cracked", "Broken", "Torn", "Soiled", "Rusty", "Loose"];
@@ -2541,19 +2549,19 @@ function CustomerForm({ data, onClose, editCustomer }) {
     custType: c.custType || "Private", notes: c.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  const [st, setSt] = useState(() => { const s = c.storage || {}; return { inStore: !!s.inStore, dateIn: s.dateIn || "", dateOut: s.dateOut || "", containers: s.containers ?? "", containerNos: Array.isArray(s.containerNos) ? s.containerNos : [], looseItems: !!s.looseItems, looseNote: s.looseNote || "", location: s.location || (getStorageLocs()[0] || "Wild & Lye"), value: s.value ?? "" }; });
-  const setS = (k, v) => setSt(p => ({ ...p, [k]: v }));
+  const [jobs, setJobs] = useState(() => getStorageJobs(c).map(j => ({ ...j, id: j.id && j.id !== "legacy" ? j.id : uid(), containers: j.containers ?? "", value: j.value ?? "" })));
   const [locs, setLocs] = useState(getStorageLocs);
   const [newLoc, setNewLoc] = useState("");
-  const contN = Math.max(0, Math.min(50, parseInt(st.containers, 10) || 0));
-  const setContainers = v => setSt(p => { const n = Math.max(0, Math.min(50, parseInt(v, 10) || 0)); const nos = (p.containerNos || []).slice(0, n); while (nos.length < n) nos.push(""); return { ...p, containers: v, containerNos: nos }; });
-  const setContainerNo = (i, v) => setSt(p => { const nos = (p.containerNos || []).slice(); nos[i] = v; return { ...p, containerNos: nos }; });
-  const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); setS("location", v); setNewLoc(""); };
-  const removeLoc = name => { const nx = locs.filter(l => l !== name); const fin = nx.length ? nx : ["Wild & Lye"]; setLocs(fin); saveStorageLocs(fin); if (st.location === name) setS("location", fin[0]); };
+  const addJob = () => setJobs(p => [...p, { id: uid(), dateIn: todayISO(), dateOut: "", containers: "", containerNos: [], looseItems: false, looseNote: "", location: getStorageLocs()[0] || "Wild & Lye", value: "" }]);
+  const setJob = (id, k, v) => setJobs(p => p.map(j => j.id === id ? { ...j, [k]: v } : j));
+  const removeJob = id => setJobs(p => p.filter(j => j.id !== id));
+  const setJobContainers = (id, v) => setJobs(p => p.map(j => { if (j.id !== id) return j; const n = Math.max(0, Math.min(50, parseInt(v, 10) || 0)); const nos = (j.containerNos || []).slice(0, n); while (nos.length < n) nos.push(""); return { ...j, containers: v, containerNos: nos }; }));
+  const setJobContainerNo = (id, i, v) => setJobs(p => p.map(j => { if (j.id !== id) return j; const nos = (j.containerNos || []).slice(); nos[i] = v; return { ...j, containerNos: nos }; }));
+  const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); setNewLoc(""); };
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
-    const storage = { inStore: st.inStore, dateIn: st.dateIn, dateOut: st.dateOut, containers: parseInt(st.containers, 10) || 0, containerNos: (st.containerNos || []).slice(0, contN), looseItems: st.looseItems, looseNote: st.looseNote, location: st.location, value: Number(st.value) || 0 };
-    const rec = { id: c.id || uid(), ...f, storage, ref: c.ref || null, createdAt: c.createdAt || new Date().toISOString() };
+    const storageJobs = jobs.map(j => { const n = parseInt(j.containers, 10) || 0; return { id: j.id, dateIn: j.dateIn || "", dateOut: j.dateOut || "", containers: n, containerNos: (j.containerNos || []).slice(0, n), looseItems: !!j.looseItems, looseNote: j.looseNote || "", location: j.location || "", value: Number(j.value) || 0, inStore: !j.dateOut }; });
+    const rec = { id: c.id || uid(), ...f, storageJobs, storage: null, ref: c.ref || null, createdAt: c.createdAt || new Date().toISOString() };
     if (!c.id) { try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "newEnquiry", customerId: rec.id })); } catch {} }
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
@@ -2575,35 +2583,37 @@ function CustomerForm({ data, onClose, editCustomer }) {
       </div>
 
       <div style={{ marginTop: 6, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage</div>
-        <Field label="In store?"><Select value={st.inStore ? "Yes" : "No"} onChange={v => setS("inStore", v === "Yes")} options={["No", "Yes"]} /></Field>
-        {st.inStore && (
-          <>
-            <div style={{ display: "flex", gap: 10 }}>
-              <div style={{ flex: 1 }}><Field label="Date into store"><Input type="date" value={st.dateIn} onChange={v => setS("dateIn", v)} /></Field></div>
-              <div style={{ flex: 1 }}><Field label="Date out of store"><Input type="date" value={st.dateOut} onChange={v => setS("dateOut", v)} /></Field></div>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage jobs</div>
+        {jobs.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>No storage jobs. Add one if this customer has goods in store.</div>}
+        {jobs.map((j, idx) => { const cn = Math.max(0, Math.min(50, parseInt(j.containers, 10) || 0)); return (
+          <div key={j.id} style={{ border: "1px solid #E1E7E6", borderRadius: 12, padding: 12, marginBottom: 10, background: "#FAFCFC" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontWeight: 800, color: "#10211E", fontSize: 13.5 }}>Job {idx + 1}{j.dateOut ? " · out" : " · in store"}</div>
+              <button onClick={() => removeJob(j.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Remove</button>
             </div>
-            <Field label="Amount of containers"><Input type="number" inputMode="numeric" value={st.containers} onChange={setContainers} /></Field>
-            {contN > 0 && (
+            <Field label="Location of storage"><Select value={j.location} onChange={v => setJob(j.id, "location", v)} options={locs} /></Field>
+            <Field label="Storage value (£)"><Input type="number" inputMode="decimal" value={j.value} onChange={v => setJob(j.id, "value", v)} /></Field>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 1 }}><Field label="Date into store"><Input type="date" value={j.dateIn} onChange={v => setJob(j.id, "dateIn", v)} /></Field></div>
+              <div style={{ flex: 1 }}><Field label="Date out" hint="Leave blank while in store"><Input type="date" value={j.dateOut} onChange={v => setJob(j.id, "dateOut", v)} /></Field></div>
+            </div>
+            <Field label="Amount of containers"><Input type="number" inputMode="numeric" value={j.containers} onChange={v => setJobContainers(j.id, v)} /></Field>
+            {cn > 0 && (
               <Field label="Container numbers">
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {Array.from({ length: contN }).map((_, i) => (
-                    <Input key={i} value={st.containerNos[i] || ""} onChange={v => setContainerNo(i, v)} placeholder={`Container ${i + 1}`} />
-                  ))}
+                  {Array.from({ length: cn }).map((_, i) => <Input key={i} value={(j.containerNos || [])[i] || ""} onChange={v => setJobContainerNo(j.id, i, v)} placeholder={`Container ${i + 1}`} />)}
                 </div>
               </Field>
             )}
-            <Field label="Any loose items?" hint="Items that don't fit in a container"><Select value={st.looseItems ? "Yes" : "No"} onChange={v => setS("looseItems", v === "Yes")} options={["No", "Yes"]} /></Field>
-            {st.looseItems && <Field label="Loose items — details"><Textarea value={st.looseNote} onChange={v => setS("looseNote", v)} /></Field>}
-            <Field label="Location of storage"><Select value={st.location} onChange={v => setS("location", v)} options={locs} /></Field>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "flex-end" }}>
-              <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
-              <Btn size="sm" onClick={addLoc} disabled={!newLoc.trim()}>Add</Btn>
-              {locs.length > 1 && <Btn size="sm" variant="grey" onClick={() => removeLoc(st.location)}>Remove</Btn>}
-            </div>
-            <Field label="Storage value (£)"><Input type="number" inputMode="decimal" value={st.value} onChange={v => setS("value", v)} /></Field>
-          </>
-        )}
+            <Field label="Any loose items?"><Select value={j.looseItems ? "Yes" : "No"} onChange={v => setJob(j.id, "looseItems", v === "Yes")} options={["No", "Yes"]} /></Field>
+            {j.looseItems && <Field label="Loose items — details"><Textarea value={j.looseNote} onChange={v => setJob(j.id, "looseNote", v)} /></Field>}
+          </div>
+        ); })}
+        <Btn size="sm" variant="grey" onClick={addJob}>+ Add storage job</Btn>
+        <div style={{ display: "flex", gap: 8, margin: "10px 0 0", alignItems: "flex-end" }}>
+          <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
+          <Btn size="sm" onClick={addLoc} disabled={!newLoc.trim()}>Add location</Btn>
+        </div>
       </div>
       <Field label="Notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
@@ -2666,15 +2676,21 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
-      {c.storage && c.storage.inStore && (
+      {getStorageJobs(c).length > 0 && (
         <Card>
-          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage</div>
-          <Row label="Location" value={c.storage.location || "—"} />
-          <Row label="Into store" value={c.storage.dateIn ? fmtUK(c.storage.dateIn) : "—"} />
-          <Row label="Out of store" value={c.storage.dateOut ? fmtUK(c.storage.dateOut) : "—"} />
-          <Row label="Containers" value={c.storage.containers ? `${c.storage.containers}${(c.storage.containerNos || []).filter(Boolean).length ? " — " + c.storage.containerNos.filter(Boolean).join(", ") : ""}` : "—"} />
-          {c.storage.looseItems && <Row label="Loose items" value={c.storage.looseNote || "Yes"} />}
-          {c.storage.value ? <Row label="Storage value" value={`£${Number(c.storage.value).toLocaleString("en-GB")}`} /> : null}
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Storage jobs</div>
+          {getStorageJobs(c).map((j, idx) => (
+            <div key={j.id || idx} style={{ padding: "8px 0", borderBottom: idx < getStorageJobs(c).length - 1 ? "1px solid #F0F4F3" : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+                <div style={{ fontWeight: 700, color: "#10211E" }}>{j.location || "—"}{j.value ? ` · £${Number(j.value).toLocaleString("en-GB")}` : ""}</div>
+                <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(j) ? "#0F766E" : "#9CA3AF", background: jobInStore(j) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px" }}>{jobInStore(j) ? "In store" : "Out"}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: "#6A7B77" }}>
+                {j.dateIn ? `In ${fmtUK(j.dateIn)}` : ""}{j.dateOut ? ` · Out ${fmtUK(j.dateOut)}` : ""}{j.containers ? ` · ${j.containers} container${j.containers != 1 ? "s" : ""}` : ""}{(j.containerNos || []).filter(Boolean).length ? ` (${j.containerNos.filter(Boolean).join(", ")})` : ""}
+              </div>
+              {j.looseItems && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {j.looseNote || "Yes"}</div>}
+            </div>
+          ))}
         </Card>
       )}
       {c.storageInv && c.storageInv.length > 0 && (
@@ -2940,7 +2956,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B62</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B63</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4151,7 +4167,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
       try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); rec.pdf = "data:application/pdf;base64," + btoa(bin); } catch {}
     }
     const list = editRec ? (cust.storageInv || []).map(r => r.id === rec.id ? rec : r) : [...(cust.storageInv || []), rec];
-    const updated = { ...cust, storageInv: list, storage: { ...(cust.storage || {}), inStore: true, location, containers: Math.max(Number(cust.storage?.containers) || 0, cleanContainers.length) } };
+    const updated = { ...cust, storageInv: list };
     clearDraft();
     await saveAndReload(upsertLocal(data, "customers", updated));
   }
@@ -4406,10 +4422,7 @@ function PartCollectionForm({ data, setView, recId }) {
     catch { try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); collection.pdf = "data:application/pdf;base64," + btoa(bin); } catch {} }
     const newRec = { ...rec, collections: [...(rec.collections || []), collection] }; // original containers + signatures preserved
     const list = (cust.storageInv || []).map(r => r.id === rec.id ? newRec : r);
-    const totalOrig = (rec.containers || []).reduce((n, c) => n + (c.items || []).reduce((m, it) => m + (Number(it.qty) || 0), 0), 0);
-    const totalColl = (newRec.collections || []).reduce((n, col) => n + (col.items || []).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
-    const storage = (totalOrig - totalColl) <= 0 ? { ...(cust.storage || {}), inStore: false, dateOut: date } : (cust.storage || {});
-    await saveAndReload(upsertLocal(data, "customers", { ...cust, storageInv: list, storage }));
+    await saveAndReload(upsertLocal(data, "customers", { ...cust, storageInv: list }));
   }
 
   return (
@@ -4463,19 +4476,18 @@ function PartCollectionForm({ data, setView, recId }) {
 }
 
 function StorageView({ data, setView }) {
-  const inStore = (data.customers || []).filter(c => c.storage && c.storage.inStore);
   const money = n => `£${Number(n || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-  const conts = c => Number(c.storage && c.storage.containers) || 0;
-  const val = c => Number(c.storage && c.storage.value) || 0;
+  // Every in-store storage job across all customers (a customer can have several).
+  const jobsList = [];
+  (data.customers || []).forEach(c => getStorageJobs(c).forEach(j => { if (jobInStore(j)) jobsList.push({ c, j }); }));
 
-  // group by location
   const groups = {};
-  inStore.forEach(c => { const loc = (c.storage.location || "Unspecified").trim() || "Unspecified"; (groups[loc] = groups[loc] || []).push(c); });
+  jobsList.forEach(({ c, j }) => { const loc = (j.location || "Unspecified").trim() || "Unspecified"; (groups[loc] = groups[loc] || []).push({ c, j }); });
   const locNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
 
-  const totCustomers = inStore.length;
-  const totContainers = inStore.reduce((n, c) => n + conts(c), 0);
-  const totValue = inStore.reduce((n, c) => n + val(c), 0);
+  const totJobs = jobsList.length;
+  const totContainers = jobsList.reduce((n, { j }) => n + (Number(j.containers) || 0), 0);
+  const totValue = jobsList.reduce((n, { j }) => n + (Number(j.value) || 0), 0);
 
   const Stat = ({ label, value }) => (
     <div style={{ flex: 1, textAlign: "center" }}>
@@ -4493,7 +4505,7 @@ function StorageView({ data, setView }) {
 
       <Card style={{ background: "#F4FBF9", border: "1px solid #CDE7E2" }}>
         <div style={{ display: "flex", gap: 8 }}>
-          <Stat label="In store" value={totCustomers} />
+          <Stat label="Jobs in store" value={totJobs} />
           <div style={{ width: 1, background: "#DCEAE7" }} />
           <Stat label="Containers" value={totContainers} />
           <div style={{ width: 1, background: "#DCEAE7" }} />
@@ -4501,31 +4513,31 @@ function StorageView({ data, setView }) {
         </div>
       </Card>
 
-      {totCustomers === 0 && <Empty icon="box" text="No customers in store" />}
+      {totJobs === 0 && <Empty icon="box" text="No storage jobs in store" />}
 
       {locNames.map(loc => {
-        const list = groups[loc].slice().sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-        const lc = list.reduce((n, c) => n + conts(c), 0);
-        const lv = list.reduce((n, c) => n + val(c), 0);
+        const list = groups[loc].slice().sort((a, b) => (a.c.name || "").localeCompare(b.c.name || ""));
+        const lc = list.reduce((n, { j }) => n + (Number(j.containers) || 0), 0);
+        const lv = list.reduce((n, { j }) => n + (Number(j.value) || 0), 0);
         return (
           <div key={loc} style={{ marginTop: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, padding: "0 2px" }}>
               <div style={{ fontSize: 16, fontWeight: 800, color: TEAL_D }}>{loc}</div>
-              <div style={{ fontSize: 12.5, color: "#6A7B77", fontWeight: 600 }}>{list.length} cust · {lc} container{lc !== 1 ? "s" : ""} · {money(lv)}</div>
+              <div style={{ fontSize: 12.5, color: "#6A7B77", fontWeight: 600 }}>{list.length} job{list.length !== 1 ? "s" : ""} · {lc} container{lc !== 1 ? "s" : ""} · {money(lv)}</div>
             </div>
-            {list.map(c => (
-              <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })} style={{ marginBottom: 8 }}>
+            {list.map(({ c, j }) => (
+              <Card key={c.id + (j.id || "")} onClick={() => setView({ screen: "customerDetail", id: c.id })} style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}</div>
                     <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2 }}>
-                      {conts(c)} container{conts(c) !== 1 ? "s" : ""}
-                      {(c.storage.containerNos || []).filter(Boolean).length ? ` · ${c.storage.containerNos.filter(Boolean).join(", ")}` : ""}
-                      {c.storage.dateIn ? ` · in ${fmtUK(c.storage.dateIn)}` : ""}
-                      {c.storage.looseItems ? " · loose items" : ""}
+                      {(Number(j.containers) || 0)} container{(Number(j.containers) || 0) !== 1 ? "s" : ""}
+                      {(j.containerNos || []).filter(Boolean).length ? ` · ${j.containerNos.filter(Boolean).join(", ")}` : ""}
+                      {j.dateIn ? ` · in ${fmtUK(j.dateIn)}` : ""}
+                      {j.looseItems ? " · loose items" : ""}
                     </div>
                   </div>
-                  <div style={{ fontWeight: 700, color: "#10211E", flexShrink: 0 }}>{val(c) ? money(val(c)) : ""}</div>
+                  <div style={{ fontWeight: 700, color: "#10211E", flexShrink: 0 }}>{Number(j.value) ? money(j.value) : ""}</div>
                 </div>
               </Card>
             ))}
