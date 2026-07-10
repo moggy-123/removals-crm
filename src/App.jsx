@@ -1778,11 +1778,11 @@ function getBusinessName() { return localStorage.getItem("removals_business_name
 function fillTemplate(body, ctx) { return (body || "").replace(/\{(\w+)\}/g, (_, k) => (ctx[k] != null && ctx[k] !== "") ? ctx[k] : ""); }
 function waNumber(phone) { let d = (phone || "").replace(/[^\d]/g, ""); if (d.startsWith("0")) d = "44" + d.slice(1); return d; }
 
-function MessageButton({ customer, ctx }) {
+function MessageButton({ customer, ctx, size = "sm", variant = "grey" }) {
   const [open, setOpen] = useState(false);
   if (!customer) return null;
   return (<>
-    <Btn size="sm" variant="grey" onClick={() => setOpen(true)}>💬 Message</Btn>
+    <Btn size={size} variant={variant} onClick={() => setOpen(true)}>💬 Message</Btn>
     {open && <MessageModal customer={customer} ctx={ctx || {}} onClose={() => setOpen(false)} />}
   </>);
 }
@@ -2644,7 +2644,7 @@ function CustomerDetail({ data, id, setView }) {
   }
   return (
     <div>
-      <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "customers" })}><Icon name="back" size={14} /> Back</Btn>
+      <button onClick={() => setView({ screen: "customers" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "9px 14px", fontSize: 14.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0" }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D }}>#{c.ref} </span> : ""}{c.name}</h2>
         <StatusBadge status={c.custType} />
@@ -2681,10 +2681,10 @@ function CustomerDetail({ data, id, setView }) {
         ))}
       </Card>
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-        {c.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${c.phone}`}>📞 Call</Btn>}
-        {c.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${c.email}`}>✉️ Email</Btn>}
-        <MessageButton customer={c} ctx={{}} />
-        <Btn size="sm" variant="grey" onClick={() => setShowEdit(true)}><Icon name="edit" size={14} /> Edit</Btn>
+        <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
+        <MessageButton customer={c} ctx={{}} size="md" variant="primary" />
+        {c.phone && <Btn variant="grey" onClick={() => window.location.href = `tel:${c.phone}`}>📞 Call</Btn>}
+        {c.email && <Btn variant="grey" onClick={() => window.location.href = `mailto:${c.email}`}>✉️ Email</Btn>}
         <Btn size="sm" variant="danger" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
       </div>
 
@@ -2907,7 +2907,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B68</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B69</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
