@@ -42,8 +42,8 @@ const STORLOC_KEY = "removals_storage_locs";
 function getStorageLocs() { try { const a = JSON.parse(localStorage.getItem(STORLOC_KEY) || "null"); return Array.isArray(a) && a.length ? a : ["Wild & Lye"]; } catch { return ["Wild & Lye"]; } }
 function saveStorageLocs(a) { try { localStorage.setItem(STORLOC_KEY, JSON.stringify(a && a.length ? a : ["Wild & Lye"])); } catch {} }
 const COND_KEY = "removals_conditions";
-const DEFAULT_CONDITIONS = ["Scratched", "Dented", "Cracked", "Broken", "Torn", "Soiled", "Rusty", "Loose"];
-function getConditions() { try { const a = JSON.parse(localStorage.getItem(COND_KEY) || "null"); return Array.isArray(a) && a.length ? a : DEFAULT_CONDITIONS.slice(); } catch { return DEFAULT_CONDITIONS.slice(); } }
+const DEFAULT_CONDITIONS = ["OK", "Scratched", "Dented", "Cracked", "Broken", "Torn", "Soiled", "Rusty", "Loose"];
+function getConditions() { try { const a = JSON.parse(localStorage.getItem(COND_KEY) || "null"); const list = Array.isArray(a) && a.length ? a.slice() : DEFAULT_CONDITIONS.slice(); if (!list.includes("OK")) list.unshift("OK"); return list; } catch { return DEFAULT_CONDITIONS.slice(); } }
 function saveConditions(a) { try { localStorage.setItem(COND_KEY, JSON.stringify(a && a.length ? a : DEFAULT_CONDITIONS)); } catch {} }
 const POS_KEY = "removals_positions";
 const DEFAULT_POSITIONS = ["Top", "Bottom", "Front", "Back", "Left", "Right", "Top left", "Top right", "Bottom left", "Bottom right", "Front left", "Front right", "Back left", "Back right", "Inside", "All over"];
@@ -2911,7 +2911,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B51</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B52</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3938,7 +3938,9 @@ async function buildStorageIntakePdf(rec, c, data) {
       const qty = Number(it.qty) || 1;
       at(`${qty} x`, M, y, 9.5, bold, navy);
       at(clean(it.name), M + 34, y, 9.5, font, navy);
-      const cp = it.packedBy ? it.packedBy : [it.condition, it.position].filter(Boolean).join(" — ");
+      const condStr = Array.isArray(it.conditions) ? it.conditions.join(", ") : (it.condition || "");
+      const posStr = Array.isArray(it.positions) ? it.positions.join(", ") : (it.position || "");
+      const cp = it.packedBy ? it.packedBy : [condStr, posStr].filter(Boolean).join(" — ");
       if (cp) { const cw = font.widthOfTextAtSize(clean(cp), 9); at(clean(cp), W - M - cw, y, 9, font, grey); }
       y -= 14;
     });
@@ -4024,7 +4026,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
   const [date, setDate] = useState(saved?.date ?? todayISO());
   const [location, setLocation] = useState(saved?.location ?? (getStorageLocs()[0] || "Wild & Lye"));
   const [crew, setCrew] = useState(saved?.crew ?? []);
-  const [containers, setContainers] = useState(saved?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, condition: "", position: "", packedBy: "" }] }]);
+  const [containers, setContainers] = useState(saved?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "" }] }]);
   const [custSig, setCustSig] = useState(saved?.custSig ?? "");
   const [empSig, setEmpSig] = useState(saved?.empSig ?? "");
   const [empName, setEmpName] = useState(saved?.empName ?? "");
@@ -4059,10 +4061,12 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
 
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
   const setContainerNo = (ci, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, number: v } : c));
-  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, condition: "", position: "", packedBy: "" }] }]);
+  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "" }] }]);
   const removeContainer = ci => setContainers(cs => cs.length > 1 ? cs.filter((_, i) => i !== ci) : cs);
-  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, condition: "", position: "" }] } : c));
+  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "" }] } : c));
   const setItem = (ci, ii, field, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: v } : it) } : c));
+  const addTag = (ci, ii, field, val) => { if (!val) return; setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: Array.from(new Set([...(it[field] || []), val])) } : it) } : c)); };
+  const removeTag = (ci, ii, field, val) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: (it[field] || []).filter(x => x !== val) } : it) } : c));
   const removeItem = (ci, ii) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.filter((_, j) => j !== ii) } : c));
   const toggleCrew = name => setCrew(cr => cr.includes(name) ? cr.filter(z => z !== name) : [...cr, name]);
   const addCond = () => { const v = newCond.trim(); if (!v || conds.includes(v)) { setNewCond(""); return; } const nx = [...conds, v]; setConds(nx); saveConditions(nx); setNewCond(""); };
@@ -4075,7 +4079,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
     if (!customerId) { setErr("Please select a customer."); return; }
     const cust = (data.customers || []).find(x => x.id === customerId);
     if (!cust) { setErr("Customer not found."); return; }
-    const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, condition: it.condition || "", position: it.position || "", packedBy: it.packedBy || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
+    const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, conditions: it.conditions || [], positions: it.positions || [], packedBy: it.packedBy || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
     if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy(true);
@@ -4145,14 +4149,28 @@ function StorageIntakeForm({ data, setView, presetCustomerId }) {
                     </select>
                   ) : (
                     <div style={{ display: phone ? "block" : "grid", gridTemplateColumns: phone ? undefined : "1fr 1fr", gap: 8 }}>
-                      <select value={it.condition} onChange={e => setItem(ci, ii, "condition", e.target.value)} style={{ ...selStyle, marginBottom: phone ? 8 : 0 }}>
-                        <option value="">Condition…</option>
-                        {conds.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <select value={it.position} onChange={e => setItem(ci, ii, "position", e.target.value)} style={selStyle}>
-                        <option value="">Position…</option>
-                        {poss.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
+                      <div style={{ marginBottom: phone ? 8 : 0 }}>
+                        {(it.conditions || []).length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 5 }}>
+                            {it.conditions.map(cd => <span key={cd} onClick={() => removeTag(ci, ii, "conditions", cd)} style={{ fontSize: 12, fontWeight: 700, color: "#8A4B12", background: "#FDEBD3", border: "1px solid #F5D6A8", borderRadius: 999, padding: "3px 9px", cursor: "pointer" }}>{cd} ✕</span>)}
+                          </div>
+                        )}
+                        <select value="" onChange={e => { addTag(ci, ii, "conditions", e.target.value); e.target.value = ""; }} style={selStyle}>
+                          <option value="">+ Condition…</option>
+                          {conds.filter(c => !(it.conditions || []).includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        {(it.positions || []).length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 5 }}>
+                            {it.positions.map(ps => <span key={ps} onClick={() => removeTag(ci, ii, "positions", ps)} style={{ fontSize: 12, fontWeight: 700, color: "#374151", background: "#EEF2F1", border: "1px solid #DCE5E3", borderRadius: 999, padding: "3px 9px", cursor: "pointer" }}>{ps} ✕</span>)}
+                          </div>
+                        )}
+                        <select value="" onChange={e => { addTag(ci, ii, "positions", e.target.value); e.target.value = ""; }} style={selStyle}>
+                          <option value="">+ Position…</option>
+                          {poss.filter(p => !(it.positions || []).includes(p)).map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </div>
                     </div>
                   )}
                 </div>
