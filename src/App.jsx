@@ -2679,16 +2679,29 @@ function CustomerDetail({ data, id, setView }) {
             <Btn size="sm" onClick={() => setView({ screen: "storageIntake", customerId: c.id })}>+ New</Btn>
           </div>
           {c.storageInv.slice().reverse().map(rec => (
-            <div key={rec.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 4px", borderBottom: "1px solid #EEF3F2", gap: 10 }}>
-              <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer", flex: 1 }}>
-                <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
-                <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{rec.location || "—"} · {(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
+            <div key={rec.id} style={{ borderBottom: "1px solid #EEF3F2", padding: "4px 0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 4px", gap: 10 }}>
+                <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer", flex: 1 }}>
+                  <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
+                  <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{rec.location || "—"} · {(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
+                </div>
+                <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
+                  <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>
+                  <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
+                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : "PDF"}</span>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
-                <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>
-                <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
-                <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : "PDF"}</span>
-              </div>
+              {(rec.collections || []).length > 0 && (
+                <div style={{ margin: "2px 4px 8px", padding: "8px 10px", background: "#FFFBF2", border: "1px solid #FBE3B3", borderRadius: 8 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "#B45309", marginBottom: 5 }}>Items collected</div>
+                  {rec.collections.slice().reverse().map(col => (
+                    <div key={col.id} style={{ marginBottom: 5 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.sig ? " · signed" : ""}</div>
+                      <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", ") || "—"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </Card>
@@ -2919,7 +2932,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B55</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B56</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
