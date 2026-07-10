@@ -2919,7 +2919,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B64</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B65</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4340,6 +4340,35 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
     at(`${it.qty} x ${clean(it.name)}`, M + 10, y, 9.5, font, navy);
     if (it.container) { const t = `Container ${it.container}`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, font, grey); }
     y -= 14;
+  });
+
+  // Previous collections (everything before this visit)
+  const prev = allC.filter(col => col.id !== collection.id).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  if (prev.length) {
+    y -= 8; newPageIf(50);
+    at("Previous collections", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
+    prev.forEach(col => {
+      newPageIf(24);
+      at(`${col.date ? fmtUK(col.date) : ""}${col.collectedBy ? ` - by ${clean(col.collectedBy)}` : ""}`, M, y, 9, bold, navy); y -= 13;
+      (col.items || []).forEach(it => { newPageIf(12); at(`${it.qty} x ${clean(it.name)}${it.container ? ` (Container ${it.container})` : ""}`, M + 10, y, 8.5, font, grey); y -= 12; });
+      y -= 4;
+    });
+  }
+
+  // What remains in store now (original minus everything collected)
+  const remainByCont = [];
+  (rec.containers || []).forEach(ct => {
+    const rem = (ct.items || []).map(it => ({ name: it.name, qty: Math.max(0, (Number(it.qty) || 0) - collectedInfo(ct.number || "", it.name).qty) })).filter(it => it.qty > 0);
+    if (rem.length) remainByCont.push({ number: ct.number || "", items: rem });
+  });
+  y -= 8; newPageIf(50);
+  at("Left in store", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
+  if (!remainByCont.length) { at("Nothing remaining - all items collected.", M + 10, y, 9.5, font, navy); y -= 14; }
+  remainByCont.forEach(ct => {
+    newPageIf(28);
+    at(`Container ${ct.number || "-"}`, M, y, 10, bold, navy); y -= 14;
+    ct.items.forEach(it => { newPageIf(12); at(`${it.qty} x ${clean(it.name)}`, M + 10, y, 9.5, font, navy); y -= 13; });
+    y -= 5;
   });
 
   y -= 16; newPageIf(120);
