@@ -2702,7 +2702,7 @@ function CustomerDetail({ data, id, setView }) {
                   {rec.collections.slice().reverse().map(col => (
                     <div key={col.id} style={{ marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.sig ? " · signed" : ""}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.collectedBy ? ` · ${col.collectedBy}` : ""}{col.sig ? " · signed" : ""}</div>
                         <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", ") || "—"}</div>
                       </div>
                       {(col.pdfUrl || col.pdf) && <span onClick={() => openCollection(col)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Receipt</span>}
@@ -2940,7 +2940,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B58</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B59</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4304,6 +4304,7 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
   const kv = (label, value) => { at(label, M, y, 9.5, bold, grey); at(value || "-", M + 110, y, 9.5, font, navy); y -= 16; };
   kv("Customer", c?.name || "-");
   kv("Collection date", collection.date ? fmtUK(collection.date) : "-");
+  if (collection.collectedBy) kv("Collected by", collection.collectedBy);
   kv("From inventory", rec.date ? fmtUK(rec.date) + (rec.location ? " - " + rec.location : "") : (rec.location || "-"));
   y -= 4;
 
@@ -4326,7 +4327,7 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
       const col = full ? grey : navy;
       at(label, M + 10, y, 9.5, font, col);
       if (full) { const w = font.widthOfTextAtSize(label, 9.5); page.drawLine({ start: { x: M + 10, y: y + 3 }, end: { x: M + 10 + w, y: y + 3 }, thickness: 0.8, color: amber }); }
-      if (info.qty > 0) { const note = full ? `collected ${info.last ? fmtUK(info.last) : ""}` : `${info.qty} of ${it.qty} collected`; const w = font.widthOfTextAtSize(note, 8.5); at(note, W - M - w, y, 8.5, font, amber); }
+      if (info.qty > 0) { const note = full ? `collected ${info.last ? fmtUK(info.last) : ""}` : `${info.qty} of ${it.qty} collected ${info.last ? fmtUK(info.last) : ""}`; const w = font.widthOfTextAtSize(note, 8.5); at(note, W - M - w, y, 8.5, font, amber); }
       y -= 14;
     });
     y -= 6;
@@ -4348,7 +4349,7 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
   const boxW = 260, boxH = 70;
   page.drawRectangle({ x: M, y: y - boxH, width: boxW, height: boxH, borderColor: grey, borderWidth: 0.7, color: white });
   if (img) { const s = Math.min(boxW - 16, (boxH - 26) * (img.width / img.height)); page.drawImage(img, { x: M + (boxW - s) / 2, y: y - boxH + 22, width: s, height: Math.min(s * (img.height / img.width), boxH - 26) }); }
-  at("Customer signature", M + 4, y - boxH + 8, 8, bold, grey);
+  at(collection.collectedBy ? `Signature - ${clean(collection.collectedBy)}` : "Customer signature", M + 4, y - boxH + 8, 8, bold, grey);
   y -= boxH + 16;
   at(`Generated ${fmtUK(todayISO())} - R&J Removals & Storage`, M, y, 8, font, grey);
 
@@ -4359,6 +4360,7 @@ function PartCollectionForm({ data, setView, recId }) {
   const cust = (data.customers || []).find(c => (c.storageInv || []).some(r => r.id === recId));
   const rec = cust ? (cust.storageInv || []).find(r => r.id === recId) : null;
   const [date, setDate] = useState(todayISO());
+  const [collectedBy, setCollectedBy] = useState("");
   const [taking, setTaking] = useState({});
   const [sig, setSig] = useState("");
   const [signing, setSigning] = useState(false);
@@ -4382,7 +4384,7 @@ function PartCollectionForm({ data, setView, recId }) {
       const take = Number(taking[ci + "_" + ii]) || 0;
       if (take > 0) collItems.push({ container: c.number || "", name: it.name, qty: take });
     }));
-    const collection = { id: uid(), date, sig, items: collItems };
+    const collection = { id: uid(), date, sig, items: collItems, collectedBy: collectedBy.trim() };
     // Separate signed receipt for this collection — the original inventory sheet is left untouched.
     let bytes;
     try {
@@ -4409,6 +4411,7 @@ function PartCollectionForm({ data, setView, recId }) {
 
       <Card>
         <Field label="Collection date"><Input type="date" value={date} onChange={setDate} /></Field>
+        <Field label="Collected by" hint={`Leave blank if collected by ${cust.name}`}><Input value={collectedBy} onChange={setCollectedBy} placeholder={cust.name} /></Field>
       </Card>
 
       {(rec.containers || []).map((c, ci) => (
@@ -4436,7 +4439,7 @@ function PartCollectionForm({ data, setView, recId }) {
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 10 }}>Customer sign-off</div>
         <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>Taking {totalTaking} item{totalTaking !== 1 ? "s" : ""} today.</div>
-        <SigField label="Customer signature" value={sig} onOpen={() => setSigning(true)} />
+        <SigField label={collectedBy.trim() ? `Signature — ${collectedBy.trim()}` : "Customer signature"} value={sig} onOpen={() => setSigning(true)} />
       </Card>
 
       {err && <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
