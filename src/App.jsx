@@ -2633,6 +2633,11 @@ function CustomerDetail({ data, id, setView }) {
     } catch (ex) { alert("Could not open sheet: " + ((ex && ex.message) || ex)); }
     setSheetBusy(false);
   }
+  const openCollection = col => {
+    const openUrl = url => { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); };
+    if (col.pdfUrl) { openUrl(col.pdfUrl); return; }
+    if (col.pdf) { try { const b = atob(col.pdf.split(",")[1]); const arr = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i); const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" })); openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000); } catch {} }
+  };
   if (!c) return <div style={{ padding: 20 }}>Customer not found.</div>;
   const enquiries = (data.enquiries || []).filter(e => e.customerId === id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   const jobs = (data.jobs || []).filter(j => j.customerId === id);
@@ -2695,9 +2700,12 @@ function CustomerDetail({ data, id, setView }) {
                 <div style={{ margin: "2px 4px 8px", padding: "8px 10px", background: "#FFFBF2", border: "1px solid #FBE3B3", borderRadius: 8 }}>
                   <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "#B45309", marginBottom: 5 }}>Items collected</div>
                   {rec.collections.slice().reverse().map(col => (
-                    <div key={col.id} style={{ marginBottom: 5 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.sig ? " · signed" : ""}</div>
-                      <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", ") || "—"}</div>
+                    <div key={col.id} style={{ marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.sig ? " · signed" : ""}</div>
+                        <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", ") || "—"}</div>
+                      </div>
+                      {(col.pdfUrl || col.pdf) && <span onClick={() => openCollection(col)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Receipt</span>}
                     </div>
                   ))}
                 </div>
@@ -2932,7 +2940,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B56</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B57</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4273,6 +4281,51 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId }) {
   );
 }
 
+async function buildCollectionPdf(collection, rec, c, data) {
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const W = 595.28, H = 841.89, M = 44;
+  const teal = rgb(0.055, 0.486, 0.451), navy = rgb(0.059, 0.18, 0.165), grey = rgb(0.42, 0.46, 0.45), white = rgb(1, 1, 1);
+  const clean = s => String(s == null ? "" : s).replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"').replace(/[\u2013\u2014\u2212]/g, "-").replace(/\u2026/g, "...").replace(/\u00A0/g, " ").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
+  let page = pdf.addPage([W, H]); let y = H - M;
+  const at = (t, x, yy, size, f = font, col = navy) => page.drawText(clean(t), { x, y: yy, size, font: f, color: col });
+  const embedSig = async url => { if (!url || url.indexOf("data:image") !== 0) return null; try { const b64 = url.split(",")[1]; const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return await pdf.embedPng(bytes); } catch { return null; } };
+
+  page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
+  at("R&J Removals & Storage", M, H - 34, 16, bold, white);
+  at("Storage — Items Collected by Customer", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
+  const ref = c?.ref ? `Ref ${c.ref}` : "";
+  if (ref) { const w = bold.widthOfTextAtSize(ref, 12); at(ref, W - M - w, H - 40, 12, bold, white); }
+  y = H - 92;
+
+  const kv = (label, value) => { at(label, M, y, 9.5, bold, grey); at(value || "-", M + 110, y, 9.5, font, navy); y -= 16; };
+  kv("Customer", c?.name || "-");
+  kv("Collection date", collection.date ? fmtUK(collection.date) : "-");
+  kv("From inventory", rec.date ? fmtUK(rec.date) + (rec.location ? " · " + rec.location : "") : (rec.location || "-"));
+  y -= 6;
+  at("Items collected", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
+  (collection.items || []).forEach(it => {
+    at(`${it.qty} x`, M, y, 9.5, bold, navy);
+    at(clean(it.name), M + 34, y, 9.5, font, navy);
+    if (it.container) { const t = `Container ${it.container}`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, font, grey); }
+    y -= 15;
+  });
+
+  y -= 20;
+  at("Received the above items in good order.", M, y, 9, font, grey); y -= 26;
+  const img = await embedSig(collection.sig);
+  const boxW = 260, boxH = 70;
+  page.drawRectangle({ x: M, y: y - boxH, width: boxW, height: boxH, borderColor: grey, borderWidth: 0.7, color: white });
+  if (img) { const s = Math.min(boxW - 16, (boxH - 26) * (img.width / img.height)); page.drawImage(img, { x: M + (boxW - s) / 2, y: y - boxH + 22, width: s, height: Math.min(s * (img.height / img.width), boxH - 26) }); }
+  at("Customer signature", M + 4, y - boxH + 8, 8, bold, grey);
+  y -= boxH + 16;
+  at(`Generated ${fmtUK(todayISO())} · R&J Removals & Storage`, M, y, 8, font, grey);
+
+  return await pdf.save();
+}
+
 function PartCollectionForm({ data, setView, recId }) {
   const cust = (data.customers || []).find(c => (c.storageInv || []).some(r => r.id === recId));
   const rec = cust ? (cust.storageInv || []).find(r => r.id === recId) : null;
@@ -4286,6 +4339,9 @@ function PartCollectionForm({ data, setView, recId }) {
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
   const setTake = (k, val, max) => setTaking(p => ({ ...p, [k]: Math.max(0, Math.min(Number(max) || 0, Math.floor(Number(val) || 0))) }));
   const totalTaking = Object.values(taking).reduce((a, b) => a + (Number(b) || 0), 0);
+  // How many of an item are still in store = original qty minus everything already collected.
+  const collectedQty = (containerNo, name) => (rec.collections || []).reduce((n, col) => n + (col.items || []).filter(ci => ci.container === containerNo && ci.name === name).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
+  const available = (containerNo, it) => Math.max(0, (Number(it.qty) || 0) - collectedQty(containerNo, it.name));
 
   async function save() {
     setErr("");
@@ -4293,27 +4349,26 @@ function PartCollectionForm({ data, setView, recId }) {
     if (!sig) { setErr("Please capture the customer's signature."); return; }
     setBusy(true);
     const collItems = [];
-    const newContainers = (rec.containers || []).map((c, ci) => ({
-      ...c,
-      items: (c.items || []).map((it, ii) => {
-        const k = ci + "_" + ii; const take = Number(taking[k]) || 0;
-        if (take > 0) collItems.push({ container: c.number || "", name: it.name, qty: take });
-        return { ...it, qty: Math.max(0, (Number(it.qty) || 0) - take) };
-      }).filter(it => (Number(it.qty) || 0) > 0),
+    (rec.containers || []).forEach((c, ci) => (c.items || []).forEach((it, ii) => {
+      const take = Number(taking[ci + "_" + ii]) || 0;
+      if (take > 0) collItems.push({ container: c.number || "", name: it.name, qty: take });
     }));
     const collection = { id: uid(), date, sig, items: collItems };
-    const newRec = { ...rec, containers: newContainers, collections: [...(rec.collections || []), collection] };
+    // Separate signed receipt for this collection — the original inventory sheet is left untouched.
     let bytes;
     try {
-      ({ bytes } = await buildStorageIntakePdf(newRec, cust, data));
-      const file = new File([bytes], `Storage-${cust.ref || "RJ"}-${rec.date || "sheet"}.pdf`, { type: "application/pdf" });
+      bytes = await buildCollectionPdf(collection, rec, cust, data);
+      const file = new File([bytes], `Collection-${cust.ref || "RJ"}-${date}.pdf`, { type: "application/pdf" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: "Storage — items collected" }); } catch (_e) {} }
+      else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
     } catch (ex) { setErr("PDF failed: " + ((ex && ex.message) || ex)); setBusy(false); return; }
-    try { newRec.pdfUrl = await uploadStorageSheet(`${cust.id}/${rec.id}.pdf`, bytes); }
-    catch { try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); newRec.pdf = "data:application/pdf;base64," + btoa(bin); } catch {} }
+    try { collection.pdfUrl = await uploadStorageSheet(`${cust.id}/collection-${collection.id}.pdf`, bytes); }
+    catch { try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); collection.pdf = "data:application/pdf;base64," + btoa(bin); } catch {} }
+    const newRec = { ...rec, collections: [...(rec.collections || []), collection] }; // original containers + signatures preserved
     const list = (cust.storageInv || []).map(r => r.id === rec.id ? newRec : r);
-    const remaining = newContainers.reduce((n, c) => n + (c.items || []).reduce((m, it) => m + (Number(it.qty) || 0), 0), 0);
-    const storage = remaining === 0 ? { ...(cust.storage || {}), inStore: false, dateOut: date } : (cust.storage || {});
+    const totalOrig = (rec.containers || []).reduce((n, c) => n + (c.items || []).reduce((m, it) => m + (Number(it.qty) || 0), 0), 0);
+    const totalColl = (newRec.collections || []).reduce((n, col) => n + (col.items || []).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
+    const storage = (totalOrig - totalColl) <= 0 ? { ...(cust.storage || {}), inStore: false, dateOut: date } : (cust.storage || {});
     await saveAndReload(upsertLocal(data, "customers", { ...cust, storageInv: list, storage }));
   }
 
@@ -4332,16 +4387,16 @@ function PartCollectionForm({ data, setView, recId }) {
           <div style={{ fontWeight: 800, color: "#10211E", marginBottom: 8 }}>Container {c.number || "—"}</div>
           {(c.items || []).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Empty</div>}
           {(c.items || []).map((it, ii) => {
-            const k = ci + "_" + ii; const max = Number(it.qty) || 0;
+            const k = ci + "_" + ii; const max = available(c.number || "", it);
             return (
-              <div key={ii} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #F0F4F3" }}>
+              <div key={ii} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #F0F4F3", opacity: max === 0 ? 0.5 : 1 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 14, color: "#10211E" }}>{it.name}</div>
-                  <div style={{ fontSize: 12, color: "#94A4A0" }}>{max} in store</div>
+                  <div style={{ fontSize: 12, color: "#94A4A0" }}>{max} in store{max !== (Number(it.qty) || 0) ? ` (of ${Number(it.qty) || 0})` : ""}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                   <span style={{ fontSize: 12, color: "#6A7B77" }}>take</span>
-                  <input type="number" inputMode="numeric" value={taking[k] || ""} placeholder="0" onChange={e => setTake(k, e.target.value, max)} style={{ ...inp, width: 64, textAlign: "center", padding: "8px 4px" }} />
+                  <input type="number" inputMode="numeric" disabled={max === 0} value={taking[k] || ""} placeholder="0" onChange={e => setTake(k, e.target.value, max)} style={{ ...inp, width: 64, textAlign: "center", padding: "8px 4px" }} />
                 </div>
               </div>
             );
