@@ -3026,7 +3026,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B76</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B77</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4647,14 +4647,11 @@ function PartCollectionForm({ data, setView, recId }) {
 function StorageJobForm({ data, customer, job, onClose }) {
   const isNew = !job;
   const [f, setF] = useState(() => job
-    ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "", containers: job.containers ?? "", containerNos: job.containerNos || [], looseItems: !!job.looseItems, looseNote: job.looseNote || "" }
-    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: todayISO(), dateOut: "", containers: "", containerNos: [], looseItems: false, looseNote: "" });
+    ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "" }
+    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: todayISO(), dateOut: "" });
   const [locs, setLocs] = useState(getStorageLocs);
   const [newLoc, setNewLoc] = useState("");
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  const cn = Math.max(0, Math.min(50, parseInt(f.containers, 10) || 0));
-  const setContainers = v => setF(p => { const n = Math.max(0, Math.min(50, parseInt(v, 10) || 0)); const nos = (p.containerNos || []).slice(0, n); while (nos.length < n) nos.push(""); return { ...p, containers: v, containerNos: nos }; });
-  const setContainerNo = (i, v) => setF(p => { const nos = (p.containerNos || []).slice(); nos[i] = v; return { ...p, containerNos: nos }; });
   const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); set("location", v); setNewLoc(""); };
 
   async function save() {
