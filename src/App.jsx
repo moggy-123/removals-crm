@@ -2930,7 +2930,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B70</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B71</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4366,6 +4366,7 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
     if (it.container) { const t = `Container ${it.container}`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, font, grey); }
     y -= 14;
   });
+  if (collection.looseCollected || collection.looseAll) { newPageIf(14); at(`Loose items: ${clean(collection.looseCollected || (collection.looseAll ? "all loose items" : ""))}`, M + 10, y, 9.5, font, navy); y -= 14; }
 
   // Previous collections (everything before this visit)
   const prev = allC.filter(col => col.id !== collection.id).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -4376,6 +4377,7 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
       newPageIf(24);
       at(`${col.date ? fmtUK(col.date) : ""}${col.collectedBy ? ` - by ${clean(col.collectedBy)}` : ""}`, M, y, 9, bold, navy); y -= 13;
       (col.items || []).forEach(it => { newPageIf(12); at(`${it.qty} x ${clean(it.name)}${it.container ? ` (Container ${it.container})` : ""}`, M + 10, y, 8.5, font, grey); y -= 12; });
+      if (col.looseCollected || col.looseAll) { newPageIf(12); at(`Loose: ${clean(col.looseCollected || "all loose items")}`, M + 10, y, 8.5, font, grey); y -= 12; }
       y -= 4;
     });
   }
@@ -4388,13 +4390,15 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
   });
   y -= 8; newPageIf(50);
   at("Left in store", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
-  if (!remainByCont.length) { at("Nothing remaining - all items collected.", M + 10, y, 9.5, font, navy); y -= 14; }
+  const looseLeft = !!rec.looseItems && !allC.some(col => col.looseAll);
+  if (!remainByCont.length && !looseLeft) { at("Nothing remaining - all items collected.", M + 10, y, 9.5, font, navy); y -= 14; }
   remainByCont.forEach(ct => {
     newPageIf(28);
     at(`Container ${ct.number || "-"}`, M, y, 10, bold, navy); y -= 14;
     ct.items.forEach(it => { newPageIf(12); at(`${it.qty} x ${clean(it.name)}`, M + 10, y, 9.5, font, navy); y -= 13; });
     y -= 5;
   });
+  if (looseLeft) { newPageIf(16); at(`Loose items: ${clean(rec.looseNote || "Yes")}`, M + 10, y, 9.5, font, navy); y -= 14; }
 
   y -= 16; newPageIf(120);
   at("Received the above items in good order.", M, y, 9, font, grey); y -= 26;
@@ -4415,6 +4419,8 @@ function PartCollectionForm({ data, setView, recId }) {
   const [date, setDate] = useState(todayISO());
   const [collectedBy, setCollectedBy] = useState("");
   const [taking, setTaking] = useState({});
+  const [looseCollected, setLooseCollected] = useState("");
+  const [looseAll, setLooseAll] = useState(false);
   const [sig, setSig] = useState("");
   const [signing, setSigning] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -4423,13 +4429,16 @@ function PartCollectionForm({ data, setView, recId }) {
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
   const setTake = (k, val, max) => setTaking(p => ({ ...p, [k]: Math.max(0, Math.min(Number(max) || 0, Math.floor(Number(val) || 0))) }));
   const totalTaking = Object.values(taking).reduce((a, b) => a + (Number(b) || 0), 0);
+  // Are there still loose items in store? (none of the prior collections cleared them)
+  const looseRemains = !!rec.looseItems && !(rec.collections || []).some(col => col.looseAll);
   // How many of an item are still in store = original qty minus everything already collected.
   const collectedQty = (containerNo, name) => (rec.collections || []).reduce((n, col) => n + (col.items || []).filter(ci => ci.container === containerNo && ci.name === name).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
   const available = (containerNo, it) => Math.max(0, (Number(it.qty) || 0) - collectedQty(containerNo, it.name));
 
   async function save() {
     setErr("");
-    if (totalTaking <= 0) { setErr("Enter a quantity for at least one item being collected."); return; }
+    const looseTaken = looseCollected.trim() || looseAll;
+    if (totalTaking <= 0 && !looseTaken) { setErr("Enter a quantity for at least one item, or record loose items being collected."); return; }
     if (!sig) { setErr("Please capture the customer's signature."); return; }
     setBusy(true);
     const collItems = [];
@@ -4437,7 +4446,7 @@ function PartCollectionForm({ data, setView, recId }) {
       const take = Number(taking[ci + "_" + ii]) || 0;
       if (take > 0) collItems.push({ container: c.number || "", name: it.name, qty: take });
     }));
-    const collection = { id: uid(), date, sig, items: collItems, collectedBy: collectedBy.trim() };
+    const collection = { id: uid(), date, sig, items: collItems, collectedBy: collectedBy.trim(), looseCollected: looseCollected.trim(), looseAll: !!looseAll };
     // Separate signed receipt for this collection — the original inventory sheet is left untouched.
     let bytes;
     try {
@@ -4486,9 +4495,21 @@ function PartCollectionForm({ data, setView, recId }) {
         </Card>
       ))}
 
+      {looseRemains && (
+        <Card style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Loose items</div>
+          <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 10 }}>In store: {rec.looseNote || "Loose items"}</div>
+          <Field label="Loose items collected this visit" hint="Type what's being taken"><Textarea value={looseCollected} onChange={setLooseCollected} placeholder="e.g. Bike, garden bench" /></Field>
+          <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontSize: 13.5, color: "#374151", marginTop: 4 }}>
+            <input type="checkbox" checked={looseAll} onChange={e => setLooseAll(e.target.checked)} style={{ width: 17, height: 17, accentColor: TEAL }} />
+            All loose items now collected (none left in store)
+          </label>
+        </Card>
+      )}
+
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 10 }}>Customer sign-off</div>
-        <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>Taking {totalTaking} item{totalTaking !== 1 ? "s" : ""} today.</div>
+        <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>Taking {totalTaking} item{totalTaking !== 1 ? "s" : ""}{(looseCollected.trim() || looseAll) ? " + loose items" : ""} today.</div>
         <SigField label={collectedBy.trim() ? `Signature — ${collectedBy.trim()}` : "Customer signature"} value={sig} onOpen={() => setSigning(true)} />
       </Card>
 
@@ -4621,7 +4642,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
                     <div key={col.id} style={{ marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.collectedBy ? ` · ${col.collectedBy}` : ""}{col.sig ? " · signed" : ""}</div>
-                        <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", ") || "—"}</div>
+                        <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{[(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", "), (col.looseCollected || (col.looseAll ? "all loose items" : "")) ? `loose: ${col.looseCollected || "all"}` : ""].filter(Boolean).join(" · ") || "—"}</div>
                       </div>
                       {(col.pdfUrl || col.pdf) && <span onClick={() => openCollection(col)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Receipt</span>}
                     </div>
