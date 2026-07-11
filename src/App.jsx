@@ -144,6 +144,11 @@ function isoAdd(iso, { days = 0, weeks = 0, months = 0 }) {
 function nextService(m) { return m && m.serviceLast && m.serviceWeeks ? isoAdd(m.serviceLast, { weeks: Number(m.serviceWeeks) || 0 }) : ""; }
 function nextMOT(m) { return m && m.motLast ? isoAdd(m.motLast, { months: 12 }) : ""; }
 function nextTacho(m) { return m && m.tachoLast ? isoAdd(m.tachoLast, { months: 24 }) : ""; }
+function storeSummary(e) {
+  if (!e || !e.toStore) return "";
+  if (e.storeMode === "Fixed date out") return e.storeOutDate ? `Into store until ${fmtUK(e.storeOutDate)}` : "Into store";
+  const q = e.storeQty; return q ? `Into store for ${q} ${e.storeMode}` : `Into store (${(e.storeMode || "").toLowerCase()})`;
+}
 // Snap a date to the nearest given weekday (0=Sun..6=Sat), within ±3 days.
 function nearestDow(iso, target) {
   const d = new Date(iso + "T00:00"); if (isNaN(d)) return iso;
@@ -975,6 +980,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     fromAddress1: e.fromAddress1 || "", fromAddress2: e.fromAddress2 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
     fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
     toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
+    toStore: !!e.toStore, storeMode: e.storeMode || "Weeks", storeQty: e.storeQty ?? "", storeOutDate: e.storeOutDate || "",
     toPropertyType: e.toPropertyType || "", toFloor: e.toFloor || "", toAccess: e.toAccess || "",
     notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
     surveyor: e.surveyor || "",
@@ -1117,7 +1123,22 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
       </div>
       <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={f.fromAccess} onChange={v => set("fromAccess", v)} rows={2} /></Field>
 
-      <SectionTitle>Moving to</SectionTitle>
+      <div style={{ marginTop: 4, marginBottom: 4, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontSize: 15, fontWeight: 700, color: "#10211E" }}>
+          <input type="checkbox" checked={!!f.toStore} onChange={e2 => set("toStore", e2.target.checked)} style={{ width: 18, height: 18, accentColor: TEAL }} />
+          Moving into store
+        </label>
+        {f.toStore && (
+          <div style={{ marginTop: 10 }}>
+            <Field label="How long in store?"><Select value={f.storeMode} onChange={v => set("storeMode", v)} options={["Days", "Weeks", "Months", "Years", "Fixed date out"]} /></Field>
+            {f.storeMode === "Fixed date out"
+              ? <Field label="Date out of store"><Input type="date" value={f.storeOutDate} onChange={v => set("storeOutDate", v)} /></Field>
+              : <Field label={`Number of ${(f.storeMode || "weeks").toLowerCase()}`}><Input type="number" inputMode="numeric" value={f.storeQty} onChange={v => set("storeQty", v)} placeholder="e.g. 3" /></Field>}
+          </div>
+        )}
+      </div>
+
+      <SectionTitle>{f.toStore ? "Moving to (or store address)" : "Moving to"}</SectionTitle>
       <Field label="Address"><Input value={f.toAddress1} onChange={v => set("toAddress1", v)} placeholder="House/flat & street" /></Field>
       <Field label="Address line 2"><Input value={f.toAddress2} onChange={v => set("toAddress2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
@@ -2123,6 +2144,7 @@ async function buildSurveyPdf(e, c, data, forStaff = false) {
   };
   kv("Moving from", fromAddr);
   kv("Moving to", toAddr);
+  if (storeSummary(e)) kv("Storage", storeSummary(e));
 
   if (e.fromAccess || e.toAccess) {
     heading("Access — please read");
@@ -2381,16 +2403,16 @@ function EnquiryDetail({ data, id, setView }) {
 
   return (
     <div>
-      <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiries" })}><Icon name="back" size={14} /> Back</Btn>
+      <button onClick={() => setView({ screen: "enquiries" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "9px 14px", fontSize: 14.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 4px" }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, e.customerId)}</h2>
         <StatusBadge status={e.status} />
       </div>
       {customer && (
         <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          {customer.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
-          {customer.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
-          <MessageButton customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />
+          {customer.phone && <Btn variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
+          {customer.email && <Btn variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
+          <MessageButton size="md" variant="primary" customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />
         </div>
       )}
 
@@ -2399,6 +2421,7 @@ function EnquiryDetail({ data, id, setView }) {
         <Row label="From" value={[e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join(", ")} />
         <Row label="From property" value={[e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.fromFloor].filter(Boolean).join(" · ")} />
         {e.fromAccess && <Row label="From access" value={e.fromAccess} />}
+        {storeSummary(e) && <Row label="Storage" value={storeSummary(e)} />}
         <Row label="To" value={[e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join(", ")} />
         <Row label="To property" value={[e.toPropertyType, e.toFloor].filter(Boolean).join(" · ")} />
         {e.toAccess && <Row label="To access" value={e.toAccess} />}
@@ -2491,9 +2514,9 @@ function EnquiryDetail({ data, id, setView }) {
         {e.status === "Won" && linkedJob && <Btn variant="grey" style={{ flex: 1 }} onClick={() => setShowMove(true)}>Manage move</Btn>}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-        <Btn variant="grey" size="sm" onClick={() => setShowEdit(true)}><Icon name="edit" size={14} /> Edit</Btn>
-        <Btn variant="grey" size="sm" onClick={setFollowUp}>⏰ Follow-up</Btn>
-        {!["Won", "Lost"].includes(e.status) && <Btn variant="grey" size="sm" onClick={markLost}>Mark Lost</Btn>}
+        <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
+        <Btn variant="grey" onClick={setFollowUp}>⏰ Follow-up</Btn>
+        {!["Won", "Lost"].includes(e.status) && <Btn variant="grey" onClick={markLost}>Mark Lost</Btn>}
         <Btn variant="danger" size="sm" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
       </div>
 
@@ -2907,7 +2930,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B69</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B70</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3270,7 +3293,7 @@ function JobDetail({ data, id, setView }) {
 
   return (
     <div>
-      <Btn variant="ghost" size="sm" onClick={() => setView({ screen: "enquiries", filter: "Won" })}><Icon name="back" size={14} /> Back</Btn>
+      <button onClick={() => setView({ screen: "enquiries", filter: "Won" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "9px 14px", fontSize: 14.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 8px" }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D, letterSpacing: ".02em" }}>{moveRef(data, j)}</div>
@@ -3280,9 +3303,9 @@ function JobDetail({ data, id, setView }) {
       </div>
       {customer && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {customer.phone && <Btn size="sm" variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
-          {customer.email && <Btn size="sm" variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
-          <MessageButton customer={customer} ctx={{ ref: moveRef(data, j), date: j.moveDate ? fmtDate(j.moveDate) : "", time: (jobStages(j)[0]?.time) || j.startTime || "", price: gbp(j.price), deposit: gbp(j.deposit), balance: gbp((Number(j.price) || 0) - (Number(j.deposit) || 0)) }} />
+          {customer.phone && <Btn variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
+          {customer.email && <Btn variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
+          <MessageButton size="md" variant="primary" customer={customer} ctx={{ ref: moveRef(data, j), date: j.moveDate ? fmtDate(j.moveDate) : "", time: (jobStages(j)[0]?.time) || j.startTime || "", price: gbp(j.price), deposit: gbp(j.deposit), balance: gbp((Number(j.price) || 0) - (Number(j.deposit) || 0)) }} />
           {j.enquiryId && <Btn size="sm" variant="grey" onClick={() => setView({ screen: "enquiryDetail", id: j.enquiryId })}>View enquiry</Btn>}
         </div>
       )}
