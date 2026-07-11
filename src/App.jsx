@@ -2430,7 +2430,7 @@ function EnquiryDetail({ data, id, setView }) {
 
   return (
     <div>
-      <button onClick={() => setView({ screen: "enquiries" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "9px 14px", fontSize: 14.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
+      <button onClick={() => setView({ screen: "enquiries" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "10px 16px", fontSize: 15.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 4px" }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, e.customerId)}</h2>
         <StatusBadge status={e.status} />
@@ -2737,7 +2737,7 @@ function CustomerDetail({ data, id, setView }) {
   }
   return (
     <div>
-      <button onClick={() => setView({ screen: "customers" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "9px 14px", fontSize: 14.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
+      <button onClick={() => setView({ screen: "customers" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "10px 16px", fontSize: 15.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0" }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D }}>#{c.ref} </span> : ""}{c.name}</h2>
         <StatusBadge status={c.custType} />
@@ -3026,7 +3026,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B77</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B78</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3389,7 +3389,7 @@ function JobDetail({ data, id, setView }) {
 
   return (
     <div>
-      <button onClick={() => setView({ screen: "enquiries", filter: "Won" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "9px 14px", fontSize: 14.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
+      <button onClick={() => setView({ screen: "enquiries", filter: "Won" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "10px 16px", fontSize: 15.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 8px" }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D, letterSpacing: ".02em" }}>{moveRef(data, j)}</div>
@@ -3491,9 +3491,9 @@ function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"a
 function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
   const [mode, setMode] = useState(initialMode || "agenda");
   const [show, setShow] = useState(initialShow || "all");
-  const showMoves = show !== "surveys";
-  const showSurveys = show !== "moves";
-  const [showVeh, setShowVeh] = useState(true);
+  const showMoves = show === "all" || show === "moves";
+  const showSurveys = show === "all" || show === "surveys";
+  const showVeh = show === "all" || show === "servicing";
   const [anchor, setAnchor] = useState(() => initialDate ? new Date(initialDate + "T00:00") : new Date());
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
@@ -3607,8 +3607,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, background: "#E9EDEC", borderRadius: 14, padding: 4, marginBottom: 14 }}>
-        {[["all", "All"], ["moves", "Moves"], ["surveys", "Surveys"]].map(([v, label]) => (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4, background: "#E9EDEC", borderRadius: 14, padding: 4, marginBottom: 14 }}>
+        {[["all", "All"], ["moves", "Moves"], ["surveys", "Surveys"], ["servicing", "🔧"]].map(([v, label]) => (
           <button key={v} onClick={() => setShow(v)} style={{
             border: "none", borderRadius: 10, padding: "9px 4px", fontSize: 13.5, cursor: "pointer",
             fontWeight: show === v ? 700 : 600, transition: "all .15s",
@@ -3617,12 +3617,6 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
             boxShadow: show === v ? "0 1px 4px rgba(15,46,42,.12)" : "none",
           }}>{label}</button>
         ))}
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
-        <button onClick={() => setShowVeh(s => !s)} style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${showVeh ? "#B7C6D6" : "#E1E7E6"}`, background: showVeh ? "#EEF2F7" : "#fff", color: showVeh ? "#475569" : "#9CA3AF", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
-          🔧 Vehicle servicing {showVeh ? "on" : "off"}
-        </button>
       </div>
 
       {showVeh && (() => {
@@ -4264,7 +4258,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
-      <button onClick={leave} style={{ background: "none", border: "none", color: TEAL, fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 6 }}>‹ Back</button>
+      <button onClick={leave} style={{ display: "inline-flex", alignItems: "center", background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Back</button>
       <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{editRec ? "Edit storage inventory" : "New storage inventory"}</h2>
 
       <Card>
@@ -4570,12 +4564,22 @@ function PartCollectionForm({ data, setView, recId }) {
     catch { try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); collection.pdf = "data:application/pdf;base64," + btoa(bin); } catch {} }
     const newRec = { ...rec, collections: [...(rec.collections || []), collection] }; // original containers + signatures preserved
     const list = (cust.storageInv || []).map(r => r.id === rec.id ? newRec : r);
-    await saveAndReload(upsertLocal(data, "customers", { ...cust, storageInv: list }));
+    // Work out if anything is still in store for this inventory.
+    const collForItem = (containerNo, name) => (newRec.collections || []).reduce((n, col) => n + (col.items || []).filter(ci => ci.container === containerNo && ci.name === name).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
+    let remaining = 0;
+    (newRec.containers || []).forEach(cc => (cc.items || []).forEach(it => { remaining += Math.max(0, (Number(it.qty) || 0) - collForItem(cc.number || "", it.name)); }));
+    (Array.isArray(newRec.looseList) ? newRec.looseList : []).forEach(li => { const col = (newRec.collections || []).reduce((n, c) => n + (c.looseItems || []).filter(x => x.name === li.name).reduce((m, x) => m + (Number(x.qty) || 0), 0), 0); remaining += Math.max(0, (Number(li.qty) || 0) - col); });
+    const updated = { ...cust, storageInv: list };
+    if (remaining === 0 && rec.jobId && confirm("Nothing left in store for this inventory. Mark the storage job out of store?")) {
+      updated.storageJobs = getStorageJobs(cust).map(j => j.id === rec.jobId ? { ...j, dateOut: date, inStore: false } : j);
+      updated.storage = null;
+    }
+    await saveAndReload(upsertLocal(data, "customers", updated));
   }
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
-      <button onClick={() => setView({ screen: "customerDetail", id: cust.id })} style={{ background: "none", border: "none", color: TEAL, fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 6 }}>‹ Back</button>
+      <button onClick={() => setView({ screen: "customerDetail", id: cust.id })} style={{ display: "inline-flex", alignItems: "center", background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Back</button>
       <h2 style={{ margin: "0 0 2px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Items collected by customer</h2>
       <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 14 }}>{cust.name} · sheet {rec.date ? fmtUK(rec.date) : ""}</div>
 
@@ -4711,7 +4715,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
-      <button onClick={() => setView({ screen: "storage" })} style={{ background: "none", border: "none", color: TEAL, fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 6 }}>‹ Storage</button>
+      <button onClick={() => setView({ screen: "storage" })} style={{ display: "inline-flex", alignItems: "center", background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Storage</button>
       <h2 style={{ margin: "0 0 2px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{job ? (job.location || "Storage job") : "Storage job"}</h2>
       <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 14 }} onClick={() => setView({ screen: "customerDetail", id: c.id })}>{c.ref ? `#${c.ref} · ` : ""}<span style={{ color: TEAL, fontWeight: 700 }}>{c.name}</span></div>
 
@@ -4728,6 +4732,11 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
             {job.dateIn ? `In ${fmtUK(job.dateIn)}` : ""}{job.dateOut ? ` · Out ${fmtUK(job.dateOut)}` : ""}{jobContainerCount(c, job) ? ` · ${jobContainerCount(c, job)} container${jobContainerCount(c, job) != 1 ? "s" : ""}` : ""}{jobContainerNos(c, job).length ? ` (${jobContainerNos(c, job).join(", ")})` : ""}
           </div>
           {jobLoose(c, job).any && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {jobLoose(c, job).notes.join("; ") || "Yes"}</div>}
+          <div style={{ marginTop: 10 }}>
+            {jobInStore(job)
+              ? <Btn size="sm" variant="grey" onClick={async () => { if (!confirm("Mark this storage job out of store (today)?")) return; const jobs = getStorageJobs(c).map(j => j.id === job.id ? { ...j, dateOut: todayISO(), inStore: false } : j); await saveAndReload(upsertLocal(data, "customers", { ...c, storageJobs: jobs, storage: null })); }}>Mark out of store</Btn>
+              : <Btn size="sm" variant="grey" onClick={async () => { const jobs = getStorageJobs(c).map(j => j.id === job.id ? { ...j, dateOut: "", inStore: true } : j); await saveAndReload(upsertLocal(data, "customers", { ...c, storageJobs: jobs, storage: null })); }}>Mark back in store</Btn>}
+          </div>
         </Card>
       )}
       {editing && job && <StorageJobForm data={data} customer={c} job={job} onClose={() => setEditing(false)} />}
