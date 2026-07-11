@@ -2655,32 +2655,43 @@ function CustomerForm({ data, onClose, editCustomer }) {
   );
 }
 
-function CommLogForm({ data, customer, onClose }) {
+function CommLogForm({ data, customer, entry, preset, onClose }) {
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
-  const [type, setType] = useState("Call");
-  const [direction, setDirection] = useState("out");
-  const [note, setNote] = useState("");
-  const [date, setDate] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
-  const [time, setTime] = useState(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
+  const [type, setType] = useState(entry?.type || preset?.type || "Call");
+  const [direction, setDirection] = useState(entry?.direction || preset?.direction || "out");
+  const [note, setNote] = useState(entry?.note || "");
+  const [date, setDate] = useState(entry?.at ? entry.at.slice(0, 10) : `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+  const [time, setTime] = useState(entry?.at ? entry.at.slice(11, 16) : `${pad(now.getHours())}:${pad(now.getMinutes())}`);
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
+  const paste = async () => { try { const t = await navigator.clipboard.readText(); if (t) setNote(n => n ? n + "\n" + t : t); else alert("Clipboard is empty."); } catch { alert("Couldn't read the clipboard — please paste into the box manually."); } };
   async function save() {
     let at; try { at = new Date(`${date}T${time || "00:00"}`).toISOString(); } catch { at = new Date().toISOString(); }
-    const entry = { id: uid(), at, type, direction, note: note.trim() };
-    await saveAndReload(upsertLocal(data, "customers", { ...customer, comms: [...(customer.comms || []), entry] }));
+    const rec = { id: entry?.id || uid(), at, type, direction, note: note.trim() };
+    const comms = entry ? (customer.comms || []).map(x => x.id === rec.id ? rec : x) : [...(customer.comms || []), rec];
+    await saveAndReload(upsertLocal(data, "customers", { ...customer, comms }));
+  }
+  async function del() {
+    if (!confirm("Delete this log entry?")) return;
+    await saveAndReload(upsertLocal(data, "customers", { ...customer, comms: (customer.comms || []).filter(x => x.id !== entry.id) }));
   }
   return (
-    <Modal title="Log communication" onClose={onClose}>
+    <Modal title={entry ? "Edit log entry" : (preset ? "Paste reply" : "Log communication")} onClose={onClose}>
       <Field label="Type"><Select value={type} onChange={setType} options={["Call", "Text", "WhatsApp", "Email", "Note"]} /></Field>
       <Field label="Direction"><Select value={direction === "out" ? "Outbound" : "Inbound"} onChange={v => setDirection(v === "Outbound" ? "out" : "in")} options={["Outbound", "Inbound"]} /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field></div>
         <div style={{ width: 120 }}><Field label="Time"><input type="time" value={time} onChange={e => setTime(e.target.value)} style={inp} /></Field></div>
       </div>
-      <Field label="Message / notes"><Textarea value={note} onChange={setNote} placeholder="What was said / sent" /></Field>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>{type === "Call" ? "Description of call" : "Message / notes"}</div>
+        <button onClick={paste} style={{ background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: NAVY, cursor: "pointer" }}>📋 Paste from clipboard</button>
+      </div>
+      <Textarea value={note} onChange={setNote} placeholder={type === "Call" ? "What was discussed on the call" : "What was said / sent"} />
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        {entry && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
-        <Btn style={{ flex: 2 }} onClick={save}>Save to log</Btn>
+        <Btn style={{ flex: 2 }} onClick={save}>{entry ? "Save" : "Save to log"}</Btn>
       </div>
     </Modal>
   );
@@ -2807,12 +2818,15 @@ function CustomerDetail({ data, id, setView }) {
       )}
       {showEdit && <CustomerForm data={data} editCustomer={c} onClose={() => setShowEdit(false)} />}
       {jobForm && <StorageJobForm data={data} customer={c} job={jobForm === "new" ? null : jobForm} onClose={() => setJobForm(null)} />}
-      {commForm && <CommLogForm data={data} customer={c} onClose={() => setCommForm(false)} />}
+      {commForm && <CommLogForm data={data} customer={c} entry={commForm.entry} preset={commForm.preset} onClose={() => setCommForm(null)} />}
 
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: (c.comms || []).length ? 8 : 0 }}>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Communication log</div>
-          <Btn size="sm" variant="grey" onClick={() => setCommForm(true)}>+ Log</Btn>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn size="sm" variant="grey" onClick={() => setCommForm({ preset: { direction: "in", type: "WhatsApp" } })}>📋 Paste reply</Btn>
+            <Btn size="sm" variant="grey" onClick={() => setCommForm({})}>+ Log</Btn>
+          </div>
         </div>
         {(c.comms || []).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 8 }}>No communications logged.</div>}
         {(c.comms || []).slice().sort((a, b) => (b.at || "").localeCompare(a.at || "")).map(cm => {
@@ -2820,12 +2834,12 @@ function CustomerDetail({ data, id, setView }) {
           const dt = cm.at ? new Date(cm.at) : null;
           const when = dt && !isNaN(dt) ? `${fmtUK(cm.at.slice(0, 10))} ${cm.at.slice(11, 16)}` : "";
           return (
-            <div key={cm.id} style={{ padding: "8px 0", borderBottom: "1px solid #F0F4F3" }}>
+            <div key={cm.id} onClick={() => setCommForm({ entry: cm })} style={{ padding: "8px 0", borderBottom: "1px solid #F0F4F3", cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontWeight: 700, color: "#10211E", fontSize: 13.5 }}>{icon} {cm.type}<span style={{ color: "#9CA3AF", fontWeight: 600 }}> · {cm.direction === "in" ? "in" : "out"}</span></div>
                 <div style={{ fontSize: 12, color: "#6A7B77" }}>{when}</div>
               </div>
-              {cm.note && <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2, whiteSpace: "pre-wrap" }}>{cm.note}</div>}
+              {cm.note ? <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2, whiteSpace: "pre-wrap" }}>{cm.note}</div> : (cm.type === "Call" ? <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>Tap to add a description</div> : null)}
             </div>
           );
         })}
@@ -3012,7 +3026,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B75</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B76</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
