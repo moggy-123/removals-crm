@@ -341,6 +341,19 @@ async function pushChangedOnly(data) {
 }
 
 // Replace or insert a record into the right table, return new data object
+// Append a communication (call/text/whatsapp/email) to a customer's log without a full reload.
+function logComm(customerId, entry) {
+  try {
+    const d = loadData();
+    const cust = (d.customers || []).find(x => x.id === customerId);
+    if (!cust) return;
+    const comms = [...(cust.comms || []), { id: uid(), at: new Date().toISOString(), direction: "out", note: "", ...entry }];
+    const d2 = upsertLocal(d, "customers", { ...cust, comms, updatedAt: Date.now() });
+    try { localStorage.setItem(DB_KEY, JSON.stringify(d2)); } catch {}
+    pushChangedOnly(d2).catch(() => {});
+  } catch {}
+}
+
 function upsertLocal(data, table, record) {
   const arr = data[table] || [];
   const idx = arr.findIndex(r => r.id === record.id);
@@ -1856,9 +1869,9 @@ function MessageModal({ customer, ctx, onClose }) {
         <textarea value={text} onChange={e => setText(e.target.value)} rows={6} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.4 }} />
       </Field>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
-        {phone && <Btn style={{ flex: 1, background: "#25D366", boxShadow: "none" }} onClick={() => go(`https://wa.me/${waNumber(phone)}?text=${enc}`)}>WhatsApp</Btn>}
-        {phone && <Btn style={{ flex: 1 }} variant="grey" onClick={() => go(`sms:${phone}&body=${enc}`)}>Text</Btn>}
-        {email && <Btn style={{ flex: 1 }} variant="grey" onClick={() => go(`mailto:${email}?subject=${encodeURIComponent(cur?.title || "")}&body=${enc}`)}>Email</Btn>}
+        {phone && <Btn style={{ flex: 1, background: "#25D366", boxShadow: "none" }} onClick={() => { logComm(customer.id, { type: "WhatsApp", note: text }); go(`https://wa.me/${waNumber(phone)}?text=${enc}`); }}>WhatsApp</Btn>}
+        {phone && <Btn style={{ flex: 1 }} variant="grey" onClick={() => { logComm(customer.id, { type: "Text", note: text }); go(`sms:${phone}&body=${enc}`); }}>Text</Btn>}
+        {email && <Btn style={{ flex: 1 }} variant="grey" onClick={() => { logComm(customer.id, { type: "Email", note: text }); go(`mailto:${email}?subject=${encodeURIComponent(cur?.title || "")}&body=${enc}`); }}>Email</Btn>}
       </div>
       {!phone && !email && <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 6 }}>No phone or email on this customer.</div>}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 4 }}>
@@ -2642,10 +2655,42 @@ function CustomerForm({ data, onClose, editCustomer }) {
   );
 }
 
+function CommLogForm({ data, customer, onClose }) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const [type, setType] = useState("Call");
+  const [direction, setDirection] = useState("out");
+  const [note, setNote] = useState("");
+  const [date, setDate] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+  const [time, setTime] = useState(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
+  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
+  async function save() {
+    let at; try { at = new Date(`${date}T${time || "00:00"}`).toISOString(); } catch { at = new Date().toISOString(); }
+    const entry = { id: uid(), at, type, direction, note: note.trim() };
+    await saveAndReload(upsertLocal(data, "customers", { ...customer, comms: [...(customer.comms || []), entry] }));
+  }
+  return (
+    <Modal title="Log communication" onClose={onClose}>
+      <Field label="Type"><Select value={type} onChange={setType} options={["Call", "Text", "WhatsApp", "Email", "Note"]} /></Field>
+      <Field label="Direction"><Select value={direction === "out" ? "Outbound" : "Inbound"} onChange={v => setDirection(v === "Outbound" ? "out" : "in")} options={["Outbound", "Inbound"]} /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field></div>
+        <div style={{ width: 120 }}><Field label="Time"><input type="time" value={time} onChange={e => setTime(e.target.value)} style={inp} /></Field></div>
+      </div>
+      <Field label="Message / notes"><Textarea value={note} onChange={setNote} placeholder="What was said / sent" /></Field>
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
+        <Btn style={{ flex: 2 }} onClick={save}>Save to log</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function CustomerDetail({ data, id, setView }) {
   const c = (data.customers || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
   const [jobForm, setJobForm] = useState(null);
+  const [commForm, setCommForm] = useState(false);
   const [sheetBusy, setSheetBusy] = useState(false);
   async function openSheet(rec) {
     if (sheetBusy) return;
@@ -2720,8 +2765,8 @@ function CustomerDetail({ data, id, setView }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
         <MessageButton customer={c} ctx={{}} size="md" variant="primary" />
-        {c.phone && <Btn variant="grey" onClick={() => window.location.href = `tel:${c.phone}`}>📞 Call</Btn>}
-        {c.email && <Btn variant="grey" onClick={() => window.location.href = `mailto:${c.email}`}>✉️ Email</Btn>}
+        {c.phone && <Btn variant="grey" onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; }}>📞 Call</Btn>}
+        {c.email && <Btn variant="grey" onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
         <Btn size="sm" variant="danger" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
       </div>
 
@@ -2762,6 +2807,29 @@ function CustomerDetail({ data, id, setView }) {
       )}
       {showEdit && <CustomerForm data={data} editCustomer={c} onClose={() => setShowEdit(false)} />}
       {jobForm && <StorageJobForm data={data} customer={c} job={jobForm === "new" ? null : jobForm} onClose={() => setJobForm(null)} />}
+      {commForm && <CommLogForm data={data} customer={c} onClose={() => setCommForm(false)} />}
+
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: (c.comms || []).length ? 8 : 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Communication log</div>
+          <Btn size="sm" variant="grey" onClick={() => setCommForm(true)}>+ Log</Btn>
+        </div>
+        {(c.comms || []).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 8 }}>No communications logged.</div>}
+        {(c.comms || []).slice().sort((a, b) => (b.at || "").localeCompare(a.at || "")).map(cm => {
+          const icon = cm.type === "Call" ? "📞" : cm.type === "WhatsApp" ? "💬" : cm.type === "Text" ? "✉️" : cm.type === "Email" ? "📧" : "📝";
+          const dt = cm.at ? new Date(cm.at) : null;
+          const when = dt && !isNaN(dt) ? `${fmtUK(cm.at.slice(0, 10))} ${cm.at.slice(11, 16)}` : "";
+          return (
+            <div key={cm.id} style={{ padding: "8px 0", borderBottom: "1px solid #F0F4F3" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontWeight: 700, color: "#10211E", fontSize: 13.5 }}>{icon} {cm.type}<span style={{ color: "#9CA3AF", fontWeight: 600 }}> · {cm.direction === "in" ? "in" : "out"}</span></div>
+                <div style={{ fontSize: 12, color: "#6A7B77" }}>{when}</div>
+              </div>
+              {cm.note && <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2, whiteSpace: "pre-wrap" }}>{cm.note}</div>}
+            </div>
+          );
+        })}
+      </Card>
     </div>
   );
 }
@@ -2944,7 +3012,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B74</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B75</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
