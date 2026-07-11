@@ -48,6 +48,12 @@ function getStorageJobs(c) {
   return [];
 }
 const jobInStore = j => !!j && !j.dateOut;
+// A customer qualifies for a storage job only if a move plan/quote marks them going into store.
+function customerHasStorageMove(data, customerId) {
+  const enqOK = (data.enquiries || []).some(e => e.customerId === customerId && (e.toStore || (e.stages || []).some(s => /store/i.test(s.type || ""))));
+  const jobOK = (data.jobs || []).some(j => j.customerId === customerId && jobStages(j).some(s => /store/i.test(s.type || "")));
+  return enqOK || jobOK;
+}
 // Inventory sheets belonging to a storage job (legacy sheets fall under the first job).
 function sheetsForJob(c, job) {
   const jobs = getStorageJobs(c);
@@ -2687,7 +2693,7 @@ function CustomerDetail({ data, id, setView }) {
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: getStorageJobs(c).length ? 8 : 0 }}>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Storage jobs</div>
-          <Btn size="sm" onClick={() => setJobForm("new")}>+ Add storage job</Btn>
+          <Btn size="sm" onClick={() => { if (!customerHasStorageMove(data, c.id)) { alert("No storage move on file for this customer.\n\nCreate a quote/enquiry and tick “Moving into store” (or add an “Into store” day to the move plan) before adding a storage job."); return; } setJobForm("new"); }}>+ Add storage job</Btn>
         </div>
         {getStorageJobs(c).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 8 }}>No storage jobs yet.</div>}
         {getStorageJobs(c).map((j, idx) => (
@@ -2933,7 +2939,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B72</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B73</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
