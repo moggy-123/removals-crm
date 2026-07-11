@@ -68,8 +68,11 @@ function jobContainerCount(c, job) {
 // Loose items are captured on the inventory sheets; gather any notes for the job.
 function jobLoose(c, job) {
   const notes = [];
-  sheetsForJob(c, job).forEach(s => { if (s.looseItems && (s.looseNote || "").trim()) notes.push(s.looseNote.trim()); });
-  const any = sheetsForJob(c, job).some(s => s.looseItems);
+  let any = false;
+  sheetsForJob(c, job).forEach(s => {
+    if (Array.isArray(s.looseList) && s.looseList.length) { any = true; s.looseList.forEach(li => notes.push(`${li.qty || 1}× ${li.name}`)); }
+    else if (s.looseItems && (s.looseNote || "").trim()) { any = true; notes.push(s.looseNote.trim()); }
+  });
   return { any, notes };
 }
 function saveStorageLocs(a) { try { localStorage.setItem(STORLOC_KEY, JSON.stringify(a && a.length ? a : ["Wild & Lye"])); } catch {} }
@@ -2930,7 +2933,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B71</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B72</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3976,10 +3979,11 @@ async function buildStorageIntakePdf(rec, c, data) {
     });
   });
 
-  if (rec.looseItems) {
+  if ((Array.isArray(rec.looseList) && rec.looseList.length) || rec.looseItems) {
     ensure(30);
     heading("Loose items");
-    at(clean(rec.looseNote || "Yes"), M, y, 9.5, font, navy); y -= 16;
+    if (Array.isArray(rec.looseList) && rec.looseList.length) { rec.looseList.forEach(li => { ensure(13); at(`${li.qty || 1} x ${clean(li.name)}`, M, y, 9.5, font, navy); y -= 13; }); }
+    else { at(clean(rec.looseNote || "Yes"), M, y, 9.5, font, navy); y -= 16; }
   }
 
   if ((rec.collections || []).length) {
@@ -4081,10 +4085,16 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   const [custSig, setCustSig] = useState(src?.custSig ?? "");
   const [empSig, setEmpSig] = useState(src?.empSig ?? "");
   const [empName, setEmpName] = useState(src?.empName ?? "");
-  const [looseItems, setLooseItems] = useState(src?.looseItems ?? (editRec ? !!editRec.looseItems : false));
-  const [looseNote, setLooseNote] = useState(src?.looseNote ?? (editRec ? (editRec.looseNote || "") : ""));
+  const [looseList, setLooseList] = useState(() => {
+    const base = src?.looseList ?? (editRec && Array.isArray(editRec.looseList) ? editRec.looseList : null);
+    if (Array.isArray(base)) return base.map(li => ({ id: li.id || uid(), name: li.name || "", qty: li.qty ?? 1 }));
+    return [];
+  });
+  const addLoose = () => setLooseList(p => [...p, { id: uid(), name: "", qty: 1 }]);
+  const setLoose = (id, k, v) => setLooseList(p => p.map(li => li.id === id ? { ...li, [k]: v } : li));
+  const removeLoose = id => setLooseList(p => p.filter(li => li.id !== id));
   useEffect(() => {
-    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ customerId, date, location, crew, containers, custSig, empSig, empName, looseItems, looseNote })); } catch {}
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ customerId, date, location, crew, containers, custSig, empSig, empName, looseList })); } catch {}
   }, [customerId, date, location, crew, containers, custSig, empSig, empName]);
   const clearDraft = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch {} };
   const leave = () => { clearDraft(); setView({ screen: "storage" }); };
@@ -4133,10 +4143,11 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
     const cust = (data.customers || []).find(x => x.id === customerId);
     if (!cust) { setErr("Customer not found."); return; }
     const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, conditions: it.conditions || [], positions: it.positions || [], packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
+    const cleanLoose = looseList.map(li => ({ name: (li.name || "").trim(), qty: Math.max(1, Number(li.qty) || 1) })).filter(li => li.name);
     if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy(true);
-    const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, looseItems, looseNote, createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
+    const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, looseList: cleanLoose, looseItems: cleanLoose.length > 0, createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
     let bytes;
     try {
       ({ bytes } = await buildStorageIntakePdf(rec, cust, data));
@@ -4263,9 +4274,16 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
       <Btn variant="grey" style={{ width: "100%", marginTop: 12 }} onClick={addContainer}>+ Add container</Btn>
 
       <Card style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Loose items</div>
-        <Field label="Any loose items?" hint="Items not in a container"><Select value={looseItems ? "Yes" : "No"} onChange={v => setLooseItems(v === "Yes")} options={["No", "Yes"]} /></Field>
-        {looseItems && <Field label="Loose items — details"><Textarea value={looseNote} onChange={setLooseNote} placeholder="e.g. Sofa, bike, garden bench" /></Field>}
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 4 }}>Loose items</div>
+        <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>Items not in a container — add each so they can be collected individually later.</div>
+        {looseList.map(li => (
+          <div key={li.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <div style={{ width: 58 }}><input type="number" inputMode="numeric" value={li.qty} onChange={e => setLoose(li.id, "qty", Math.max(1, parseInt(e.target.value, 10) || 1))} style={{ ...inp, textAlign: "center", padding: "9px 4px" }} /></div>
+            <div style={{ flex: 1 }}><input value={li.name} placeholder="e.g. Bike, sofa, bench" onChange={e => setLoose(li.id, "name", e.target.value)} style={inp} /></div>
+            <button onClick={() => removeLoose(li.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 18, fontWeight: 700, cursor: "pointer", lineHeight: 1 }}>×</button>
+          </div>
+        ))}
+        <Btn size="sm" variant="grey" onClick={addLoose}>+ Add loose item</Btn>
       </Card>
 
       <Card style={{ marginTop: 12 }}>
@@ -4366,7 +4384,7 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
     if (it.container) { const t = `Container ${it.container}`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, font, grey); }
     y -= 14;
   });
-  if (collection.looseCollected || collection.looseAll) { newPageIf(14); at(`Loose items: ${clean(collection.looseCollected || (collection.looseAll ? "all loose items" : ""))}`, M + 10, y, 9.5, font, navy); y -= 14; }
+  if ((collection.looseItems || []).length) { newPageIf(14); at("Loose items:", M + 10, y, 9.5, bold, navy); y -= 13; (collection.looseItems || []).forEach(li => { newPageIf(12); at(`${li.qty} x ${clean(li.name)}`, M + 20, y, 9.5, font, navy); y -= 13; }); }
 
   // Previous collections (everything before this visit)
   const prev = allC.filter(col => col.id !== collection.id).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -4377,7 +4395,7 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
       newPageIf(24);
       at(`${col.date ? fmtUK(col.date) : ""}${col.collectedBy ? ` - by ${clean(col.collectedBy)}` : ""}`, M, y, 9, bold, navy); y -= 13;
       (col.items || []).forEach(it => { newPageIf(12); at(`${it.qty} x ${clean(it.name)}${it.container ? ` (Container ${it.container})` : ""}`, M + 10, y, 8.5, font, grey); y -= 12; });
-      if (col.looseCollected || col.looseAll) { newPageIf(12); at(`Loose: ${clean(col.looseCollected || "all loose items")}`, M + 10, y, 8.5, font, grey); y -= 12; }
+      if ((col.looseItems || []).length) { newPageIf(12); at(`Loose: ${(col.looseItems || []).map(li => `${li.qty}x ${clean(li.name)}`).join(", ")}`, M + 10, y, 8.5, font, grey); y -= 12; }
       y -= 4;
     });
   }
@@ -4390,15 +4408,15 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
   });
   y -= 8; newPageIf(50);
   at("Left in store", M, y, 12, bold, teal); y -= 7; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
-  const looseLeft = !!rec.looseItems && !allC.some(col => col.looseAll);
-  if (!remainByCont.length && !looseLeft) { at("Nothing remaining - all items collected.", M + 10, y, 9.5, font, navy); y -= 14; }
+  const looseRem = (Array.isArray(rec.looseList) ? rec.looseList : []).map(li => { const collected = allC.reduce((n, col) => n + (col.looseItems || []).filter(x => x.name === li.name).reduce((m, x) => m + (Number(x.qty) || 0), 0), 0); return { name: li.name, qty: Math.max(0, (Number(li.qty) || 0) - collected) }; }).filter(li => li.qty > 0);
+  if (!remainByCont.length && !looseRem.length) { at("Nothing remaining - all items collected.", M + 10, y, 9.5, font, navy); y -= 14; }
   remainByCont.forEach(ct => {
     newPageIf(28);
     at(`Container ${ct.number || "-"}`, M, y, 10, bold, navy); y -= 14;
     ct.items.forEach(it => { newPageIf(12); at(`${it.qty} x ${clean(it.name)}`, M + 10, y, 9.5, font, navy); y -= 13; });
     y -= 5;
   });
-  if (looseLeft) { newPageIf(16); at(`Loose items: ${clean(rec.looseNote || "Yes")}`, M + 10, y, 9.5, font, navy); y -= 14; }
+  if (looseRem.length) { newPageIf(16 + looseRem.length * 13); at("Loose items", M, y, 10, bold, navy); y -= 14; looseRem.forEach(li => { newPageIf(12); at(`${li.qty} x ${clean(li.name)}`, M + 10, y, 9.5, font, navy); y -= 13; }); }
 
   y -= 16; newPageIf(120);
   at("Received the above items in good order.", M, y, 9, font, grey); y -= 26;
@@ -4419,8 +4437,6 @@ function PartCollectionForm({ data, setView, recId }) {
   const [date, setDate] = useState(todayISO());
   const [collectedBy, setCollectedBy] = useState("");
   const [taking, setTaking] = useState({});
-  const [looseCollected, setLooseCollected] = useState("");
-  const [looseAll, setLooseAll] = useState(false);
   const [sig, setSig] = useState("");
   const [signing, setSigning] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -4429,16 +4445,18 @@ function PartCollectionForm({ data, setView, recId }) {
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
   const setTake = (k, val, max) => setTaking(p => ({ ...p, [k]: Math.max(0, Math.min(Number(max) || 0, Math.floor(Number(val) || 0))) }));
   const totalTaking = Object.values(taking).reduce((a, b) => a + (Number(b) || 0), 0);
-  // Are there still loose items in store? (none of the prior collections cleared them)
-  const looseRemains = !!rec.looseItems && !(rec.collections || []).some(col => col.looseAll);
+  const looseList = Array.isArray(rec.looseList) ? rec.looseList : [];
   // How many of an item are still in store = original qty minus everything already collected.
   const collectedQty = (containerNo, name) => (rec.collections || []).reduce((n, col) => n + (col.items || []).filter(ci => ci.container === containerNo && ci.name === name).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
   const available = (containerNo, it) => Math.max(0, (Number(it.qty) || 0) - collectedQty(containerNo, it.name));
+  const collectedLooseQty = name => (rec.collections || []).reduce((n, col) => n + (col.looseItems || []).filter(li => li.name === name).reduce((m, li) => m + (Number(li.qty) || 0), 0), 0);
+  const looseAvailable = li => Math.max(0, (Number(li.qty) || 0) - collectedLooseQty(li.name));
 
   async function save() {
     setErr("");
-    const looseTaken = looseCollected.trim() || looseAll;
-    if (totalTaking <= 0 && !looseTaken) { setErr("Enter a quantity for at least one item, or record loose items being collected."); return; }
+    const looseItemsTaken = [];
+    looseList.forEach((li, i) => { const take = Number(taking["loose_" + i]) || 0; if (take > 0) looseItemsTaken.push({ name: li.name, qty: take }); });
+    if (totalTaking <= 0 && !looseItemsTaken.length) { setErr("Enter a quantity for at least one item being collected."); return; }
     if (!sig) { setErr("Please capture the customer's signature."); return; }
     setBusy(true);
     const collItems = [];
@@ -4446,7 +4464,7 @@ function PartCollectionForm({ data, setView, recId }) {
       const take = Number(taking[ci + "_" + ii]) || 0;
       if (take > 0) collItems.push({ container: c.number || "", name: it.name, qty: take });
     }));
-    const collection = { id: uid(), date, sig, items: collItems, collectedBy: collectedBy.trim(), looseCollected: looseCollected.trim(), looseAll: !!looseAll };
+    const collection = { id: uid(), date, sig, items: collItems, looseItems: looseItemsTaken, collectedBy: collectedBy.trim() };
     // Separate signed receipt for this collection — the original inventory sheet is left untouched.
     let bytes;
     try {
@@ -4495,21 +4513,30 @@ function PartCollectionForm({ data, setView, recId }) {
         </Card>
       ))}
 
-      {looseRemains && (
+      {looseList.length > 0 && (
         <Card style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 8 }}>Loose items</div>
-          <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 10 }}>In store: {rec.looseNote || "Loose items"}</div>
-          <Field label="Loose items collected this visit" hint="Type what's being taken"><Textarea value={looseCollected} onChange={setLooseCollected} placeholder="e.g. Bike, garden bench" /></Field>
-          <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontSize: 13.5, color: "#374151", marginTop: 4 }}>
-            <input type="checkbox" checked={looseAll} onChange={e => setLooseAll(e.target.checked)} style={{ width: 17, height: 17, accentColor: TEAL }} />
-            All loose items now collected (none left in store)
-          </label>
+          <div style={{ fontWeight: 800, color: "#10211E", marginBottom: 8 }}>Loose items</div>
+          {looseList.map((li, i) => {
+            const k = "loose_" + i; const max = looseAvailable(li);
+            return (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #F0F4F3", opacity: max === 0 ? 0.5 : 1 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: "#10211E" }}>{li.name}</div>
+                  <div style={{ fontSize: 12, color: "#94A4A0" }}>{max} in store{max !== (Number(li.qty) || 0) ? ` (of ${Number(li.qty) || 0})` : ""}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, color: "#6A7B77" }}>take</span>
+                  <input type="number" inputMode="numeric" disabled={max === 0} value={taking[k] || ""} placeholder="0" onChange={e => setTake(k, e.target.value, max)} style={{ ...inp, width: 64, textAlign: "center", padding: "8px 4px" }} />
+                </div>
+              </div>
+            );
+          })}
         </Card>
       )}
 
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 10 }}>Customer sign-off</div>
-        <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>Taking {totalTaking} item{totalTaking !== 1 ? "s" : ""}{(looseCollected.trim() || looseAll) ? " + loose items" : ""} today.</div>
+        <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>Taking {totalTaking} item{totalTaking !== 1 ? "s" : ""} today.</div>
         <SigField label={collectedBy.trim() ? `Signature — ${collectedBy.trim()}` : "Customer signature"} value={sig} onOpen={() => setSigning(true)} />
       </Card>
 
@@ -4642,7 +4669,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
                     <div key={col.id} style={{ marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A4B12" }}>{col.date ? fmtUK(col.date) : "—"} ({dow(col.date)}){col.collectedBy ? ` · ${col.collectedBy}` : ""}{col.sig ? " · signed" : ""}</div>
-                        <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{[(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", "), (col.looseCollected || (col.looseAll ? "all loose items" : "")) ? `loose: ${col.looseCollected || "all"}` : ""].filter(Boolean).join(" · ") || "—"}</div>
+                        <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{[(col.items || []).map(ci => `${ci.qty}× ${ci.name}`).join(", "), (col.looseItems || []).length ? `loose: ${(col.looseItems || []).map(li => `${li.qty}× ${li.name}`).join(", ")}` : ""].filter(Boolean).join(" · ") || "—"}</div>
                       </div>
                       {(col.pdfUrl || col.pdf) && <span onClick={() => openCollection(col)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Receipt</span>}
                     </div>
