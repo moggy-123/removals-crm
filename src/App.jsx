@@ -520,9 +520,9 @@ function Dashboard({ data, setView }) {
     .sort((a, b) => a.st.date.localeCompare(b.st.date))
     .slice(0, 6);
   const followUps = enquiries
-    .filter(e => e.followUpDate && !["Won", "Lost"].includes(e.status))
+    .filter(e => e.followUpDate && e.status !== "Lost")
     .sort((a, b) => (a.followUpDate || "").localeCompare(b.followUpDate || ""))
-    .slice(0, 6);
+    .slice(0, 12);
   const custById = id => (data.customers || []).find(c => c.id === id) || {};
   const toCall = enquiries
     .filter(e => e.status === "New" && !e.surveyDate)
@@ -3068,7 +3068,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B83</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B84</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
