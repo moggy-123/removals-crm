@@ -711,7 +711,7 @@ function Dashboard({ data, setView }) {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                     <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.followUpNote || "Follow up"}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77", marginTop: 2 }}>{overdue ? "Due " : ""}{fmtDateShort(e.followUpDate)}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77", marginTop: 2 }}>{overdue ? "Due " : ""}{fmtUK(e.followUpDate)}</div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                     <StatusBadge status={e.status} />
@@ -2345,6 +2345,29 @@ function MoveManageModal({ data, job, onClose }) {
     </Modal>
   );
 }
+function FollowUpModal({ data, enquiry, onClose }) {
+  const [date, setDate] = useState(enquiry.followUpDate || todayISO());
+  const [note, setNote] = useState(enquiry.followUpNote || "");
+  async function save() {
+    if (!date) { alert("Please choose a date."); return; }
+    await saveAndReload(upsertLocal(data, "enquiries", { ...enquiry, followUpDate: date, followUpNote: note.trim() }));
+  }
+  async function clear() {
+    await saveAndReload(upsertLocal(data, "enquiries", { ...enquiry, followUpDate: "", followUpNote: "" }));
+  }
+  return (
+    <Modal title="Follow-up reminder" onClose={onClose}>
+      <Field label="Follow-up date"><Input type="date" value={date} onChange={setDate} /></Field>
+      <Field label="Note"><Textarea value={note} onChange={setNote} placeholder="e.g. Call to check on quote" /></Field>
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        {enquiry.followUpDate && <Btn variant="grey" onClick={clear}>Clear</Btn>}
+        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
+        <Btn style={{ flex: 2 }} onClick={save}>Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function EnquiryDetail({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
@@ -2411,12 +2434,8 @@ function EnquiryDetail({ data, id, setView }) {
     const reason = prompt("Reason lost? (optional)") || "";
     await setStatus("Lost", { lostReason: reason });
   }
-  async function setFollowUp() {
-    const date = prompt("Follow-up date (YYYY-MM-DD):", e.followUpDate || todayISO());
-    if (date === null) return;
-    const note = prompt("Follow-up note:", e.followUpNote || "") || "";
-    await saveAndReload(upsertLocal(data, "enquiries", { ...e, followUpDate: date, followUpNote: note }));
-  }
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const setFollowUp = () => setFollowUpOpen(true);
   async function del() {
     if (!confirm("Delete this enquiry? This cannot be undone.")) return;
     addTombstone(e.id);
@@ -2551,6 +2570,7 @@ function EnquiryDetail({ data, id, setView }) {
       </div>
 
       {showEdit && <EnquiryForm data={data} editEnquiry={e} onClose={() => setShowEdit(false)} />}
+      {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
       {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
       {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
@@ -3048,7 +3068,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B82</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B83</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
