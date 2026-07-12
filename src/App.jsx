@@ -704,13 +704,15 @@ function Dashboard({ data, setView }) {
           {followUps.map(fu => {
             const overdue = (fu.date + (fu.time || "")) <= (todayISO() + "23:59") && fu.date <= todayISO();
             const cust = (data.customers || []).find(x => x.id === fu.customerId);
-            const phone = cust && cust.phone;
+            const phone = cust && (cust.phone || cust.homePhone);
             const email = cust && cust.email;
             const noteL = (fu.note || "").toLowerCase();
-            const wantsCall = /call/.test(noteL);
+            const wantsCall = /call|phone|ring/.test(noteL);
             const wantsText = /text|sms|whats ?app|message/.test(noteL);
             const wantsEmail = /email|e-mail/.test(noteL);
-            const none = !wantsCall && !wantsText && !wantsEmail;
+            const showText = wantsText && phone;
+            const showEmail = wantsEmail && email;
+            const showCall = phone && (wantsCall || (!showText && !showEmail));
             const btn = (bg, label, onTap) => <button onClick={ev => { ev.stopPropagation(); onTap(); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: bg, border: "none", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 800, color: "#fff", cursor: "pointer" }}>{label}</button>;
             return (
               <Card key={fu.key} onClick={() => setView(fu.kind === "enquiry" ? { screen: "enquiryDetail", id: fu.id } : { screen: "customerDetail", id: fu.id })} style={overdue ? { borderColor: "#FBD9A0", background: "#FFFBF2" } : undefined}>
@@ -723,9 +725,10 @@ function Dashboard({ data, setView }) {
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                     {fu.kind === "enquiry" && <StatusBadge status={fu.status} />}
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                      {(wantsCall || none) && phone && btn("#0E7C73", "📞 Call", () => { logComm(fu.customerId, { type: "Call" }); window.location.href = `tel:${phone}`; })}
-                      {wantsText && phone && btn("#2563EB", "💬 Text", () => { logComm(fu.customerId, { type: "Text" }); window.location.href = `sms:${phone}`; })}
-                      {wantsEmail && email && btn("#6B7280", "📧 Email", () => { logComm(fu.customerId, { type: "Email" }); window.location.href = `mailto:${email}`; })}
+                      {showCall && btn("#0E7C73", "📞 Call", () => { logComm(fu.customerId, { type: "Call" }); window.location.href = `tel:${phone}`; })}
+                      {showText && btn("#2563EB", "💬 Text", () => { logComm(fu.customerId, { type: "Text" }); window.location.href = `sms:${phone}`; })}
+                      {showEmail && btn("#6B7280", "📧 Email", () => { logComm(fu.customerId, { type: "Email" }); window.location.href = `mailto:${email}`; })}
+                      {!phone && !email && <span style={{ fontSize: 11.5, color: "#B7C3C0" }}>No contact saved</span>}
                     </div>
                   </div>
                 </div>
@@ -3089,7 +3092,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B86</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B87</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
