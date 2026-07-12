@@ -700,19 +700,22 @@ function Dashboard({ data, setView }) {
 
       {followUps.length > 0 && (
         <>
-          <SectionTitle>Follow-ups</SectionTitle>
+          <SectionTitle>Follow-ups — to call</SectionTitle>
           {followUps.map(e => {
             const overdue = e.followUpDate <= todayISO();
+            const cust = (data.customers || []).find(x => x.id === e.customerId);
+            const phone = cust && cust.phone;
             return (
               <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={overdue ? { borderColor: "#FBD9A0", background: "#FFFBF2" } : undefined}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                     <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.followUpNote || "Follow up"}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77", marginTop: 2 }}>{overdue ? "Due " : ""}{fmtDateShort(e.followUpDate)}</div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77" }}>{overdue ? "Due " : ""}{fmtDateShort(e.followUpDate)}</div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                     <StatusBadge status={e.status} />
+                    {phone && <button onClick={ev => { ev.stopPropagation(); logComm(e.customerId, { type: "Call" }); window.location.href = `tel:${phone}`; }} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#0E7C73", border: "none", borderRadius: 999, padding: "7px 14px", fontSize: 13, fontWeight: 800, color: "#fff", cursor: "pointer" }}>📞 Call</button>}
                   </div>
                 </div>
               </Card>
@@ -3045,7 +3048,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B81</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B82</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
