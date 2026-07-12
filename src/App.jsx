@@ -2772,6 +2772,25 @@ function CustomerDetail({ data, id, setView }) {
             <span onClick={() => setJobForm(j)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Edit</span>
           </div>
         ))}
+        {getStorageJobs(c).map(j => sheetsForJob(c, j).length ? (
+          <div key={"inv" + (j.id || "")} style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid #EEF3F2" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#B7C4C1", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>{j.location || "Storage"}{jobInStore(j) ? "" : " · out"} — inventories</div>
+            {sheetsForJob(c, j).map(rec => (
+              <div key={rec.id} style={{ marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 12.5, color: "#374151" }}>Inventory {rec.date ? fmtUK(rec.date) : ""} · {(rec.containers || []).length} cont.</div>
+                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>{sheetBusy ? "…" : "PDF"}</span>
+                </div>
+                {(rec.collections || []).slice().reverse().map(col => (
+                  <div key={col.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, paddingLeft: 10 }}>
+                    <div style={{ fontSize: 12, color: "#8A6D3B" }}>Collected {col.date ? fmtUK(col.date) : ""}{col.collectedBy ? ` · ${col.collectedBy}` : ""}</div>
+                    {(col.pdfUrl || col.pdf) && <span onClick={() => openCollection(col)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Receipt</span>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : null)}
       </Card>
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
@@ -3026,7 +3045,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B79</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B80</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
