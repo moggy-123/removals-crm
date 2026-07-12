@@ -3026,7 +3026,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B78</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B79</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4545,32 +4545,35 @@ function PartCollectionForm({ data, setView, recId }) {
     looseList.forEach((li, i) => { const take = Number(taking["loose_" + i]) || 0; if (take > 0) looseItemsTaken.push({ name: li.name, qty: take }); });
     if (totalTaking <= 0 && !looseItemsTaken.length) { setErr("Enter a quantity for at least one item being collected."); return; }
     if (!sig) { setErr("Please capture the customer's signature."); return; }
-    setBusy(true);
     const collItems = [];
     (rec.containers || []).forEach((c, ci) => (c.items || []).forEach((it, ii) => {
       const take = Number(taking[ci + "_" + ii]) || 0;
       if (take > 0) collItems.push({ container: c.number || "", name: it.name, qty: take });
     }));
     const collection = { id: uid(), date, sig, items: collItems, looseItems: looseItemsTaken, collectedBy: collectedBy.trim() };
+    const allColl = [...(rec.collections || []), collection];
+    // Decide about closing the job NOW — before any async work. On iOS the share sheet/upload
+    // break the user-gesture chain, so a confirm() afterwards can fail to show and hang the save.
+    const collForItem = (containerNo, name) => allColl.reduce((n, col) => n + (col.items || []).filter(ci => ci.container === containerNo && ci.name === name).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
+    let remaining = 0;
+    (rec.containers || []).forEach(cc => (cc.items || []).forEach(it => { remaining += Math.max(0, (Number(it.qty) || 0) - collForItem(cc.number || "", it.name)); }));
+    (Array.isArray(rec.looseList) ? rec.looseList : []).forEach(li => { const col = allColl.reduce((n, c) => n + (c.looseItems || []).filter(x => x.name === li.name).reduce((m, x) => m + (Number(x.qty) || 0), 0), 0); remaining += Math.max(0, (Number(li.qty) || 0) - col); });
+    const markOut = (remaining === 0 && rec.jobId) ? confirm("Nothing left in store for this inventory. Mark the storage job out of store?") : false;
+    setBusy(true);
     // Separate signed receipt for this collection — the original inventory sheet is left untouched.
     let bytes;
     try {
-      bytes = await buildCollectionPdf(collection, rec, cust, data, [...(rec.collections || []), collection]);
+      bytes = await buildCollectionPdf(collection, rec, cust, data, allColl);
       const file = new File([bytes], `Collection-${cust.ref || "RJ"}-${date}.pdf`, { type: "application/pdf" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch (_e) {} }
       else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
     } catch (ex) { setErr("PDF failed: " + ((ex && ex.message) || ex)); setBusy(false); return; }
     try { collection.pdfUrl = await uploadStorageSheet(`${cust.id}/collection-${collection.id}.pdf`, bytes); }
     catch { try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); collection.pdf = "data:application/pdf;base64," + btoa(bin); } catch {} }
-    const newRec = { ...rec, collections: [...(rec.collections || []), collection] }; // original containers + signatures preserved
+    const newRec = { ...rec, collections: allColl };
     const list = (cust.storageInv || []).map(r => r.id === rec.id ? newRec : r);
-    // Work out if anything is still in store for this inventory.
-    const collForItem = (containerNo, name) => (newRec.collections || []).reduce((n, col) => n + (col.items || []).filter(ci => ci.container === containerNo && ci.name === name).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
-    let remaining = 0;
-    (newRec.containers || []).forEach(cc => (cc.items || []).forEach(it => { remaining += Math.max(0, (Number(it.qty) || 0) - collForItem(cc.number || "", it.name)); }));
-    (Array.isArray(newRec.looseList) ? newRec.looseList : []).forEach(li => { const col = (newRec.collections || []).reduce((n, c) => n + (c.looseItems || []).filter(x => x.name === li.name).reduce((m, x) => m + (Number(x.qty) || 0), 0), 0); remaining += Math.max(0, (Number(li.qty) || 0) - col); });
     const updated = { ...cust, storageInv: list };
-    if (remaining === 0 && rec.jobId && confirm("Nothing left in store for this inventory. Mark the storage job out of store?")) {
+    if (markOut) {
       updated.storageJobs = getStorageJobs(cust).map(j => j.id === rec.jobId ? { ...j, dateOut: date, inStore: false } : j);
       updated.storage = null;
     }
