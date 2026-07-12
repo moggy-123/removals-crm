@@ -3045,7 +3045,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B80</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B81</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4243,6 +4243,25 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
 
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
 
+  async function makeIntakePdf() {
+    setErr("");
+    if (!customerId) { setErr("Please select a customer."); return; }
+    const cust = (data.customers || []).find(x => x.id === customerId);
+    if (!cust) { setErr("Customer not found."); return; }
+    const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, conditions: it.conditions || [], positions: it.positions || [], packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
+    if (!cleanContainers.length) { setErr("Add at least one container with items first."); return; }
+    const cleanLoose = looseList.map(li => ({ name: (li.name || "").trim(), qty: Math.max(1, Number(li.qty) || 1) })).filter(li => li.name);
+    const rec = { id: editRec ? editRec.id : "preview", jobId, date, location, crew, containers: cleanContainers, custSig, empSig, empName, looseList: cleanLoose, looseItems: cleanLoose.length > 0 };
+    setBusy("pdf");
+    try {
+      const { bytes } = await buildStorageIntakePdf(rec, cust, data);
+      const file = new File([bytes], `Storage-${cust.ref || "RJ"}-${date}.pdf`, { type: "application/pdf" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch (_e) {} }
+      else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
+    } catch (ex) { setErr("PDF failed: " + ((ex && ex.message) || ex)); }
+    setBusy(false);
+  }
+
   async function saveIntake() {
     setErr("");
     if (!customerId) { setErr("Please select a customer."); return; }
@@ -4252,20 +4271,8 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
     const cleanLoose = looseList.map(li => ({ name: (li.name || "").trim(), qty: Math.max(1, Number(li.qty) || 1) })).filter(li => li.name);
     if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
-    setBusy(true);
-    const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, looseList: cleanLoose, looseItems: cleanLoose.length > 0, createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
-    let bytes;
-    try {
-      ({ bytes } = await buildStorageIntakePdf(rec, cust, data));
-      const file = new File([bytes], `Storage-${cust.ref || "RJ"}-${date}.pdf`, { type: "application/pdf" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch (_e) {} }
-      else { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
-    } catch (ex) { setErr("PDF failed: " + ((ex && ex.message) || ex)); setBusy(false); return; }
-    try {
-      rec.pdfUrl = await uploadStorageSheet(`${cust.id}/${rec.id}.pdf`, bytes);
-    } catch {
-      try { let bin = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]); rec.pdf = "data:application/pdf;base64," + btoa(bin); } catch {}
-    }
+    setBusy("save");
+    const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, looseList: cleanLoose, looseItems: cleanLoose.length > 0, pdfUrl: (editRec && editRec.pdfUrl) || "", pdf: (editRec && editRec.pdf) || "", createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
     const list = editRec ? (cust.storageInv || []).map(r => r.id === rec.id ? rec : r) : [...(cust.storageInv || []), rec];
     const updated = { ...cust, storageInv: list };
     clearDraft();
@@ -4423,7 +4430,8 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
       {err && <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         <Btn variant="grey" onClick={leave}>Cancel</Btn>
-        <Btn style={{ flex: 1 }} disabled={busy} onClick={saveIntake}>{busy ? "Saving…" : "Save & create PDF"}</Btn>
+        <Btn variant="grey" disabled={busy} onClick={makeIntakePdf}>{busy === "pdf" ? "…" : "PDF"}</Btn>
+        <Btn style={{ flex: 1 }} disabled={busy} onClick={saveIntake}>{busy === "save" ? "Saving…" : "Save inventory"}</Btn>
       </div>
     </div>
   );
