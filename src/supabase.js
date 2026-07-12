@@ -13,6 +13,7 @@ const customerToDb = c => ({
   id: c.id, name: c.name, company: c.company, phone: c.phone, home_phone: c.homePhone || "", email: c.email,
   address1: c.address1, address2: c.address2, town: c.town, county: c.county,
   postcode: c.postcode, cust_type: c.custType || "Private", notes: c.notes, comms: c.comms || null,
+  follow_up_date: c.followUpDate || null, follow_up_note: c.followUpNote || null,
   storage: c.storage || null, storage_jobs: c.storageJobs || null, move: c.move || null, storage_inv: c.storageInv || null,
   updated_at: c.updatedAt || Date.now(),
   created_at: c.createdAt || new Date().toISOString(),
@@ -21,7 +22,7 @@ const customerFromDb = r => ({
   id: r.id, name: r.name, company: r.company, phone: r.phone, homePhone: r.home_phone || "", email: r.email,
   address1: r.address1, address2: r.address2, town: r.town, county: r.county,
   postcode: r.postcode, custType: r.cust_type || "Private", ref: r.ref || null, notes: r.notes,
-  storage: r.storage || null, storageJobs: r.storage_jobs || null, move: r.move || null, storageInv: r.storage_inv || null, comms: r.comms || null,
+  storage: r.storage || null, storageJobs: r.storage_jobs || null, move: r.move || null, storageInv: r.storage_inv || null, comms: r.comms || null, followUpDate: r.follow_up_date || "", followUpNote: r.follow_up_note || "",
   updatedAt: r.updated_at, createdAt: r.created_at,
 });
 
