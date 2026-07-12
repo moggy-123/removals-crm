@@ -520,9 +520,9 @@ function Dashboard({ data, setView }) {
     .sort((a, b) => a.st.date.localeCompare(b.st.date))
     .slice(0, 6);
   const followUps = [
-    ...enquiries.filter(e => e.followUpDate && e.status !== "Lost").map(e => ({ kind: "enquiry", key: "e" + e.id, id: e.id, customerId: e.customerId, date: e.followUpDate, note: e.followUpNote, status: e.status })),
-    ...(data.customers || []).filter(c => c.followUpDate).map(c => ({ kind: "customer", key: "c" + c.id, id: c.id, customerId: c.id, date: c.followUpDate, note: c.followUpNote })),
-  ].sort((a, b) => (a.date || "").localeCompare(b.date || "")).slice(0, 12);
+    ...enquiries.filter(e => e.followUpDate && e.status !== "Lost").map(e => ({ kind: "enquiry", key: "e" + e.id, id: e.id, customerId: e.customerId, date: e.followUpDate, time: e.followUpTime || "", note: e.followUpNote, status: e.status })),
+    ...(data.customers || []).filter(c => c.followUpDate).map(c => ({ kind: "customer", key: "c" + c.id, id: c.id, customerId: c.id, date: c.followUpDate, time: c.followUpTime || "", note: c.followUpNote })),
+  ].sort((a, b) => ((a.date || "") + (a.time || "99:99")).localeCompare((b.date || "") + (b.time || "99:99"))).slice(0, 12);
   const custById = id => (data.customers || []).find(c => c.id === id) || {};
   const toCall = enquiries
     .filter(e => e.status === "New" && !e.surveyDate)
@@ -702,20 +702,31 @@ function Dashboard({ data, setView }) {
         <>
           <SectionTitle>Follow-ups — to call</SectionTitle>
           {followUps.map(fu => {
-            const overdue = fu.date <= todayISO();
+            const overdue = (fu.date + (fu.time || "")) <= (todayISO() + "23:59") && fu.date <= todayISO();
             const cust = (data.customers || []).find(x => x.id === fu.customerId);
             const phone = cust && cust.phone;
+            const email = cust && cust.email;
+            const noteL = (fu.note || "").toLowerCase();
+            const wantsCall = /call/.test(noteL);
+            const wantsText = /text|sms|whats ?app|message/.test(noteL);
+            const wantsEmail = /email|e-mail/.test(noteL);
+            const none = !wantsCall && !wantsText && !wantsEmail;
+            const btn = (bg, label, onTap) => <button onClick={ev => { ev.stopPropagation(); onTap(); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: bg, border: "none", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 800, color: "#fff", cursor: "pointer" }}>{label}</button>;
             return (
               <Card key={fu.key} onClick={() => setView(fu.kind === "enquiry" ? { screen: "enquiryDetail", id: fu.id } : { screen: "customerDetail", id: fu.id })} style={overdue ? { borderColor: "#FBD9A0", background: "#FFFBF2" } : undefined}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, fu.customerId)}</div>
                     <div style={{ fontSize: 13, color: "#6A7B77" }}>{fu.note || "Follow up"}{fu.kind === "customer" ? " · customer" : ""}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77", marginTop: 2 }}>{overdue ? "Due " : ""}{fmtUK(fu.date)}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77", marginTop: 2 }}>{overdue ? "Due " : ""}{fmtUK(fu.date)}{fu.time ? ` · ${fu.time}` : ""}</div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                     {fu.kind === "enquiry" && <StatusBadge status={fu.status} />}
-                    {phone && <button onClick={ev => { ev.stopPropagation(); logComm(fu.customerId, { type: "Call" }); window.location.href = `tel:${phone}`; }} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#0E7C73", border: "none", borderRadius: 999, padding: "7px 14px", fontSize: 13, fontWeight: 800, color: "#fff", cursor: "pointer" }}>📞 Call</button>}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      {(wantsCall || none) && phone && btn("#0E7C73", "📞 Call", () => { logComm(fu.customerId, { type: "Call" }); window.location.href = `tel:${phone}`; })}
+                      {wantsText && phone && btn("#2563EB", "💬 Text", () => { logComm(fu.customerId, { type: "Text" }); window.location.href = `sms:${phone}`; })}
+                      {wantsEmail && email && btn("#6B7280", "📧 Email", () => { logComm(fu.customerId, { type: "Email" }); window.location.href = `mailto:${email}`; })}
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -2349,18 +2360,23 @@ function FollowUpModal({ data, record, table, enquiry, onClose }) {
   const rec = record || enquiry;
   const tbl = table || "enquiries";
   const [date, setDate] = useState(rec.followUpDate || todayISO());
+  const [time, setTime] = useState(rec.followUpTime || "");
   const [note, setNote] = useState(rec.followUpNote || "");
+  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
   async function save() {
     if (!date) { alert("Please choose a date."); return; }
-    await saveAndReload(upsertLocal(data, tbl, { ...rec, followUpDate: date, followUpNote: note.trim() }));
+    await saveAndReload(upsertLocal(data, tbl, { ...rec, followUpDate: date, followUpTime: time, followUpNote: note.trim() }));
   }
   async function clear() {
-    await saveAndReload(upsertLocal(data, tbl, { ...rec, followUpDate: "", followUpNote: "" }));
+    await saveAndReload(upsertLocal(data, tbl, { ...rec, followUpDate: "", followUpTime: "", followUpNote: "" }));
   }
   return (
     <Modal title="Follow-up reminder" onClose={onClose}>
-      <Field label="Follow-up date"><Input type="date" value={date} onChange={setDate} /></Field>
-      <Field label="Note"><Textarea value={note} onChange={setNote} placeholder="e.g. Call to check on quote" /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field></div>
+        <div style={{ width: 120 }}><Field label="Time" hint="Optional"><input type="time" value={time} onChange={e => setTime(e.target.value)} style={inp} /></Field></div>
+      </div>
+      <Field label="Note" hint="Mention call, text or email to get quick buttons"><Textarea value={note} onChange={setNote} placeholder="e.g. Call to check on quote" /></Field>
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
         {rec.followUpDate && <Btn variant="grey" onClick={clear}>Clear</Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
@@ -3073,7 +3089,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B85</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B86</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
