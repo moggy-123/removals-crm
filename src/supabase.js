@@ -210,7 +210,9 @@ export async function saveCatalog(value, updatedAt) {
 // ── Upload a generated PDF to Supabase Storage, return its public URL ────────
 export async function uploadStorageSheet(path, bytes) {
   const blob = new Blob([bytes], { type: "application/pdf" });
-  const { error } = await supabase.storage.from("storage-sheets").upload(path, blob, { upsert: true, contentType: "application/pdf" });
+  const upload = supabase.storage.from("storage-sheets").upload(path, blob, { upsert: true, contentType: "application/pdf" });
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("upload timed out")), 12000));
+  const { error } = await Promise.race([upload, timeout]);
   if (error) throw error;
   const { data } = supabase.storage.from("storage-sheets").getPublicUrl(path);
   return data.publicUrl;
