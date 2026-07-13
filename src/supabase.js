@@ -195,6 +195,12 @@ export async function deletePhoto(path) {
 
 // ── Item catalogue (rooms + furniture volumes/weights), synced across devices ─
 // Stored as a single JSON document in the app_config table (key = 'catalog').
+export async function setCustomerRefStart(nextVal) {
+  const { error } = await supabase.rpc("set_customer_ref_start", { next_val: nextVal });
+  if (error) throw error;
+  return true;
+}
+
 export async function loadCatalog() {
   try {
     const { data, error } = await supabase.from("app_config").select("value, updated_at").eq("key", "catalog").maybeSingle();
