@@ -1260,6 +1260,19 @@ function InventoryModal({ data, enquiry, onClose }) {
       if (it.slot.startsWith("fh::")) { const r = ensure(it.room); r.text = it.raw ?? it.name ?? ""; r.cuFt = it.cuFt || ""; }
       else if (it.slot.startsWith("fhwb::")) { const r = ensure(it.room); r.wardrobe = it.qty || 0; }
     });
+    // Fallback: nothing matched the freehand tags but the enquiry HAS inventory (e.g. it shows on the
+    // PDF). Rebuild the rooms from whatever is saved so the survey never looks blank when data exists.
+    if (!Object.keys(out).length && (enquiry.inventory || []).length) {
+      (enquiry.inventory || []).forEach(it => {
+        if (it.slot === "fh-dismantle") return;
+        const r = ensure(it.room || "Other");
+        if (it.wardrobe) { r.wardrobe = (Number(r.wardrobe) || 0) + (Number(it.qty) || 0); return; }
+        const line = it.raw ?? ((Number(it.qty) || 1) > 1 && it.name ? `${it.qty} x ${it.name}` : (it.name || ""));
+        if (line && line !== "(see volume)") r.text = r.text ? r.text + "\n" + line : line;
+        r.cuFt = (Number(r.cuFt) || 0) + (Number(it.cuFt) || 0) * (Number(it.qty) || 1);
+      });
+      Object.values(out).forEach(r => { r.cuFt = r.cuFt ? Math.round(r.cuFt * 100) / 100 : ""; });
+    }
     return out;
   });
   const [dismantleNote, setDismantleNote] = useState(() => {
@@ -3168,7 +3181,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B94</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B95</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
