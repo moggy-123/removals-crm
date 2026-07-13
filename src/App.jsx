@@ -1250,7 +1250,9 @@ function InventoryModal({ data, enquiry, onClose }) {
   const [lounges, setLounges] = useState(initialLounges);
   // ── Freehand mode (alternative to the detailed catalogue) ──
   const [invMode, setInvMode] = useState((enquiry.inventory || []).some(it => it.freehand) ? "freehand" : "detailed");
+  const draftKey = "rm_fhsurvey_" + (enquiry.id || "new");
   const [freeRooms, setFreeRooms] = useState(() => {
+    try { const d = JSON.parse(localStorage.getItem(draftKey) || "null"); if (d && d.freeRooms && Object.keys(d.freeRooms).length) return d.freeRooms; } catch {}
     const out = {};
     const ensure = r => (out[r] = out[r] || { text: "", cuFt: "", wardrobe: 0 });
     (enquiry.inventory || []).forEach(it => {
@@ -1261,9 +1263,14 @@ function InventoryModal({ data, enquiry, onClose }) {
     return out;
   });
   const [dismantleNote, setDismantleNote] = useState(() => {
+    try { const d = JSON.parse(localStorage.getItem(draftKey) || "null"); if (d && typeof d.dismantleNote === "string") return d.dismantleNote; } catch {}
     const d = (enquiry.inventory || []).find(it => it.freehand && it.slot === "fh-dismantle");
     return d ? (d.raw ?? d.name ?? "") : "";
   });
+  // Autosave the in-progress freehand survey continuously, so a reload/sync/backgrounding can't wipe it.
+  useEffect(() => {
+    try { localStorage.setItem(draftKey, JSON.stringify({ freeRooms, dismantleNote, at: Date.now() })); } catch {}
+  }, [freeRooms, dismantleNote, draftKey]);
   const setFree = (label, key, val) => setFreeRooms(p => ({ ...p, [label]: { text: "", cuFt: "", wardrobe: 0, ...p[label], [key]: val } }));
   const [search, setSearch] = useState("");
   const [openSection, setOpenSection] = useState(getRooms()[0]);
@@ -1348,7 +1355,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   };
   const rec = recommendVehicle(aTot.cuFt);
 
-  async function save() {
+  function buildSurveyRec(advanceStatus) {
     let inventory, vol;
     if (invMode === "freehand") {
       inventory = [];
@@ -1368,13 +1375,43 @@ function InventoryModal({ data, enquiry, onClose }) {
         .map(([slot, v]) => ({ slot, catalogId: v.catalogId ?? null, room: v.room, name: v.name, cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty, dismantle: v.dismantle || "" }));
       vol = totals;
     }
-    const rec2 = {
+    return {
       ...enquiry, inventory: sortInventoryByRoom(inventory),
       volumeCuFt: vol.cuFt, volumeM3: vol.m3, weightKg: vol.kg,
-      status: enquiry.status === "New" ? "Surveyed" : enquiry.status,
+      status: advanceStatus && enquiry.status === "New" ? "Surveyed" : enquiry.status,
     };
+  }
+
+  async function save() {
+    const rec2 = buildSurveyRec(true);
+    try { localStorage.removeItem(draftKey); } catch {}
     await saveAndReload(upsertLocal(data, "enquiries", rec2));
   }
+
+  // Silent cloud backup: persists the in-progress survey to the cloud without reloading,
+  // so it survives even if this phone is lost. Skipped while a field is focused.
+  const dirtyRef = useRef(false);
+  const [cloudAt, setCloudAt] = useState(null);
+  useEffect(() => { dirtyRef.current = true; }, [freeRooms, dismantleNote, lines]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!dirtyRef.current) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return;
+      try {
+        const rec2 = buildSurveyRec(false);
+        const d = loadData();
+        const d2 = upsertLocal(d, "enquiries", { ...rec2, updatedAt: Date.now() });
+        try { localStorage.setItem(DB_KEY, JSON.stringify(d2)); } catch {}
+        pushChangedOnly(d2).catch(() => {});
+        dirtyRef.current = false;
+        setCloudAt(new Date());
+      } catch {}
+    }, 60000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line
+  }, [freeRooms, dismantleNote, lines, invMode]);
+
 
   // Build ordered section list, expanding Bedroom into Bedroom 1..N
   const sections = [];
@@ -1529,6 +1566,11 @@ function InventoryModal({ data, enquiry, onClose }) {
         {[["detailed", "Detailed list"], ["freehand", "Freehand"]].map(([m, lbl]) => (
           <button key={m} onClick={() => setInvMode(m)} style={{ flex: 1, padding: "9px", borderRadius: 9, border: `1.5px solid ${invMode === m ? TEAL : "#E5E7EB"}`, background: invMode === m ? "#F0FDFA" : "#fff", color: invMode === m ? TEAL : "#6B7280", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{lbl}</button>
         ))}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#15803D", background: "#F1F9F4", border: "1px solid #CDE9D6", borderRadius: 8, padding: "6px 10px", marginBottom: 12 }}>
+        <span style={{ fontWeight: 800 }}>✓ Draft saved as you type</span>
+        <span style={{ color: "#6A9E7C" }}>· nothing is lost if you look away{cloudAt ? ` · backed up ${cloudAt.getHours().toString().padStart(2, "0")}:${cloudAt.getMinutes().toString().padStart(2, "0")}` : ""}</span>
       </div>
 
       {invMode === "detailed" && <div style={{ marginBottom: 12 }}><Input value={search} onChange={setSearch} placeholder="🔍 Search items…" /></div>}
@@ -3126,7 +3168,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B92</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B94</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
