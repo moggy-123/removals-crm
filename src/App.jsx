@@ -507,6 +507,7 @@ function Dashboard({ data, setView }) {
   const enquiries = data.enquiries || [];
   const jobs = data.jobs || [];
   const [dashShow, setDashShow] = useState("");
+  const [editFu, setEditFu] = useState(null);
   const open = enquiries.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status));
   const quotesOut = enquiries.filter(e => e.status === "Quoted");
   const now = new Date();
@@ -721,6 +722,7 @@ function Dashboard({ data, setView }) {
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, fu.customerId)}</div>
                     <div style={{ fontSize: 13, color: "#6A7B77" }}>{fu.note || "Follow up"}{fu.kind === "customer" ? " · customer" : ""}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77", marginTop: 2 }}>{overdue ? "Due " : ""}{fmtUK(fu.date)}{fu.time ? ` · ${fu.time}` : ""}</div>
+                    <button onClick={ev => { ev.stopPropagation(); const rec = fu.kind === "enquiry" ? (data.enquiries || []).find(x => x.id === fu.id) : (data.customers || []).find(x => x.id === fu.id); if (rec) setEditFu({ record: rec, table: fu.kind === "enquiry" ? "enquiries" : "customers" }); }} style={{ background: "none", border: "none", color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0 0" }}>Edit / reschedule</button>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                     {fu.kind === "enquiry" && <StatusBadge status={fu.status} />}
@@ -737,6 +739,8 @@ function Dashboard({ data, setView }) {
           })}
         </>
       )}
+
+      {editFu && <FollowUpModal data={data} record={editFu.record} table={editFu.table} onClose={() => setEditFu(null)} />}
 
       {dashShow !== "surveys" && dashShow !== "servicing" && (() => {
         const list = upcoming.filter(({ st }) => inWindow(st.date));
@@ -1728,15 +1732,15 @@ function MovePlanModal({ data, enquiry, onClose }) {
   function bookedOn(date, exceptIdx) {
     const veh = new Set(), crew = new Set();
     if (!date) return { veh, crew };
-    (data.jobs || []).filter(x => !linkedJob || x.id !== linkedJob.id).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    (data.jobs || []).filter(x => (!linkedJob || x.id !== linkedJob.id) && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     days.forEach((st, ix) => { if (ix !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
     if (date) (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
     return { veh, crew };
   }
   async function save() {
-    if (linkedJob) {
+    if (linkedJob && ["Confirmed", "Completed"].includes(linkedJob.status)) {
       const badDays = days.map((d, i) => (!(d.crew && d.crew.length) || !(d.vehicleIds && d.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
-      if (badDays.length) { alert(`Please assign at least one staff member and one vehicle to every day before saving. Still needed on day ${badDays.join(", ")}.`); return; }
+      if (badDays.length) { alert(`This job is confirmed, so please assign at least one staff member and one vehicle to every day before saving. Still needed on day ${badDays.join(", ")}.`); return; }
     }
     // Safety net: no vehicle that's booked out for maintenance can be on a move that day.
     const clashes = [];
@@ -3122,7 +3126,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B89</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B90</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3434,7 +3438,7 @@ function JobDetail({ data, id, setView }) {
   function bookedOn(date, exceptIdx) {
     const veh = new Set(), crew = new Set();
     if (!date) return { veh, crew };
-    (data.jobs || []).filter(x => x.id !== j.id).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    (data.jobs || []).filter(x => x.id !== j.id && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     f.stages.forEach((st, i) => { if (i !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
     (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
     return { veh, crew };
@@ -3600,8 +3604,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const jobsOn = d => showMoves ? rawJobsOn(d) : [];
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
-  const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
-  const bookedStaffOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.crew || []));
+  const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
+  const bookedStaffOn = d => new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || []));
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
 
