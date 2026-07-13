@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart } from "./supabase";
+import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog, uploadStorageSheet } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
@@ -507,7 +507,6 @@ function Dashboard({ data, setView }) {
   const enquiries = data.enquiries || [];
   const jobs = data.jobs || [];
   const [dashShow, setDashShow] = useState("");
-  const [editFu, setEditFu] = useState(null);
   const open = enquiries.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status));
   const quotesOut = enquiries.filter(e => e.status === "Quoted");
   const now = new Date();
@@ -722,7 +721,6 @@ function Dashboard({ data, setView }) {
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, fu.customerId)}</div>
                     <div style={{ fontSize: 13, color: "#6A7B77" }}>{fu.note || "Follow up"}{fu.kind === "customer" ? " · customer" : ""}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77", marginTop: 2 }}>{overdue ? "Due " : ""}{fmtUK(fu.date)}{fu.time ? ` · ${fu.time}` : ""}</div>
-                    <button onClick={ev => { ev.stopPropagation(); const rec = fu.kind === "enquiry" ? (data.enquiries || []).find(x => x.id === fu.id) : (data.customers || []).find(x => x.id === fu.id); if (rec) setEditFu({ record: rec, table: fu.kind === "enquiry" ? "enquiries" : "customers" }); }} style={{ background: "none", border: "none", color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0 0" }}>Edit / reschedule</button>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                     {fu.kind === "enquiry" && <StatusBadge status={fu.status} />}
@@ -739,8 +737,6 @@ function Dashboard({ data, setView }) {
           })}
         </>
       )}
-
-      {editFu && <FollowUpModal data={data} record={editFu.record} table={editFu.table} onClose={() => setEditFu(null)} />}
 
       {dashShow !== "surveys" && dashShow !== "servicing" && (() => {
         const list = upcoming.filter(({ st }) => inWindow(st.date));
@@ -1250,9 +1246,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   const [lounges, setLounges] = useState(initialLounges);
   // ── Freehand mode (alternative to the detailed catalogue) ──
   const [invMode, setInvMode] = useState((enquiry.inventory || []).some(it => it.freehand) ? "freehand" : "detailed");
-  const draftKey = "rm_fhsurvey_" + (enquiry.id || "new");
   const [freeRooms, setFreeRooms] = useState(() => {
-    try { const d = JSON.parse(localStorage.getItem(draftKey) || "null"); if (d && d.freeRooms && Object.keys(d.freeRooms).length) return d.freeRooms; } catch {}
     const out = {};
     const ensure = r => (out[r] = out[r] || { text: "", cuFt: "", wardrobe: 0 });
     (enquiry.inventory || []).forEach(it => {
@@ -1260,30 +1254,12 @@ function InventoryModal({ data, enquiry, onClose }) {
       if (it.slot.startsWith("fh::")) { const r = ensure(it.room); r.text = it.raw ?? it.name ?? ""; r.cuFt = it.cuFt || ""; }
       else if (it.slot.startsWith("fhwb::")) { const r = ensure(it.room); r.wardrobe = it.qty || 0; }
     });
-    // Fallback: nothing matched the freehand tags but the enquiry HAS inventory (e.g. it shows on the
-    // PDF). Rebuild the rooms from whatever is saved so the survey never looks blank when data exists.
-    if (!Object.keys(out).length && (enquiry.inventory || []).length) {
-      (enquiry.inventory || []).forEach(it => {
-        if (it.slot === "fh-dismantle") return;
-        const r = ensure(it.room || "Other");
-        if (it.wardrobe) { r.wardrobe = (Number(r.wardrobe) || 0) + (Number(it.qty) || 0); return; }
-        const line = it.raw ?? ((Number(it.qty) || 1) > 1 && it.name ? `${it.qty} x ${it.name}` : (it.name || ""));
-        if (line && line !== "(see volume)") r.text = r.text ? r.text + "\n" + line : line;
-        r.cuFt = (Number(r.cuFt) || 0) + (Number(it.cuFt) || 0) * (Number(it.qty) || 1);
-      });
-      Object.values(out).forEach(r => { r.cuFt = r.cuFt ? Math.round(r.cuFt * 100) / 100 : ""; });
-    }
     return out;
   });
   const [dismantleNote, setDismantleNote] = useState(() => {
-    try { const d = JSON.parse(localStorage.getItem(draftKey) || "null"); if (d && typeof d.dismantleNote === "string") return d.dismantleNote; } catch {}
     const d = (enquiry.inventory || []).find(it => it.freehand && it.slot === "fh-dismantle");
     return d ? (d.raw ?? d.name ?? "") : "";
   });
-  // Autosave the in-progress freehand survey continuously, so a reload/sync/backgrounding can't wipe it.
-  useEffect(() => {
-    try { localStorage.setItem(draftKey, JSON.stringify({ freeRooms, dismantleNote, at: Date.now() })); } catch {}
-  }, [freeRooms, dismantleNote, draftKey]);
   const setFree = (label, key, val) => setFreeRooms(p => ({ ...p, [label]: { text: "", cuFt: "", wardrobe: 0, ...p[label], [key]: val } }));
   const [search, setSearch] = useState("");
   const [openSection, setOpenSection] = useState(getRooms()[0]);
@@ -1368,7 +1344,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   };
   const rec = recommendVehicle(aTot.cuFt);
 
-  function buildSurveyRec(advanceStatus) {
+  async function save() {
     let inventory, vol;
     if (invMode === "freehand") {
       inventory = [];
@@ -1388,43 +1364,13 @@ function InventoryModal({ data, enquiry, onClose }) {
         .map(([slot, v]) => ({ slot, catalogId: v.catalogId ?? null, room: v.room, name: v.name, cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty, dismantle: v.dismantle || "" }));
       vol = totals;
     }
-    return {
+    const rec2 = {
       ...enquiry, inventory: sortInventoryByRoom(inventory),
       volumeCuFt: vol.cuFt, volumeM3: vol.m3, weightKg: vol.kg,
-      status: advanceStatus && enquiry.status === "New" ? "Surveyed" : enquiry.status,
+      status: enquiry.status === "New" ? "Surveyed" : enquiry.status,
     };
-  }
-
-  async function save() {
-    const rec2 = buildSurveyRec(true);
-    try { localStorage.removeItem(draftKey); } catch {}
     await saveAndReload(upsertLocal(data, "enquiries", rec2));
   }
-
-  // Silent cloud backup: persists the in-progress survey to the cloud without reloading,
-  // so it survives even if this phone is lost. Skipped while a field is focused.
-  const dirtyRef = useRef(false);
-  const [cloudAt, setCloudAt] = useState(null);
-  useEffect(() => { dirtyRef.current = true; }, [freeRooms, dismantleNote, lines]);
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (!dirtyRef.current) return;
-      const ae = document.activeElement;
-      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return;
-      try {
-        const rec2 = buildSurveyRec(false);
-        const d = loadData();
-        const d2 = upsertLocal(d, "enquiries", { ...rec2, updatedAt: Date.now() });
-        try { localStorage.setItem(DB_KEY, JSON.stringify(d2)); } catch {}
-        pushChangedOnly(d2).catch(() => {});
-        dirtyRef.current = false;
-        setCloudAt(new Date());
-      } catch {}
-    }, 60000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line
-  }, [freeRooms, dismantleNote, lines, invMode]);
-
 
   // Build ordered section list, expanding Bedroom into Bedroom 1..N
   const sections = [];
@@ -1579,11 +1525,6 @@ function InventoryModal({ data, enquiry, onClose }) {
         {[["detailed", "Detailed list"], ["freehand", "Freehand"]].map(([m, lbl]) => (
           <button key={m} onClick={() => setInvMode(m)} style={{ flex: 1, padding: "9px", borderRadius: 9, border: `1.5px solid ${invMode === m ? TEAL : "#E5E7EB"}`, background: invMode === m ? "#F0FDFA" : "#fff", color: invMode === m ? TEAL : "#6B7280", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{lbl}</button>
         ))}
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#15803D", background: "#F1F9F4", border: "1px solid #CDE9D6", borderRadius: 8, padding: "6px 10px", marginBottom: 12 }}>
-        <span style={{ fontWeight: 800 }}>✓ Draft saved as you type</span>
-        <span style={{ color: "#6A9E7C" }}>· nothing is lost if you look away{cloudAt ? ` · backed up ${cloudAt.getHours().toString().padStart(2, "0")}:${cloudAt.getMinutes().toString().padStart(2, "0")}` : ""}</span>
       </div>
 
       {invMode === "detailed" && <div style={{ marginBottom: 12 }}><Input value={search} onChange={setSearch} placeholder="🔍 Search items…" /></div>}
@@ -1787,15 +1728,15 @@ function MovePlanModal({ data, enquiry, onClose }) {
   function bookedOn(date, exceptIdx) {
     const veh = new Set(), crew = new Set();
     if (!date) return { veh, crew };
-    (data.jobs || []).filter(x => (!linkedJob || x.id !== linkedJob.id) && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    (data.jobs || []).filter(x => !linkedJob || x.id !== linkedJob.id).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     days.forEach((st, ix) => { if (ix !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
     if (date) (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
     return { veh, crew };
   }
   async function save() {
-    if (linkedJob && ["Confirmed", "Completed"].includes(linkedJob.status)) {
+    if (linkedJob) {
       const badDays = days.map((d, i) => (!(d.crew && d.crew.length) || !(d.vehicleIds && d.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
-      if (badDays.length) { alert(`This job is confirmed, so please assign at least one staff member and one vehicle to every day before saving. Still needed on day ${badDays.join(", ")}.`); return; }
+      if (badDays.length) { alert(`Please assign at least one staff member and one vehicle to every day before saving. Still needed on day ${badDays.join(", ")}.`); return; }
     }
     // Safety net: no vehicle that's booked out for maintenance can be on a move that day.
     const clashes = [];
@@ -1838,7 +1779,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
           </div>
           <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
           <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
-          {linkedJob && ["Confirmed", "Completed"].includes(linkedJob.status) ? (
+          {linkedJob ? (
             <>
               <div style={{ fontSize: 12, background: "#EAF4F2", borderRadius: 9, padding: "7px 11px", marginBottom: 10 }}>
                 <span style={{ color: TEAL_D, fontWeight: 700 }}>Planned:</span> <span style={{ color: "#10211E" }}>{d.staffCount ? `${d.staffCount} staff` : "staff —"}{vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : ""}</span>
@@ -3088,36 +3029,6 @@ async function wipeBusinessData(data) {
   window.location.reload();
 }
 
-function RefStartControl({ data }) {
-  const refs = (data.customers || []).map(c => Number(c.ref)).filter(n => !isNaN(n) && n > 0);
-  const maxRef = refs.length ? Math.max(...refs) : 0;
-  const [val, setVal] = useState(String(maxRef + 1));
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
-  async function apply() {
-    setMsg("");
-    const n = parseInt(val, 10);
-    if (!n || n < 1) { setMsg("Enter a whole number of 1 or more."); return; }
-    if (maxRef && n <= maxRef && !confirm(`Your highest existing reference is #${maxRef}. Starting at ${n} could clash with existing numbers. Continue anyway?`)) return;
-    setBusy(true);
-    try { await setCustomerRefStart(n); setMsg(`Done — the next new customer will be #${n}.`); }
-    catch (e) { setMsg("Couldn't set it: " + ((e && e.message) || e) + ". Make sure the database function is installed."); }
-    setBusy(false);
-  }
-  return (
-    <div style={{ marginTop: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Set the next reference number</div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <div style={{ width: 130 }}><input type="number" inputMode="numeric" value={val} onChange={e => setVal(e.target.value)} style={inp} /></div>
-        <Btn size="sm" disabled={busy} onClick={apply}>{busy ? "Setting…" : "Set"}</Btn>
-      </div>
-      <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 6 }}>Highest reference so far: {maxRef ? `#${maxRef}` : "none yet"}. The next new customer that syncs will take the number you set.</div>
-      {msg && <div style={{ fontSize: 12.5, color: msg.startsWith("Done") ? "#15803D" : "#B45309", marginTop: 6 }}>{msg}</div>}
-    </div>
-  );
-}
-
 function CompanyView({ data, setView }) {
   const restoreRef = useRef(null);
   const [restoring, setRestoring] = useState(false);
@@ -3181,7 +3092,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B95</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B87</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3205,7 +3116,6 @@ function CompanyView({ data, setView }) {
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Customer reference numbers</h4>
           <div style={{ fontSize: 13, color: "#6A7B77", lineHeight: 1.5 }}>Reference numbers are now assigned automatically by the cloud when a new customer syncs — so they can't clash, even if two devices add customers offline at the same time. A new customer added offline shows no number until it reconnects.</div>
-          <RefStartControl data={data} />
         </Card>
 
         <Card style={{ marginBottom: 0 }}>
@@ -3493,7 +3403,7 @@ function JobDetail({ data, id, setView }) {
   function bookedOn(date, exceptIdx) {
     const veh = new Set(), crew = new Set();
     if (!date) return { veh, crew };
-    (data.jobs || []).filter(x => x.id !== j.id && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    (data.jobs || []).filter(x => x.id !== j.id).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     f.stages.forEach((st, i) => { if (i !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
     (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
     return { veh, crew };
@@ -3586,14 +3496,8 @@ function JobDetail({ data, id, setView }) {
             ) : null}
             <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
             <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
-            {["Confirmed", "Completed"].includes(f.status) ? (
-              <>
-                <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
-                <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
-              </>
-            ) : (
-              <div style={{ fontSize: 12.5, color: "#6A7B77", background: "#F5F8F7", border: "1px dashed #D9E2E0", borderRadius: 9, padding: "9px 11px", marginBottom: 10 }}>Actual crew &amp; vehicles are assigned once this move is confirmed.</div>
-            )}
+            <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
+            <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
             <Field label="Day notes"><Input value={st.notes} onChange={v => setStage(idx, "notes", v)} placeholder="(optional)" /></Field>
           </Card>
         );
@@ -3660,13 +3564,13 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const jobs = (data.jobs || []).filter(j => j.moveDate);
   const today = new Date();
   const hasStaff = st => !!(st.crew && st.crew.length);
-  const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
+  const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso && hasStaff(st)) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
   const rawSurveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost").sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
   const jobsOn = d => showMoves ? rawJobsOn(d) : [];
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
-  const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
-  const bookedStaffOn = d => new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || []));
+  const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
+  const bookedStaffOn = d => new Set(rawJobsOn(d).flatMap(m => m.stage.crew || []));
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
 
