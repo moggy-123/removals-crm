@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog, uploadStorageSheet } from "./supabase";
+import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
@@ -3029,6 +3029,36 @@ async function wipeBusinessData(data) {
   window.location.reload();
 }
 
+function RefStartControl({ data }) {
+  const refs = (data.customers || []).map(c => Number(c.ref)).filter(n => !isNaN(n) && n > 0);
+  const maxRef = refs.length ? Math.max(...refs) : 0;
+  const [val, setVal] = useState(String(maxRef + 1));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
+  async function apply() {
+    setMsg("");
+    const n = parseInt(val, 10);
+    if (!n || n < 1) { setMsg("Enter a whole number of 1 or more."); return; }
+    if (maxRef && n <= maxRef && !confirm(`Your highest existing reference is #${maxRef}. Starting at ${n} could clash with existing numbers. Continue anyway?`)) return;
+    setBusy(true);
+    try { await setCustomerRefStart(n); setMsg(`Done — the next new customer will be #${n}.`); }
+    catch (e) { setMsg("Couldn't set it: " + ((e && e.message) || e) + ". Make sure the database function is installed."); }
+    setBusy(false);
+  }
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Set the next reference number</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ width: 130 }}><input type="number" inputMode="numeric" value={val} onChange={e => setVal(e.target.value)} style={inp} /></div>
+        <Btn size="sm" disabled={busy} onClick={apply}>{busy ? "Setting…" : "Set"}</Btn>
+      </div>
+      <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 6 }}>Highest reference so far: {maxRef ? `#${maxRef}` : "none yet"}. The next new customer that syncs will take the number you set.</div>
+      {msg && <div style={{ fontSize: 12.5, color: msg.startsWith("Done") ? "#15803D" : "#B45309", marginTop: 6 }}>{msg}</div>}
+    </div>
+  );
+}
+
 function CompanyView({ data, setView }) {
   const restoreRef = useRef(null);
   const [restoring, setRestoring] = useState(false);
@@ -3092,7 +3122,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B87</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B88</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3116,6 +3146,7 @@ function CompanyView({ data, setView }) {
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Customer reference numbers</h4>
           <div style={{ fontSize: 13, color: "#6A7B77", lineHeight: 1.5 }}>Reference numbers are now assigned automatically by the cloud when a new customer syncs — so they can't clash, even if two devices add customers offline at the same time. A new customer added offline shows no number until it reconnects.</div>
+          <RefStartControl data={data} />
         </Card>
 
         <Card style={{ marginBottom: 0 }}>
