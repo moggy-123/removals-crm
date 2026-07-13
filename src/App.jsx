@@ -1783,7 +1783,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
           </div>
           <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
           <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
-          {linkedJob ? (
+          {linkedJob && ["Confirmed", "Completed"].includes(linkedJob.status) ? (
             <>
               <div style={{ fontSize: 12, background: "#EAF4F2", borderRadius: 9, padding: "7px 11px", marginBottom: 10 }}>
                 <span style={{ color: TEAL_D, fontWeight: 700 }}>Planned:</span> <span style={{ color: "#10211E" }}>{d.staffCount ? `${d.staffCount} staff` : "staff —"}{vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : ""}</span>
@@ -3126,7 +3126,7 @@ function CompanyView({ data, setView }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B90</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B91</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3531,8 +3531,14 @@ function JobDetail({ data, id, setView }) {
             ) : null}
             <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
             <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
-            <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
-            <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
+            {["Confirmed", "Completed"].includes(f.status) ? (
+              <>
+                <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
+                <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
+              </>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "#6A7B77", background: "#F5F8F7", border: "1px dashed #D9E2E0", borderRadius: 9, padding: "9px 11px", marginBottom: 10 }}>Actual crew &amp; vehicles are assigned once this move is confirmed.</div>
+            )}
             <Field label="Day notes"><Input value={st.notes} onChange={v => setStage(idx, "notes", v)} placeholder="(optional)" /></Field>
           </Card>
         );
