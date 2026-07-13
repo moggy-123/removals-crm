@@ -9,15 +9,21 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── Field mapping: app (camelCase) <-> db (snake_case) ──────────────────────
 
-const customerToDb = c => ({
-  id: c.id, name: c.name, company: c.company, phone: c.phone, home_phone: c.homePhone || "", email: c.email,
-  address1: c.address1, address2: c.address2, town: c.town, county: c.county,
-  postcode: c.postcode, cust_type: c.custType || "Private", notes: c.notes, comms: c.comms || null,
-  follow_up_date: c.followUpDate || null, follow_up_note: c.followUpNote || null, follow_up_time: c.followUpTime || null,
-  storage: c.storage || null, storage_jobs: c.storageJobs || null, move: c.move || null, storage_inv: c.storageInv || null,
-  updated_at: c.updatedAt || Date.now(),
-  created_at: c.createdAt || new Date().toISOString(),
-});
+const customerToDb = c => {
+  const o = {
+    id: c.id, name: c.name, company: c.company, phone: c.phone, home_phone: c.homePhone || "", email: c.email,
+    address1: c.address1, address2: c.address2, town: c.town, county: c.county,
+    postcode: c.postcode, cust_type: c.custType || "Private", notes: c.notes, comms: c.comms || null,
+    follow_up_date: c.followUpDate || null, follow_up_note: c.followUpNote || null, follow_up_time: c.followUpTime || null,
+    storage: c.storage || null, storage_jobs: c.storageJobs || null, move: c.move || null, storage_inv: c.storageInv || null,
+    updated_at: c.updatedAt || Date.now(),
+    created_at: c.createdAt || new Date().toISOString(),
+  };
+  // Only send ref once the DB has assigned one. Sending it back stops the column
+  // default (nextval) from firing on every upsert and burning reference numbers.
+  if (c.ref != null && c.ref !== "") o.ref = c.ref;
+  return o;
+};
 const customerFromDb = r => ({
   id: r.id, name: r.name, company: r.company, phone: r.phone, homePhone: r.home_phone || "", email: r.email,
   address1: r.address1, address2: r.address2, town: r.town, county: r.county,
