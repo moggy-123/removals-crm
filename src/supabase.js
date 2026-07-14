@@ -127,16 +127,33 @@ const staffFromDb = r => ({
 
 const MAP_TO_DB = { customers: customerToDb, enquiries: enquiryToDb, jobs: jobToDb, vehicles: vehicleToDb, staff: staffToDb };
 
+// Stable, order-independent, type-insensitive stringify. Numbers and their string form
+// (e.g. 1042 vs "1042", as bigint columns return) produce the same output, and object key
+// order doesn't matter — so a record's fingerprint stays constant across a cloud round-trip.
+function stableStr(v) {
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) return "[" + v.map(stableStr).join(",") + "]";
+  if (typeof v === "object") return "{" + Object.keys(v).sort().map(k => k + ":" + stableStr(v[k])).join(",") + "}";
+  return String(v);
+}
+// Canonical sync fingerprint: based on the DB payload, minus volatile timestamps.
+export function dbSig(table, rec) {
+  const m = MAP_TO_DB[table] ? MAP_TO_DB[table](rec) : rec;
+  const { updated_at, created_at, ...rest } = m || {};
+  return stableStr(rest);
+}
+
 // ── Pull all data from Supabase ─────────────────────────────────────────────
 export async function pullFromCloud() {
+  const withTimeout = (p, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label + " timed out")), 15000))]);
   const [c, e, j, v, s] = await Promise.all([
-    supabase.from("customers").select("*"),
-    supabase.from("enquiries").select("*"),
-    supabase.from("jobs").select("*"),
-    supabase.from("vehicles").select("*"),
-    supabase.from("staff").select("*"),
+    withTimeout(supabase.from("customers").select("*"), "customers"),
+    withTimeout(supabase.from("enquiries").select("*"), "enquiries"),
+    withTimeout(supabase.from("jobs").select("*"), "jobs"),
+    withTimeout(supabase.from("vehicles").select("*"), "vehicles"),
+    withTimeout(supabase.from("staff").select("*"), "staff"),
   ]);
-  if (c.error || e.error || j.error || v.error || s.error) throw new Error("Pull failed");
+  if (c.error || e.error || j.error || v.error || s.error) throw new Error("Pull failed: " + ((c.error || e.error || j.error || v.error || s.error).message || "unknown"));
   return {
     customers: (c.data || []).map(customerFromDb),
     enquiries: (e.data || []).map(enquiryFromDb),
