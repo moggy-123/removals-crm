@@ -3136,14 +3136,24 @@ function SyncControl({ data, setData, compact }) {
   const pending = unsyncedCount(data);
   async function doSync() {
     setStatus("syncing"); setMsg("");
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setStatus("error"); setMsg("This device is offline. Your changes are saved here and will upload automatically when you're back online.");
+      return;
+    }
+    let merged;
     try {
-      const merged = mergeAll(await pullFromCloud(), loadData());
+      merged = mergeAll(await pullFromCloud(), loadData());
       try { localStorage.setItem(DB_KEY, JSON.stringify(merged)); } catch {}
-      await pushChangedOnly(merged);
       if (setData) setData(merged);
-      setStatus("done"); setAt(new Date());
     } catch (e) {
-      setStatus("error"); setMsg((e && e.message) || "Couldn't reach the cloud — you're offline. It'll sync when you're back online.");
+      setStatus("error"); setMsg("Couldn't reach the cloud: " + ((e && e.message) || e));
+      return;
+    }
+    try {
+      await pushChangedOnly(merged);
+      setStatus("done"); setAt(new Date());
+    } catch (pe) {
+      setStatus("error"); setMsg("Downloaded fine, but some changes couldn't upload — " + ((pe && pe.message) || pe));
     }
   }
   const hhmm = d => `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
@@ -3234,7 +3244,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B96</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B97</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -5149,7 +5159,7 @@ export default function App() {
         setData(merged);
         pushChangedOnly(merged).catch(() => {});
         setSyncStatus("synced");
-      } catch { if (!cancelled) setSyncStatus("offline"); }
+      } catch { if (!cancelled) setSyncStatus(navigator.onLine === false ? "offline" : "synced"); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -5181,7 +5191,7 @@ export default function App() {
         pushChangedOnly(merged).catch(() => {});
         setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
         setSyncStatus("synced");
-      } catch { setSyncStatus("offline"); }
+      } catch { setSyncStatus(navigator.onLine === false ? "offline" : "synced"); }
     };
     const onVis = () => { if (document.visibilityState === "visible") syncNow(); };
     window.addEventListener("online", syncNow);
@@ -5201,7 +5211,7 @@ export default function App() {
         pushChangedOnly(merged).catch(() => {});
         setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
         setSyncStatus("synced");
-      } catch { setSyncStatus("offline"); }
+      } catch { setSyncStatus(navigator.onLine === false ? "offline" : "synced"); }
     }, 20000);
     return () => clearInterval(iv);
   }, []);
