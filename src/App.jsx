@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart } from "./supabase";
+import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
@@ -346,7 +346,7 @@ async function pushChangedOnly(data) {
   const changed = [];
   for (const name of TABLES) {
     for (const rec of data[name] || []) {
-      const sig = recSig(rec);
+      const sig = dbSig(name, rec);
       if (sigs[rec.id] !== sig) changed.push({ name, rec, sig });
       else newSigs[rec.id] = sig;
     }
@@ -3151,7 +3151,7 @@ function unsyncedCount(data) {
   let sigs = {};
   try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
   let n = 0;
-  for (const name of TABLES) for (const rec of (data && data[name]) || []) { if (sigs[rec.id] !== recSig(rec)) n++; }
+  for (const name of TABLES) for (const rec of (data && data[name]) || []) { if (sigs[rec.id] !== dbSig(name, rec)) n++; }
   return n;
 }
 
@@ -3270,7 +3270,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B101</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B102</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
