@@ -29,7 +29,7 @@ const customerFromDb = r => ({
   address1: r.address1, address2: r.address2, town: r.town, county: r.county,
   postcode: r.postcode, custType: r.cust_type || "Private", ref: r.ref || null, notes: r.notes,
   storage: r.storage || null, storageJobs: r.storage_jobs || null, move: r.move || null, storageInv: r.storage_inv || null, comms: r.comms || null, followUpDate: r.follow_up_date || "", followUpNote: r.follow_up_note || "", followUpTime: r.follow_up_time || "",
-  updatedAt: r.updated_at, createdAt: r.created_at,
+  updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 
 const enquiryToDb = e => ({
@@ -75,7 +75,7 @@ const enquiryFromDb = r => ({
   quoteStatus: r.quote_status || "Draft", quoteSentDate: r.quote_sent_date || "",
   followUpDate: r.follow_up_date || "", followUpNote: r.follow_up_note || "", followUpTime: r.follow_up_time || "",
   lostReason: r.lost_reason || "", notes: r.notes || "",
-  updatedAt: r.updated_at, createdAt: r.created_at,
+  updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 
 const jobToDb = j => ({
@@ -104,7 +104,7 @@ const jobFromDb = r => ({
   price: r.price || 0, deposit: r.deposit || 0, depositPaid: r.deposit_paid,
   balancePaid: r.balance_paid,
   status: r.status || "Booked", notes: r.notes || "",
-  updatedAt: r.updated_at, createdAt: r.created_at,
+  updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 
 const vehicleToDb = v => ({
@@ -114,7 +114,7 @@ const vehicleToDb = v => ({
 });
 const vehicleFromDb = r => ({
   id: r.id, name: r.name, reg: r.reg || "", vtype: r.vtype || "",
-  capacityCuFt: r.capacity_cuft || 0, maint: r.maintenance || null, updatedAt: r.updated_at, createdAt: r.created_at,
+  capacityCuFt: r.capacity_cuft || 0, maint: r.maintenance || null, updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 const staffToDb = s => ({
   id: s.id, name: s.name, role: s.role || "", phone: s.phone || "", active: s.active !== false,
@@ -122,7 +122,7 @@ const staffToDb = s => ({
 });
 const staffFromDb = r => ({
   id: r.id, name: r.name, role: r.role || "", phone: r.phone || "", active: r.active !== false,
-  updatedAt: r.updated_at, createdAt: r.created_at,
+  updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 
 const MAP_TO_DB = { customers: customerToDb, enquiries: enquiryToDb, jobs: jobToDb, vehicles: vehicleToDb, staff: staffToDb };
