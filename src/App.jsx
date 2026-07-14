@@ -318,26 +318,28 @@ function removeTombstones(ids) {
 async function pushChangedOnly(data) {
   let sigs = {};
   try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
-  let failed = 0, lastError = "";
   const newSigs = {};
+  const changed = [];
   for (const name of TABLES) {
     for (const rec of data[name] || []) {
       const sig = JSON.stringify(rec);
-      if (sigs[rec.id] !== sig) {
-        try {
-          await pushOne(name, rec);
-          newSigs[rec.id] = sig; // record signature ONLY after success
-        } catch (e) {
-          failed++; lastError = e?.message || JSON.stringify(e);
-          if (sigs[rec.id]) newSigs[rec.id] = sigs[rec.id]; // keep old so we retry
-        }
-      } else {
-        newSigs[rec.id] = sig;
-      }
+      if (sigs[rec.id] !== sig) changed.push({ name, rec, sig });
+      else newSigs[rec.id] = sig;
     }
   }
+  let failed = 0, lastError = "", failInfo = "";
+  const BATCH = 6; // push several at once so many records don't take minutes
+  for (let i = 0; i < changed.length; i += BATCH) {
+    const slice = changed.slice(i, i + BATCH);
+    const results = await Promise.allSettled(slice.map(x => pushOne(x.name, x.rec)));
+    results.forEach((r, k) => {
+      const x = slice[k];
+      if (r.status === "fulfilled") { newSigs[x.rec.id] = x.sig; }
+      else { failed++; lastError = (r.reason && r.reason.message) || String(r.reason); failInfo = `${x.name} ${x.rec.ref ? "#" + x.rec.ref : (x.rec.name || x.rec.id)}`; if (sigs[x.rec.id]) newSigs[x.rec.id] = sigs[x.rec.id]; }
+    });
+  }
   try { localStorage.setItem(SIG_KEY, JSON.stringify(newSigs)); } catch {}
-  if (failed > 0) throw new Error(`${failed} record(s) failed to sync. Last error: ${lastError}`);
+  if (failed > 0) throw new Error(`${failed} record(s) couldn't upload (e.g. ${failInfo}): ${lastError}`);
 }
 
 // Replace or insert a record into the right table, return new data object
@@ -3244,7 +3246,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B97</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B98</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
