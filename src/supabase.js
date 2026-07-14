@@ -165,7 +165,9 @@ export async function pushToCloud(data) {
 
 // Push ONE record (fast single saves)
 export async function pushOne(table, record) {
-  const { error } = await supabase.from(table).upsert(MAP_TO_DB[table](record));
+  const req = supabase.from(table).upsert(MAP_TO_DB[table](record));
+  const to = new Promise((_, rej) => setTimeout(() => rej(new Error("request timed out")), 12000));
+  const { error } = await Promise.race([req, to]);
   if (error) throw new Error(error.message || error.details || error.hint || JSON.stringify(error));
 }
 
