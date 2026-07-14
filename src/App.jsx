@@ -315,6 +315,10 @@ function removeTombstones(ids) {
 }
 
 // Push only changed/new records (compared against last-synced signatures)
+// Signature of a record's meaningful content — excludes timestamps, which can change type
+// (number vs string) on a cloud round-trip and would otherwise mark records "changed" forever.
+function recSig(rec) { const { updatedAt, createdAt, ...rest } = rec; return JSON.stringify(rest); }
+
 async function pushChangedOnly(data) {
   let sigs = {};
   try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
@@ -322,7 +326,7 @@ async function pushChangedOnly(data) {
   const changed = [];
   for (const name of TABLES) {
     for (const rec of data[name] || []) {
-      const sig = JSON.stringify(rec);
+      const sig = recSig(rec);
       if (sigs[rec.id] !== sig) changed.push({ name, rec, sig });
       else newSigs[rec.id] = sig;
     }
@@ -3127,7 +3131,7 @@ function unsyncedCount(data) {
   let sigs = {};
   try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
   let n = 0;
-  for (const name of TABLES) for (const rec of (data && data[name]) || []) { if (sigs[rec.id] !== JSON.stringify(rec)) n++; }
+  for (const name of TABLES) for (const rec of (data && data[name]) || []) { if (sigs[rec.id] !== recSig(rec)) n++; }
   return n;
 }
 
@@ -3246,7 +3250,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B98</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B99</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
