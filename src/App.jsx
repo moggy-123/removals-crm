@@ -319,6 +319,26 @@ function removeTombstones(ids) {
 // (number vs string) on a cloud round-trip and would otherwise mark records "changed" forever.
 function recSig(rec) { const { updatedAt, createdAt, ...rest } = rec; return JSON.stringify(rest); }
 
+// One shared, throttled sync path for all the automatic triggers (focus, visibility, interval,
+// realtime). Caps automatic full-database pulls to about once every 30s to keep data use low.
+let LAST_SYNC_AT = 0;
+async function doPullSync(setData, setSyncStatus, opts) {
+  const force = opts && opts.force;
+  if (SAVING_IN_PROGRESS) return;
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return; // don't disrupt an open field/picker
+  const now = Date.now();
+  if (!force && now - LAST_SYNC_AT < 30000) return; // throttle
+  LAST_SYNC_AT = now;
+  try {
+    const merged = mergeAll(await pullFromCloud(), loadData());
+    localStorage.setItem(DB_KEY, JSON.stringify(merged));
+    pushChangedOnly(merged).catch(() => {});
+    setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
+    if (setSyncStatus) setSyncStatus("synced");
+  } catch { if (setSyncStatus) setSyncStatus(navigator.onLine === false ? "offline" : "synced"); }
+}
+
 async function pushChangedOnly(data) {
   let sigs = {};
   try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
@@ -3250,7 +3270,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B99</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B101</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -5171,34 +5191,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let deb = null;
     const channel = supabase
       .channel("removals-changes")
-      .on("postgres_changes", { event: "*", schema: "public" }, async (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public" }, (payload) => {
         if (SAVING_IN_PROGRESS) return;
-        try {
-          if (payload?.eventType === "DELETE" && payload?.old?.id) addTombstone(payload.old.id);
-          const merged = mergeAll(await pullFromCloud(), loadData());
-          localStorage.setItem(DB_KEY, JSON.stringify(merged));
-          setData(merged);
-        } catch {}
+        if (payload?.eventType === "DELETE" && payload?.old?.id) addTombstone(payload.old.id);
+        // Coalesce a burst of changes into a single pull.
+        if (deb) clearTimeout(deb);
+        deb = setTimeout(() => doPullSync(setData, setSyncStatus, { force: true }), 3000);
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { if (deb) clearTimeout(deb); supabase.removeChannel(channel); };
   }, []);
 
   useEffect(() => {
-    const syncNow = async () => {
-      if (SAVING_IN_PROGRESS) return;
-      const ae = document.activeElement;
-      if (ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return; // don't disrupt an open picker/field
-      try {
-        const merged = mergeAll(await pullFromCloud(), loadData());
-        localStorage.setItem(DB_KEY, JSON.stringify(merged));
-        pushChangedOnly(merged).catch(() => {});
-        setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
-        setSyncStatus("synced");
-      } catch { setSyncStatus(navigator.onLine === false ? "offline" : "synced"); }
-    };
+    const syncNow = () => doPullSync(setData, setSyncStatus);
     const onVis = () => { if (document.visibilityState === "visible") syncNow(); };
     window.addEventListener("online", syncNow);
     window.addEventListener("focus", syncNow);
@@ -5207,18 +5215,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const iv = setInterval(async () => {
-      if (SAVING_IN_PROGRESS) return;
-      const ae = document.activeElement;
-      if (ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;
-      try {
-        const merged = mergeAll(await pullFromCloud(), loadData());
-        localStorage.setItem(DB_KEY, JSON.stringify(merged));
-        pushChangedOnly(merged).catch(() => {});
-        setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
-        setSyncStatus("synced");
-      } catch { setSyncStatus(navigator.onLine === false ? "offline" : "synced"); }
-    }, 20000);
+    const iv = setInterval(() => doPullSync(setData, setSyncStatus), 120000);
     return () => clearInterval(iv);
   }, []);
 
