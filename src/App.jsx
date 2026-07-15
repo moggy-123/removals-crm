@@ -3270,7 +3270,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B102</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B103</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -4124,9 +4124,11 @@ function CatalogueEditor({ catalog, onSave, setView }) {
   };
   const delRoom = room => {
     const n = draft.items.filter(it => it.room === room).length;
-    if (n > 0) { alert(`"${room}" still has ${n} item(s). Delete or move them first.`); return; }
-    if (!confirm(`Remove the room "${room}"?`)) return;
-    setDraft(d => ({ ...d, rooms: d.rooms.filter(r => r !== room) }));
+    const msg = n > 0
+      ? `Remove the room "${room}" and its ${n} catalogue item${n !== 1 ? "s" : ""}?\n\nThis just removes it from the room list — surveys you've already saved keep their data.`
+      : `Remove the room "${room}"?`;
+    if (!confirm(msg)) return;
+    setDraft(d => ({ ...d, rooms: d.rooms.filter(r => r !== room), items: d.items.filter(it => it.room !== room) }));
   };
   const moveRoom = (room, dir) => {
     setDraft(d => {
