@@ -1106,7 +1106,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
       cid = uid();
-      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, custType: "Private", ref: null, createdAt: new Date().toISOString() };
+      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, address1: f.fromAddress1 || "", address2: f.fromAddress2 || "", town: f.fromTown || "", postcode: f.fromPostcode || "", custType: "Private", ref: null, createdAt: new Date().toISOString() };
       data2 = upsertLocal(data2, "customers", customer);
     }
     const rec = {
@@ -2833,6 +2833,14 @@ function CommLogForm({ data, customer, entry, preset, onClose }) {
 
 function CustomerDetail({ data, id, setView }) {
   const c = (data.customers || []).find(x => x.id === id);
+  const latestEnq = (data.enquiries || []).filter(x => x.customerId === id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))[0];
+  const msgCtx = latestEnq ? {
+    survey_date: latestEnq.surveyDate ? fmtDate(latestEnq.surveyDate) : "",
+    survey_time: latestEnq.surveyTime || "",
+    date: latestEnq.preferredDate ? fmtDate(latestEnq.preferredDate) : (latestEnq.moveMonth ? fmtMonth(latestEnq.moveMonth) : ""),
+    price: latestEnq.quoteTotal ? gbp(latestEnq.quoteTotal) : "",
+    deposit: latestEnq.quoteTotal ? gbp(Math.round(latestEnq.quoteTotal * 0.6)) : "",
+  } : {};
   const [showEdit, setShowEdit] = useState(false);
   const [jobForm, setJobForm] = useState(null);
   const [commForm, setCommForm] = useState(false);
@@ -2930,7 +2938,7 @@ function CustomerDetail({ data, id, setView }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
         <Btn variant="grey" onClick={() => setFollowUpOpen(true)}>⏰ {c.followUpDate ? "Follow-up ·" + fmtUK(c.followUpDate).slice(0, 5) : "Follow-up"}</Btn>
-        <MessageButton customer={c} ctx={{}} size="md" variant="primary" />
+        <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" />
         {c.phone && <Btn variant="grey" onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; }}>📞 Call</Btn>}
         {c.email && <Btn variant="grey" onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
         <Btn size="sm" variant="danger" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
@@ -3272,7 +3280,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B106</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B107</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
