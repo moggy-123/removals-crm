@@ -2308,7 +2308,10 @@ async function buildSurveyPdf(e, c, data, forStaff = false) {
     order.sort((a, b) => roomRank(a[0]) - roomRank(b[0]));
     order.forEach(([room, items]) => {
       const moving = items.filter(it => it.qty > 0), staying = items.filter(it => it.qty < 0);
-      ensure(20); at(room, M, y, 10, bold, navy); y -= 14;
+      const roomCuft = moving.reduce((s, it) => s + (Number(it.cuFt) || 0) * (Number(it.qty) || 0), 0);
+      ensure(20); at(room, M, y, 10, bold, navy);
+      if (roomCuft > 0) { const t = `${Math.round(roomCuft)} cu ft`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, bold, teal); }
+      y -= 14;
       moving.forEach(it => {
         ensure(13);
         let t = `${it.qty} x ${it.name}`;
@@ -3270,7 +3273,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B103</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B104</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
