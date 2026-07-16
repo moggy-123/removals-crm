@@ -2234,7 +2234,9 @@ function resetZoom() {
   } catch (_e) { /* noop */ }
 }
 
-async function buildSurveyPdf(e, c, data, forStaff = false) {
+async function buildSurveyPdf(e, c, data, audience = "customer") {
+  const forStaff = audience === "staff";
+  const forOffice = audience === "office";
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -2253,7 +2255,7 @@ async function buildSurveyPdf(e, c, data, forStaff = false) {
   np();
   page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
   at("R&J Removals & Storage", M, H - 34, 16, bold, white);
-  at(forStaff ? "Move Plan — STAFF COPY" : "Survey & Move Plan", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
+  at(forOffice ? "Survey & Move Plan — OFFICE COPY" : forStaff ? "Move Plan — STAFF COPY" : "Survey & Move Plan", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
   const ref = c?.ref ? `Ref ${c.ref}` : "";
   if (ref) { const w = bold.widthOfTextAtSize(ref, 12); at(ref, W - M - w, H - 40, 12, bold, white); }
   y = H - 88;
@@ -2310,7 +2312,7 @@ async function buildSurveyPdf(e, c, data, forStaff = false) {
       const moving = items.filter(it => it.qty > 0), staying = items.filter(it => it.qty < 0);
       const roomCuft = moving.reduce((s, it) => s + (Number(it.cuFt) || 0) * (Number(it.qty) || 0), 0);
       ensure(20); at(room, M, y, 10, bold, navy);
-      if (roomCuft > 0) { const t = `${Math.round(roomCuft)} cu ft`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, bold, teal); }
+      if (roomCuft > 0 && forOffice) { const t = `${Math.round(roomCuft)} cu ft`; const w = font.widthOfTextAtSize(t, 9); at(t, W - M - w, y, 9, bold, teal); }
       y -= 14;
       moving.forEach(it => {
         ensure(13);
@@ -2352,7 +2354,7 @@ function SurveyPdfView({ data, id, setView }) {
   if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
   const copy = (which, val) => { if (!val || !navigator.clipboard) return; navigator.clipboard.writeText(val).then(() => { setCopied(which); setTimeout(() => setCopied(""), 1500); }).catch(() => {}); };
   const firstName = (() => { const n = (c?.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim(); return (n.split(/\s+/)[0] || "there"); })();
-  const makeFile = async () => { const { bytes, ref } = await buildSurveyPdf(e, c, data, staff); return { file: new File([bytes], `${staff ? "MovePlan-STAFF" : "Survey"}-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref }; };
+  const makeFile = async () => { const { bytes, ref } = await buildSurveyPdf(e, c, data, mode); return { file: new File([bytes], `${mode === "staff" ? "MovePlan-STAFF" : mode === "office" ? "Survey-OFFICE" : "Survey"}-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref }; };
   const downloadFile = file => { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); };
   const share = async () => {
     setErr(""); setBusy(true);
@@ -2361,7 +2363,7 @@ function SurveyPdfView({ data, id, setView }) {
       const text = staff
         ? `Move plan (staff copy) attached — crew and vehicles included.\n\nR&J Removals & Storage`
         : `Hi ${firstName}, please find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
-      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: staff ? "Move Plan — Staff copy" : "Survey & Move Plan", text });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: staff ? "Move Plan — Staff copy" : mode === "office" ? "Survey — Office copy" : "Survey & Move Plan", text });
       else downloadFile(file);
     } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
     setBusy(false);
@@ -2380,8 +2382,8 @@ function SurveyPdfView({ data, id, setView }) {
       </div>
       <Card>
         <div style={{ display: "flex", gap: 6, background: "#EEF3F2", borderRadius: 10, padding: 4, marginBottom: 12 }}>
-          {["customer", "staff"].map(mo => (
-            <button key={mo} onClick={() => setMode(mo)} style={{ flex: 1, padding: "8px 0", border: "none", borderRadius: 7, cursor: "pointer", fontWeight: 700, fontSize: 13, background: mode === mo ? "#fff" : "transparent", color: mode === mo ? TEAL : "#6A7B77", boxShadow: mode === mo ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>{mo === "customer" ? "Customer copy" : "Staff copy"}</button>
+          {["customer", "staff", "office"].map(mo => (
+            <button key={mo} onClick={() => setMode(mo)} style={{ flex: 1, padding: "8px 0", border: "none", borderRadius: 7, cursor: "pointer", fontWeight: 700, fontSize: 12.5, background: mode === mo ? "#fff" : "transparent", color: mode === mo ? TEAL : "#6A7B77", boxShadow: mode === mo ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>{mo === "customer" ? "Customer" : mo === "staff" ? "Staff" : "Office"}</button>
           ))}
         </div>
         <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>
@@ -3273,7 +3275,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B104</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B105</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
