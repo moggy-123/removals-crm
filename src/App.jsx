@@ -3217,6 +3217,36 @@ function SyncControl({ data, setData, compact }) {
   );
 }
 
+function OrphanCleanup({ data, setData }) {
+  const custIds = new Set((data.customers || []).map(c => c.id));
+  const orphanJobs = (data.jobs || []).filter(j => !custIds.has(j.customerId));
+  const orphanEnq = (data.enquiries || []).filter(e => !custIds.has(e.customerId));
+  const n = orphanJobs.length + orphanEnq.length;
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  async function clean() {
+    if (!n) { setMsg("Nothing to clean — no orphaned records."); return; }
+    if (!confirm(`Remove ${n} orphaned record${n !== 1 ? "s" : ""} that no longer belong to a customer? This can't be undone.`)) return;
+    setBusy(true);
+    let d = loadData();
+    for (const j of orphanJobs) { addTombstone(j.id); try { await deleteRecord("jobs", j.id); } catch {} d = { ...d, jobs: (d.jobs || []).filter(x => x.id !== j.id) }; }
+    for (const e of orphanEnq) { addTombstone(e.id); try { await deleteRecord("enquiries", e.id); } catch {} d = { ...d, enquiries: (d.enquiries || []).filter(x => x.id !== e.id) }; }
+    try { localStorage.setItem(DB_KEY, JSON.stringify(d)); } catch {}
+    if (setData) setData(d);
+    setBusy(false); setMsg(`Removed ${n} orphaned record${n !== 1 ? "s" : ""}.`);
+  }
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 4 }}>Clean up orphaned records</div>
+      <div style={{ fontSize: 12, color: "#94A4A0", marginBottom: 8 }}>Removes any moves or enquiries left without a customer (e.g. after a reset) — including stray calendar entries.</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Btn size="sm" variant={n ? "danger" : "grey"} disabled={busy || !n} onClick={clean}>{busy ? "Cleaning…" : n ? `Remove ${n} orphaned` : "None found"}</Btn>
+        {msg && <div style={{ fontSize: 12.5, color: "#15803D", fontWeight: 700 }}>{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
 function CompanyView({ data, setView, setData }) {
   const restoreRef = useRef(null);
   const [restoring, setRestoring] = useState(false);
@@ -3280,12 +3310,13 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B107</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B108</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 2px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Sync</h4>
           <SyncControl data={data} setData={setData} />
+          <OrphanCleanup data={data} setData={setData} />
         </Card>
         <Card style={{ marginBottom: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
