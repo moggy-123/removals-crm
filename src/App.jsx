@@ -1315,6 +1315,8 @@ function InventoryModal({ data, enquiry, onClose }) {
   }, [freeRooms, dismantleNote, draftKey]);
   const setFree = (label, key, val) => setFreeRooms(p => ({ ...p, [label]: { text: "", cuFt: "", wardrobe: 0, ...p[label], [key]: val } }));
   const [search, setSearch] = useState("");
+  const [detailView, setDetailView] = useState("rooms");
+  const [azRoom, setAzRoom] = useState("");
   const [openSection, setOpenSection] = useState(getRooms()[0]);
   const [customItems, setCustomItems] = useState(getCustomItems());
 
@@ -1563,6 +1565,46 @@ function InventoryModal({ data, enquiry, onClose }) {
   }
 
   const removeLink = { color: "#DC2626", fontSize: 13, fontWeight: 600 };
+  function renderAZ() {
+    const roomOpts = sections.filter(s => s.label).map(s => s.label);
+    const room = (azRoom && roomOpts.includes(azRoom)) ? azRoom : (roomOpts[0] || "");
+    const seen = new Set();
+    const all = [...getFurniture(), ...customItems, ...BOX_ITEMS]
+      .filter(it => { if (seen.has(it.id)) return false; seen.add(it.id); return true; })
+      .filter(it => matches(it.name))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, background: "#F0FDFA", border: `1px solid ${TEAL}`, borderRadius: 10, padding: "8px 12px" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, whiteSpace: "nowrap" }}>Adding to</span>
+          <select value={room} onChange={e => setAzRoom(e.target.value)} style={{ ...inputStyle, flex: 1, marginBottom: 0 }}>
+            {roomOpts.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div style={{ border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
+          {all.length === 0 && <div style={{ padding: 14, fontSize: 13, color: "#9CA3AF" }}>No items match “{search}”.</div>}
+          {all.map(it => {
+            const slot = `${room}::${it.id}`;
+            const q = lines[slot]?.qty || 0;
+            return (
+              <div key={it.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+                <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: q < 0 ? "#9CA3AF" : "#111827" }}>{it.name}{q > 0 && <span style={{ fontSize: 11, color: TEAL, fontWeight: 700 }}> · {q} in {room}</span>}</div>
+                  <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <button onClick={() => bump(slot, { catalogId: it.id, room, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg }, -1)} style={stepBtn(true)}>−</button>
+                  <span style={{ minWidth: 18, textAlign: "center", fontWeight: 700, color: q < 0 ? "#DC2626" : q > 0 ? "#111827" : "#D1D5DB" }}>{q}</span>
+                  <button onClick={() => bump(slot, { catalogId: it.id, room, name: it.name, cuFt: it.cuFt, m3: it.m3, kg: it.kg }, 1)} style={stepBtn(true)}>+</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   function renderFree(s) {
     const { label, isBedroom, isLounge } = s;
     const r = freeRooms[label] || { text: "", cuFt: "", wardrobe: 0 };
@@ -1615,9 +1657,17 @@ function InventoryModal({ data, enquiry, onClose }) {
         <span style={{ color: "#6A9E7C" }}>· nothing is lost if you look away{cloudAt ? ` · backed up ${cloudAt.getHours().toString().padStart(2, "0")}:${cloudAt.getMinutes().toString().padStart(2, "0")}` : ""}</span>
       </div>
 
+      {invMode === "detailed" && (
+        <div style={{ display: "flex", gap: 6, background: "#EEF3F2", borderRadius: 10, padding: 4, marginBottom: 10 }}>
+          {[["rooms", "Rooms"], ["az", "A–Z (all items)"]].map(([m, lbl]) => (
+            <button key={m} onClick={() => setDetailView(m)} style={{ flex: 1, padding: "8px 0", border: "none", borderRadius: 7, cursor: "pointer", fontWeight: 700, fontSize: 13, background: detailView === m ? "#fff" : "transparent", color: detailView === m ? TEAL : "#6A7B77", boxShadow: detailView === m ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>{lbl}</button>
+          ))}
+        </div>
+      )}
+
       {invMode === "detailed" && <div style={{ marginBottom: 12 }}><Input value={search} onChange={setSearch} placeholder="🔍 Search items…" /></div>}
 
-      {sections.map(s => {
+      {invMode === "detailed" && detailView === "az" ? renderAZ() : sections.map(s => {
         if (s.addBedroom) return (invMode === "freehand" || !search) ? <button key="addbed" onClick={addBedroom} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another bedroom</button> : null;
         if (s.addLounge) return (invMode === "freehand" || !search) ? <button key="addlounge" onClick={addLounge} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another lounge</button> : null;
         return invMode === "freehand" ? renderFree(s) : <Section key={s.label} {...s} />;
@@ -3310,7 +3360,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B108</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B110</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3946,7 +3996,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const endIso = isoOf(_nd);
         const inRange = d => d && d >= startIso && d <= endIso;
         const items = [];
-        if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (inRange(st.date) && st.crew && st.crew.length) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
+        if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (inRange(st.date)) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
         if (showSurveys) (data.enquiries||[]).forEach(en => { if (inRange(en.surveyDate) && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
         if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso && b.start <= endIso) items.push({ type:"maint", date: b.start < startIso ? startIso : b.start, time:"00", v, b }); }));
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
