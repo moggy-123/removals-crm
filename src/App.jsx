@@ -2461,15 +2461,26 @@ function MoveManageModal({ data, job, onClose }) {
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const price = Number(f.price) || 0;
   const balanceDue = price - (Number(f.deposit) || 0);
+  const [assign, setAssign] = useState(false);
+  const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "" })));
+  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, name: s.name }));
+  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, name: v.name }));
+  const bookedOn = date => {
+    const veh = new Set(), crew = new Set();
+    (data.jobs || []).filter(x => x.id !== job.id && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    return { veh, crew };
+  };
+  const toggleCrew = (i, name) => setDays(d => d.map((x, ix) => ix === i ? { ...x, crew: x.crew.includes(name) ? x.crew.filter(c => c !== name) : [...x.crew, name] } : x));
+  const toggleVeh = (i, vid) => setDays(d => d.map((x, ix) => ix === i ? { ...x, vehicleIds: x.vehicleIds.includes(vid) ? x.vehicleIds.filter(v => v !== vid) : [...x.vehicleIds, vid] } : x));
   async function persist(extra) {
     await saveAndReload(upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: f.status, ...extra }));
     onClose();
   }
   const confirmMove = () => {
-    const stages = jobStages(job).filter(st => st.date);
-    const bad = stages.filter(st => !(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length));
-    if (!stages.length || bad.length) { alert("Before confirming, assign named staff and at least one vehicle to every day of this move.\n\nOpen the move's day planner, set the crew and vehicles for each day, then confirm."); return; }
-    persist({ status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true });
+    if (!assign) { setAssign(true); return; }
+    const bad = days.map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+    if (!days.length || bad.length) { alert(`Assign named staff and at least one vehicle to every day before confirming.\n\nStill needed on day ${bad.join(", ")}.`); return; }
+    persist({ stages: days, status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true });
   };
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
   const reopenConfirmed = () => persist({ status: "Confirmed" });
@@ -2497,7 +2508,20 @@ function MoveManageModal({ data, job, onClose }) {
       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 8 }}><input type="checkbox" checked={f.depositPaid} onChange={ev => set("depositPaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Deposit paid</label>
       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 16 }}><input type="checkbox" checked={f.balancePaid} onChange={ev => set("balancePaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Balance paid</label>
 
-      {f.status === "Provisional" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}><Icon name="check" size={16} /> Confirm — take 60% deposit ({gbp(Math.round(price * 0.6))})</Btn>}
+      {assign && f.status === "Provisional" && (
+        <div style={{ marginBottom: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>Assign named staff and a vehicle to each day, then press Confirm again.</div>
+          {days.map((d, i) => (
+            <div key={d.id} style={{ border: "1px solid #F0F3F2", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#10211E", marginBottom: 8 }}>{d.type || "Move"}{d.date ? ` · ${fmtDate(d.date)}` : ` · Day ${i + 1}`}{d.time ? ` · ${d.time}` : ""}</div>
+              <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds} takenIds={bookedOn(d.date).veh} onToggle={vid => toggleVeh(i, vid)} empty="No vehicles — add under Company." /></Field>
+              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew} takenIds={bookedOn(d.date).crew} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {f.status === "Provisional" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}><Icon name="check" size={16} /> {assign ? `Confirm — take 60% deposit (${gbp(Math.round(price * 0.6))})` : "Confirm — assign crew & vehicles"}</Btn>}
       {f.status === "Confirmed" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={completeMove}><Icon name="check" size={16} /> Mark move complete</Btn>}
       {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
       {f.status !== "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
@@ -3365,7 +3389,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B112</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B113</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
