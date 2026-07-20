@@ -3429,7 +3429,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B119</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B120</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3964,6 +3964,9 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const bookedStaffOn = d => new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || []));
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
+  const showStaffOff = show === "all" || show === "servicing";
+  const staffOffOnIso = iso => { const out = []; (data.staff || []).forEach(s => ((s.away) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ s, b }); } })); return out; };
+  const staffOffOnCal = d => showStaffOff ? staffOffOnIso(isoOf(d)) : [];
 
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
@@ -3999,6 +4002,14 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
     );
   };
 
+  const StaffOffCard = ({ s, b, big }) => (
+    <div onClick={() => setView({ screen: "company" })}
+      style={{ background:"#FFF7ED", border:"1px solid #FBD9A0", borderLeft:"4px solid #F59E0B", borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer" }}>
+      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:"#B45309", textTransform:"uppercase", letterSpacing:".05em" }}>🌴 Off · {b.reason || "Away"}</div>
+      <div style={{ fontSize: big?14:12.5, fontWeight:800, color:"#10211E", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.name}</div>
+      {b.days > 1 && <div style={{ fontSize: big?12:10.5, color:"#6A7B77", marginTop:1, fontWeight:600 }}>{fmtUK(b.start)} – {fmtUK(isoAdd(b.start, { days: b.days - 1 }))}</div>}
+    </div>
+  );
   const MaintCard = ({ v, b, big }) => (
     <div onClick={() => setView({ screen: "company" })}
       style={{ background:"#F3F6FA", border:"1px solid #D3DEEA", borderLeft:"4px solid #64748B", borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer" }}>
@@ -4110,6 +4121,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (inRange(st.date)) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
         if (showSurveys) (data.enquiries||[]).forEach(en => { if (inRange(en.surveyDate) && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
         if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso && b.start <= endIso) items.push({ type:"maint", date: b.start < startIso ? startIso : b.start, time:"00", v, b }); }));
+        if (showStaffOff) (data.staff||[]).forEach(s => ((s.away)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso && b.start <= endIso) items.push({ type:"staffoff", date: b.start < startIso ? startIso : b.start, time:"00", s, b }); }));
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
         if (!items.length) return <Empty icon="calendar" text="Nothing this month or next" />;
         const groups = [];
@@ -4120,7 +4132,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
               <div key={g.date}>
                 <div style={{ fontSize:13, fontWeight:800, color: sameDay(new Date(g.date+"T00:00"),today)?AMBER:"#10211E", marginBottom:8, textTransform:"uppercase", letterSpacing:".04em" }}>{fmtDate(g.date)} ({dow(g.date)}){sameDay(new Date(g.date+"T00:00"),today)?" · Today":""}</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {g.items.map((it,ix) => it.type==="survey" ? <SurveyCard key={ix} en={it.en} big /> : it.type==="maint" ? <MaintCard key={ix} v={it.v} b={it.b} big /> : <MoveCard key={ix} m={{ job:it.job, stage:it.stage }} big />)}
+                  {g.items.map((it,ix) => it.type==="survey" ? <SurveyCard key={ix} en={it.en} big /> : it.type==="maint" ? <MaintCard key={ix} v={it.v} b={it.b} big /> : it.type==="staffoff" ? <StaffOffCard key={ix} s={it.s} b={it.b} big /> : <MoveCard key={ix} m={{ job:it.job, stage:it.stage }} big />)}
                 </div>
               </div>
             ))}
@@ -4173,6 +4185,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
                     <div style={{ padding:7, display:"flex", flexDirection:"column", gap:6, minHeight:90 }}>
                       {surveysOn(d).map(en => <SurveyCard key={en.id} en={en} />)}
                       {maintOn(d).map((mm,ix) => <MaintCard key={"m"+ix} v={mm.v} b={mm.b} />)}
+                      {staffOffOnCal(d).map((so,ix) => <StaffOffCard key={"so"+ix} s={so.s} b={so.b} />)}
                       {evs.map((m,ix) => <MoveCard key={m.job.id+'-'+ix} m={m} />)}
                     </div>
                     {showMoves && ((data.vehicles||[]).length>0 || (data.staff||[]).filter(s=>s.active!==false).length>0) && (() => {
@@ -4200,8 +4213,9 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {svs.map(en => <SurveyCard key={en.id} en={en} big />)}
               {maintOn(anchor).map((mm,ix) => <MaintCard key={"m"+ix} v={mm.v} b={mm.b} big />)}
+              {staffOffOnCal(anchor).map((so,ix) => <StaffOffCard key={"so"+ix} s={so.s} b={so.b} big />)}
               {evs.map((m,ix) => <MoveCard key={m.job.id+'-'+ix} m={m} big />)}
-              {evs.length===0 && svs.length===0 && maintOn(anchor).length===0 && <Empty icon="truck" text="Nothing booked this day" />}
+              {evs.length===0 && svs.length===0 && maintOn(anchor).length===0 && staffOffOnCal(anchor).length===0 && <Empty icon="truck" text="Nothing booked this day" />}
             </div>
           </div>
         );
