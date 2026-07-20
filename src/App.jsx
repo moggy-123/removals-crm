@@ -183,6 +183,10 @@ function vehOutOn(v, dateISO) {
   const b = (v && v.maint && v.maint.bookings) || [];
   return b.some(x => { if (!x.start) return false; const end = isoAdd(x.start, { days: Math.max(1, Number(x.days) || 1) - 1 }); return dateISO >= x.start && dateISO <= end; });
 }
+function staffOffOn(s, dateISO) {
+  const b = (s && s.away) || [];
+  return b.some(x => { if (!x.start) return false; const end = isoAdd(x.start, { days: Math.max(1, Number(x.days) || 1) - 1 }); return dateISO >= x.start && dateISO <= end; });
+}
 function fmtMonth(ym) {
   if (!ym) return "";
   const [y, m] = String(ym).split("-");
@@ -1845,7 +1849,7 @@ function Row({ label, value }) {
 
 function MovePlanModal({ data, enquiry, onClose }) {
   const linkedJob = (data.jobs || []).find(j => j.enquiryId === enquiry.id);
-  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: v.name }));
+  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
   const vname = id => ((data.vehicles || []).find(v => v.id === id) || {}).name;
   const [days, setDays] = useState(() => (Array.isArray(enquiry.stages) ? enquiry.stages : []).map((d, i) => {
@@ -1868,7 +1872,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
     if (!date) return { veh, crew };
     (data.jobs || []).filter(x => (!linkedJob || x.id !== linkedJob.id) && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     days.forEach((st, ix) => { if (ix !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
-    if (date) (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
+    if (date) (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); }); if (date) (data.staff || []).forEach(s => { if (staffOffOn(s, date)) crew.add(s.name); });
     return { veh, crew };
   }
   async function save() {
@@ -2463,11 +2467,13 @@ function MoveManageModal({ data, job, onClose }) {
   const balanceDue = price - (Number(f.deposit) || 0);
   const [assign, setAssign] = useState(false);
   const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "" })));
-  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, name: s.name }));
-  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, name: v.name }));
+  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
+  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const bookedOn = date => {
     const veh = new Set(), crew = new Set();
     (data.jobs || []).filter(x => x.id !== job.id && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    if (date) (data.vehicles || []).forEach(v => { if (vehOutOn(v, date)) veh.add(v.id); });
+    if (date) (data.staff || []).forEach(s => { if (staffOffOn(s, date)) crew.add(s.name); });
     return { veh, crew };
   };
   const toggleCrew = (i, name) => setDays(d => d.map((x, ix) => ix === i ? { ...x, crew: x.crew.includes(name) ? x.crew.filter(c => c !== name) : [...x.crew, name] } : x));
@@ -3389,7 +3395,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B113</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B116</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3588,10 +3594,17 @@ function VehicleForm({ data, onClose, editVehicle }) {
 function StaffForm({ data, onClose, editStaff }) {
   const s = editStaff || {};
   const [f, setF] = useState({ name: s.name || "", role: s.role || "", phone: s.phone || "", active: s.active !== false });
+  const [away, setAway] = useState(Array.isArray(s.away) ? s.away : []);
+  const [awStart, setAwStart] = useState("");
+  const [awDays, setAwDays] = useState("1");
+  const [awReason, setAwReason] = useState("Holiday");
   const set = (k, val) => setF(p => ({ ...p, [k]: val }));
+  const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
+  const addAway = () => { if (!awStart) { alert("Pick a start date."); return; } setAway(a => [...a, { id: uid(), start: awStart, days: Math.max(1, Number(awDays) || 1), reason: awReason }]); setAwStart(""); setAwDays("1"); setAwReason("Holiday"); };
+  const rmAway = id => setAway(a => a.filter(x => x.id !== id));
   async function save() {
     if (!f.name.trim()) { alert("Enter a name."); return; }
-    const rec = { id: s.id || uid(), name: f.name.trim(), role: f.role, phone: f.phone, active: f.active, createdAt: s.createdAt || new Date().toISOString() };
+    const rec = { id: s.id || uid(), name: f.name.trim(), role: f.role, phone: f.phone, active: f.active, away, createdAt: s.createdAt || new Date().toISOString() };
     await saveAndReload(upsertLocal(data, "staff", rec));
   }
   async function del() {
@@ -3611,7 +3624,30 @@ function StaffForm({ data, onClose, editStaff }) {
           <input type="checkbox" checked={f.active} onChange={e => set("active", e.target.checked)} style={{ width: 18, height: 18 }} /> Currently working (show when assigning crew)
         </label>
       </Field>
-      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+
+      <div style={{ borderTop: "1px solid #EEF3F2", paddingTop: 12, marginTop: 4 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#10211E", marginBottom: 6 }}>Time off / unavailable</div>
+        <div style={{ fontSize: 12, color: "#94A4A0", marginBottom: 8 }}>Mark holiday, sickness or other leave. They can't be assigned to a move on these days.</div>
+        {away.length > 0 && away.slice().sort((a, b) => (a.start || "").localeCompare(b.start || "")).map(p => {
+          const end = isoAdd(p.start, { days: Math.max(1, Number(p.days) || 1) - 1 });
+          return (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F7FAF9", border: "1px solid #EEF3F2", borderRadius: 8, padding: "8px 11px", marginBottom: 6 }}>
+              <div style={{ fontSize: 13, color: "#374151" }}><span style={{ fontWeight: 700 }}>{p.reason || "Off"}</span> · {fmtUK(p.start)}{p.days > 1 ? ` – ${fmtUK(end)}` : ""} <span style={{ color: "#94A4A0" }}>({p.days} day{p.days !== 1 ? "s" : ""})</span></div>
+              <button onClick={() => rmAway(p.id)} style={{ background: "none", border: "none", color: "#DC2626", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Remove</button>
+            </div>
+          );
+        })}
+        <div style={{ display: "flex", gap: 6, alignItems: "flex-end", marginTop: 6 }}>
+          <div style={{ flex: 1 }}><label style={{ fontSize: 11, color: "#6A7B77", fontWeight: 700 }}>From</label><input type="date" value={awStart} onChange={e => setAwStart(e.target.value)} style={inp} /></div>
+          <div style={{ width: 62 }}><label style={{ fontSize: 11, color: "#6A7B77", fontWeight: 700 }}>Days</label><input type="number" min="1" value={awDays} onChange={e => setAwDays(e.target.value)} style={inp} /></div>
+          <div style={{ flex: 1 }}><label style={{ fontSize: 11, color: "#6A7B77", fontWeight: 700 }}>Reason</label>
+            <select value={awReason} onChange={e => setAwReason(e.target.value)} style={inp}>{["Holiday", "Sick", "Training", "Other"].map(r => <option key={r} value={r}>{r}</option>)}</select>
+          </div>
+          <Btn size="sm" onClick={addAway}>Add</Btn>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         {s.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
         <Btn style={{ flex: 2 }} onClick={save}>{s.id ? "Save" : "Add staff"}</Btn>
@@ -3709,7 +3745,7 @@ function JobDetail({ data, id, setView }) {
     if (!date) return { veh, crew };
     (data.jobs || []).filter(x => x.id !== j.id && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     f.stages.forEach((st, i) => { if (i !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
-    (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
+    (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); }); (data.staff || []).forEach(s => { if (staffOffOn(s, date)) crew.add(s.name); });
     return { veh, crew };
   }
 
@@ -3762,7 +3798,7 @@ function JobDetail({ data, id, setView }) {
     SAVING_IN_PROGRESS = false; setView({ screen: "enquiries", filter: "Won" }); window.location.reload();
   }
   const balance = (Number(f.price) || 0) - (Number(f.deposit) || 0);
-  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: v.name }));
+  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
 
   return (
