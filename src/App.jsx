@@ -2465,7 +2465,12 @@ function MoveManageModal({ data, job, onClose }) {
     await saveAndReload(upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: f.status, ...extra }));
     onClose();
   }
-  const confirmMove = () => persist({ status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true });
+  const confirmMove = () => {
+    const stages = jobStages(job).filter(st => st.date);
+    const bad = stages.filter(st => !(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length));
+    if (!stages.length || bad.length) { alert("Before confirming, assign named staff and at least one vehicle to every day of this move.\n\nOpen the move's day planner, set the crew and vehicles for each day, then confirm."); return; }
+    persist({ status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true });
+  };
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
   const reopenConfirmed = () => persist({ status: "Confirmed" });
   const revertProvisional = () => persist({ status: "Provisional" });
@@ -3360,7 +3365,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B110</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B111</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3709,6 +3714,8 @@ function JobDetail({ data, id, setView }) {
   async function completeMove() { await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: "Completed", balancePaid: true }))); }
   async function confirmMove() {
     if (maintClash()) return;
+    const bad = (f.stages || []).map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+    if (!f.stages || !f.stages.length || bad.length) { alert(`Before confirming, assign named staff and at least one vehicle to every day of this move.${bad.length ? `\n\nStill needed on day ${bad.join(", ")}.` : ""}`); return; }
     const price = Number(f.price) || 0;
     const dep = Math.round(price * 0.6);
     setF(p => ({ ...p, status: "Confirmed", deposit: dep, depositPaid: true }));
