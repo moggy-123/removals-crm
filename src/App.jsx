@@ -187,6 +187,19 @@ function staffOffOn(s, dateISO) {
   const b = (s && s.away) || [];
   return b.some(x => { if (!x.start) return false; const end = isoAdd(x.start, { days: Math.max(1, Number(x.days) || 1) - 1 }); return dateISO >= x.start && dateISO <= end; });
 }
+function staffAwayReason(s, dateISO) {
+  const b = (s && s.away) || [];
+  const hit = b.find(x => { if (!x.start) return false; const end = isoAdd(x.start, { days: Math.max(1, Number(x.days) || 1) - 1 }); return dateISO >= x.start && dateISO <= end; });
+  return hit ? (hit.reason || "Away") : "";
+}
+// Map of crew-name -> why they're unavailable on a date ("Holiday"/"Sick"/… or "booked").
+function crewReasonsOn(data, date, exceptJobId) {
+  const m = {};
+  if (!date) return m;
+  (data.staff || []).forEach(s => { const r = staffAwayReason(s, date); if (r) m[s.name] = r; });
+  (data.jobs || []).filter(x => x.id !== exceptJobId && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) (st.crew || []).forEach(c => { if (!m[c]) m[c] = "booked"; }); }));
+  return m;
+}
 function fmtMonth(ym) {
   if (!ym) return "";
   const [y, m] = String(ym).split("-");
@@ -1935,7 +1948,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
                   return <span style={{ color: "#6B7280", display: "block", marginTop: 2 }}>Assigned: <b style={{ color: sc }}>{asgStaff}{plannedStaff ? `/${plannedStaff}` : ""} staff</b> · <b style={{ color: vc }}>{asgVeh}{plannedVeh ? `/${plannedVeh}` : ""} vehicle{asgVeh !== 1 ? "s" : ""}</b></span>;
                 })()}
               </div>
-              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew || []} takenIds={bookedOn(d.date, i).crew} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
+              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew || []} takenIds={bookedOn(d.date, i).crew} takenReasons={crewReasonsOn(data, d.date, linkedJob && linkedJob.id)} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
               <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds || []} takenIds={bookedOn(d.date, i).veh} onToggle={vid => toggleVehId(i, vid)} empty="No vehicles — add under Company." /></Field>
               {!d.date && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: -6, marginBottom: 8 }}>Set a date to see what's already booked that day.</div>}
             </>
@@ -2521,7 +2534,7 @@ function MoveManageModal({ data, job, onClose }) {
             <div key={d.id} style={{ border: "1px solid #F0F3F2", borderRadius: 10, padding: 12, marginBottom: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: "#10211E", marginBottom: 8 }}>{d.type || "Move"}{d.date ? ` · ${fmtDate(d.date)}` : ` · Day ${i + 1}`}{d.time ? ` · ${d.time}` : ""}</div>
               <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds} takenIds={bookedOn(d.date).veh} onToggle={vid => toggleVeh(i, vid)} empty="No vehicles — add under Company." /></Field>
-              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew} takenIds={bookedOn(d.date).crew} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
+              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew} takenIds={bookedOn(d.date).crew} takenReasons={crewReasonsOn(data, d.date, job.id)} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
             </div>
           ))}
         </div>
@@ -3395,7 +3408,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B116</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B117</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3701,17 +3714,18 @@ function jobMoveDate(j) {
   return ds[0] || j.moveDate || "";
 }
 // Generic selectable chip row (vehicles or crew). options: [{id,label}]
-function PickChips({ options, selectedIds, takenIds, onToggle, empty }) {
+function PickChips({ options, selectedIds, takenIds, onToggle, empty, takenReasons }) {
   if (!options.length) return <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>{empty}</div>;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
       {options.map(o => {
         const on = selectedIds.includes(o.id);
         const taken = !on && takenIds.has(o.id);
+        const reason = taken ? ((takenReasons && takenReasons[o.id]) || "booked") : "";
         return (
-          <button key={o.id} onClick={() => !taken && onToggle(o.id)} disabled={taken} title={taken ? "Already booked that day" : ""}
+          <button key={o.id} onClick={() => !taken && onToggle(o.id)} disabled={taken} title={taken ? reason : ""}
             style={{ border: on ? `1.5px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : taken ? "#F2F5F4" : "#fff", color: on ? TEAL_D : taken ? "#B7C3C0" : "#43534F", borderRadius: 99, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: taken ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 5, textDecoration: taken ? "line-through" : "none" }}>
-            {on && <Icon name="check" size={12} color={TEAL} />}{o.label}{taken ? " · booked" : ""}
+            {on && <Icon name="check" size={12} color={TEAL} />}{o.label}{taken ? ` · ${reason}` : ""}
           </button>
         );
       })}
@@ -3849,7 +3863,7 @@ function JobDetail({ data, id, setView }) {
             {["Confirmed", "Completed"].includes(f.status) || confirming ? (
               <>
                 <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
-                <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
+                <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} takenReasons={crewReasonsOn(data, st.date, j.id)} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
               </>
             ) : (
               <div style={{ fontSize: 12.5, color: "#6A7B77", background: "#F5F8F7", border: "1px dashed #D9E2E0", borderRadius: 9, padding: "9px 11px", marginBottom: 10 }}>Actual crew &amp; vehicles are assigned once this move is confirmed.</div>
