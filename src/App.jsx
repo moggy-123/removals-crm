@@ -3429,7 +3429,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B120</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B121</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3961,7 +3961,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
   const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
-  const bookedStaffOn = d => new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || []));
+  const bookedStaffOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || [])); const iso = isoOf(d); (data.staff || []).forEach(st => { if (staffOffOn(st, iso)) s.add(st.name); }); return s; };
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
   const showStaffOff = show === "all" || show === "servicing";
@@ -4051,7 +4051,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         </>}
         {staffActive.length>0 && <>
           <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Staff</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>{staffActive.map(s => <span key={s.id}>{availChip(s.name, bs.has(s.name))}</span>)}</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>{staffActive.map(s => { const off = staffAwayReason(s, isoOf(d)); return <span key={s.id}>{availChip(off ? `${s.name} · ${off}` : s.name, bs.has(s.name))}</span>; })}</div>
         </>}
       </div>
     );
