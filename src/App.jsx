@@ -2479,7 +2479,7 @@ function MoveManageModal({ data, job, onClose }) {
   const price = Number(f.price) || 0;
   const balanceDue = price - (Number(f.deposit) || 0);
   const [assign, setAssign] = useState(false);
-  const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "" })));
+  const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", staffCount: st.staffCount || "", vehTypes: st.vehTypes || {}, crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "" })));
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const bookedOn = date => {
@@ -2498,7 +2498,13 @@ function MoveManageModal({ data, job, onClose }) {
   const confirmMove = () => {
     if (!assign) { setAssign(true); return; }
     const bad = days.map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
-    if (!days.length || bad.length) { alert(`Assign named staff and at least one vehicle to every day before confirming.\n\nStill needed on day ${bad.join(", ")}.`); return; }
+    if (!days.length || bad.length) { alert(`Assign at least one staff member and one vehicle to every day before confirming.\n\nStill needed on day ${bad.join(", ")}.`); return; }
+    const shortfalls = days.map((d, i) => {
+      const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+      const ss = Math.max(0, ps - (d.crew || []).length), vs = Math.max(0, pv - (d.vehicleIds || []).length);
+      return (ss || vs) ? `Day ${i + 1}:${ss ? ` ${ss} more staff` : ""}${ss && vs ? " and" : ""}${vs ? ` ${vs} more vehicle${vs !== 1 ? "s" : ""}` : ""}` : null;
+    }).filter(Boolean);
+    if (shortfalls.length && !confirm(`This move is below the planned resources:\n\n${shortfalls.join("\n")}\n\nConfirm anyway?`)) return;
     persist({ stages: days, status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true });
   };
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
@@ -2530,13 +2536,27 @@ function MoveManageModal({ data, job, onClose }) {
       {assign && f.status === "Provisional" && (
         <div style={{ marginBottom: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>Assign named staff and a vehicle to each day, then press Confirm again.</div>
-          {days.map((d, i) => (
-            <div key={d.id} style={{ border: "1px solid #F0F3F2", borderRadius: 10, padding: 12, marginBottom: 10 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#10211E", marginBottom: 8 }}>{d.type || "Move"}{d.date ? ` · ${fmtDate(d.date)}` : ` · Day ${i + 1}`}{d.time ? ` · ${d.time}` : ""}</div>
-              <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds} takenIds={bookedOn(d.date).veh} onToggle={vid => toggleVeh(i, vid)} empty="No vehicles — add under Company." /></Field>
-              <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew} takenIds={bookedOn(d.date).crew} takenReasons={crewReasonsOn(data, d.date, job.id)} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
-            </div>
-          ))}
+          {days.map((d, i) => {
+            const plannedStaff = Number(d.staffCount) || 0;
+            const plannedVeh = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+            const staffShort = Math.max(0, plannedStaff - (d.crew || []).length);
+            const vehShort = Math.max(0, plannedVeh - (d.vehicleIds || []).length);
+            return (
+              <div key={d.id} style={{ border: "1px solid #F0F3F2", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#10211E", marginBottom: 8 }}>{d.type || "Move"}{d.date ? ` · ${fmtDate(d.date)}` : ` · Day ${i + 1}`}{d.time ? ` · ${d.time}` : ""}</div>
+                {(plannedStaff > 0 || plannedVeh > 0) && (
+                  <div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 8 }}>Planned: {plannedStaff || "—"} staff{plannedVeh ? ` · ${vehTypesSummary(d.vehTypes)}` : ""} · Assigned: {(d.crew || []).length} staff, {(d.vehicleIds || []).length} vehicle{(d.vehicleIds || []).length !== 1 ? "s" : ""}</div>
+                )}
+                {(staffShort > 0 || vehShort > 0) && (
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#B45309", background: "#FFF7ED", border: "1px solid #FBD9A0", borderRadius: 8, padding: "7px 10px", marginBottom: 8 }}>
+                    ⚠ Short on this day:{staffShort > 0 ? ` ${staffShort} more staff` : ""}{staffShort > 0 && vehShort > 0 ? " ·" : ""}{vehShort > 0 ? ` ${vehShort} more vehicle${vehShort !== 1 ? "s" : ""}` : ""} needed.
+                  </div>
+                )}
+                <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={d.vehicleIds} takenIds={bookedOn(d.date).veh} onToggle={vid => toggleVeh(i, vid)} empty="No vehicles — add under Company." /></Field>
+                <Field label="Crew"><PickChips options={crewOpts} selectedIds={d.crew} takenIds={bookedOn(d.date).crew} takenReasons={crewReasonsOn(data, d.date, job.id)} onToggle={name => toggleCrew(i, name)} empty="No staff — add under Company." /></Field>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -3408,7 +3428,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B117</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B118</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
