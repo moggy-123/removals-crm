@@ -117,11 +117,11 @@ const vehicleFromDb = r => ({
   capacityCuFt: r.capacity_cuft || 0, maint: r.maintenance || null, updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 const staffToDb = s => ({
-  id: s.id, name: s.name, role: s.role || "", phone: s.phone || "", active: s.active !== false,
+  id: s.id, name: s.name, role: s.role || "", phone: s.phone || "", active: s.active !== false, away: s.away || null,
   updated_at: s.updatedAt || Date.now(), created_at: s.createdAt || new Date().toISOString(),
 });
 const staffFromDb = r => ({
-  id: r.id, name: r.name, role: r.role || "", phone: r.phone || "", active: r.active !== false,
+  id: r.id, name: r.name, role: r.role || "", phone: r.phone || "", active: r.active !== false, away: r.away || null,
   updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 
