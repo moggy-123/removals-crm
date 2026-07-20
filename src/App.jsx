@@ -1439,6 +1439,7 @@ function InventoryModal({ data, enquiry, onClose }) {
     return {
       ...enquiry, inventory: sortInventoryByRoom(inventory),
       volumeCuFt: vol.cuFt, volumeM3: vol.m3, weightKg: vol.kg,
+      surveyDone: inventory.length > 0 ? true : enquiry.surveyDone,
       status: advanceStatus && enquiry.status === "New" ? "Surveyed" : enquiry.status,
     };
   }
@@ -2722,7 +2723,7 @@ function EnquiryDetail({ data, id, setView }) {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
             <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
-            {e.surveyDate && <Btn size="sm" variant={(e.surveyDone || e.status === "Surveyed") ? "grey" : "primary"} onClick={async () => { const done = !(e.surveyDone || e.status === "Surveyed"); await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{(e.surveyDone || e.status === "Surveyed") ? "✓ Surveyed" : "Mark surveyed"}</Btn>}
+            {e.surveyDate && (() => { const surveyed = e.surveyDone || ["Surveyed", "Quoted", "Won"].includes(e.status); return <Btn size="sm" variant={surveyed ? "grey" : "primary"} onClick={async () => { const done = !surveyed; await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{surveyed ? "✓ Surveyed" : "Mark surveyed"}</Btn>; })()}
           </div>
         </div>
       </Card>
@@ -3428,7 +3429,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B118</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B119</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
