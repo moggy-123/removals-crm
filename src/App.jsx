@@ -3365,7 +3365,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B111</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B112</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3670,6 +3670,7 @@ function JobDetail({ data, id, setView }) {
     status: (j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : (j.status || "Confirmed"), notes: j.notes || "",
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const [confirming, setConfirming] = useState(false);
   const vehLabel = vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; };
 
   const setStage = (idx, key, val) => setF(p => ({ ...p, stages: p.stages.map((st, i) => i === idx ? { ...st, [key]: val } : st) }));
@@ -3714,8 +3715,14 @@ function JobDetail({ data, id, setView }) {
   async function completeMove() { await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: "Completed", balancePaid: true }))); }
   async function confirmMove() {
     if (maintClash()) return;
+    // First press on a provisional move: reveal the crew/vehicle pickers and jump to them.
+    if (!confirming) {
+      setConfirming(true);
+      setTimeout(() => { const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
+      return;
+    }
     const bad = (f.stages || []).map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
-    if (!f.stages || !f.stages.length || bad.length) { alert(`Before confirming, assign named staff and at least one vehicle to every day of this move.${bad.length ? `\n\nStill needed on day ${bad.join(", ")}.` : ""}`); return; }
+    if (!f.stages || !f.stages.length || bad.length) { alert(`Assign named staff and at least one vehicle to every day before confirming.\n\nStill needed on day ${bad.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     const price = Number(f.price) || 0;
     const dep = Math.round(price * 0.6);
     setF(p => ({ ...p, status: "Confirmed", deposit: dep, depositPaid: true }));
@@ -3761,7 +3768,9 @@ function JobDetail({ data, id, setView }) {
         <Row label="Volume" value={j.volumeCuFt ? `${j.volumeCuFt} cu ft · ${j.volumeM3} m³` : ""} />
       </Card>
 
+      <div id="jd-days" />
       <SectionTitle>Days</SectionTitle>
+      {confirming && f.status === "Provisional" && <div style={{ fontSize: 13, fontWeight: 700, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>Assign named staff and a vehicle to every day below, then press Confirm again.</div>}
       {f.stages.map((st, idx) => {
         const booked = bookedOn(st.date, idx);
         return (
@@ -3777,7 +3786,7 @@ function JobDetail({ data, id, setView }) {
             ) : null}
             <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
             <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
-            {["Confirmed", "Completed"].includes(f.status) ? (
+            {["Confirmed", "Completed"].includes(f.status) || confirming ? (
               <>
                 <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
                 <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
@@ -3816,7 +3825,7 @@ function JobDetail({ data, id, setView }) {
       </div>
       {f.status === "Provisional" && (
         <Btn variant="primary" style={{ width: "100%", marginTop: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}>
-          <Icon name="check" size={16} /> Confirm move — take 60% deposit ({gbp(Math.round((Number(f.price) || 0) * 0.6))})
+          <Icon name="check" size={16} /> {confirming ? `Confirm move — take 60% deposit (${gbp(Math.round((Number(f.price) || 0) * 0.6))})` : "Confirm move — assign crew & vehicles"}
         </Btn>
       )}
       {f.status === "Confirmed" && (
