@@ -794,18 +794,26 @@ function Dashboard({ data, setView, setData }) {
         <>
           <SectionTitle>Upcoming moves</SectionTitle>
           {list.length === 0 && <Empty icon="truck" text="No moves this month or next" />}
-          {list.map(({ j, st }, ix) => (
+          {list.map(({ j, st }, ix) => {
+            const provisional = !["Confirmed", "Completed"].includes(j.status);
+            const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
+            const resLine = provisional
+              ? `${vehTypesSummary(st.vehTypes) || "Vehicle TBC"} · ${Number(st.staffCount) || "—"} crew (planned)`
+              : `${vehNames || "No vehicle"}${(st.crew || []).length ? " · " + st.crew.length + " crew" : ""}`;
+            return (
             <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.type || "Move"}{st.time ? ` · ${st.time}` : ""}</div>
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(st.date)} ({dow(st.date)}) · {j.fromTown || "—"} → {j.toTown || "—"}</div>
+                  <div style={{ fontSize: 12.5, color: "#41514E", marginTop: 3, fontWeight: 600 }}>🚚 {resLine}</div>
                 </div>
                 <StatusBadge status={j.status} />
               </div>
             </Card>
-          ))}
+            );
+          })}
         </>
         );
       })()}
@@ -3433,7 +3441,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B126</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B127</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3983,6 +3991,13 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const MoveCard = ({ m, big }) => {
     const j = m.job, st = m.stage;
     const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
+    const provisional = !["Confirmed", "Completed"].includes(j.status);
+    const plannedVeh = vehTypesSummary(st.vehTypes);
+    const plannedStaff = Number(st.staffCount) || 0;
+    const resLine = provisional
+      ? `${plannedVeh || "Vehicle TBC"} · ${plannedStaff || "—"} crew (planned)`
+      : `${vehNames || "No vehicle"}${(st.crew || []).length ? " · " + st.crew.join(", ") : ""}`;
+    const resShort = provisional ? `${plannedVeh || "Veh TBC"} · ${plannedStaff || "—"} crew` : vehNames;
     return (
     <div onClick={() => setView(j.enquiryId ? { screen:"enquiryDetail", id:j.enquiryId } : { screen:"jobDetail", id:j.id })}
       style={{ background:"#fff", border:"1px solid #E9EEED", borderLeft:`4px solid ${colorOf(m)}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
@@ -3995,13 +4010,12 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         {j.fromTown || "—"} → {j.toTown || "—"}
       </div>
       {big && (
-        <div style={{ fontSize:12, color:"#41514E", marginTop:6, display:"flex", flexWrap:"wrap", gap:"2px 10px" }}>
-          <span>{vehNames || "No vehicle"}</span>
-          {(st.crew||[]).length>0 && <span>· {st.crew.join(", ")}</span>}
+        <div style={{ fontSize:12, color:"#41514E", marginTop:6, display:"flex", flexWrap:"wrap", alignItems:"center", gap:"2px 10px" }}>
+          <span>{resLine}</span>
           <StatusBadge status={j.status} />
         </div>
       )}
-      {!big && vehNames && <div style={{ fontSize:10.5, color:"#94A4A0", marginTop:1, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{vehNames}</div>}
+      {!big && resShort && <div style={{ fontSize:10.5, color:"#94A4A0", marginTop:1, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{resShort}</div>}
     </div>
     );
   };
