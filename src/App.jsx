@@ -450,8 +450,7 @@ function Field({ label, children, required, hint }) {
 }
 const inputStyle = { width: "100%", padding: "10px 13px", borderRadius: 11, border: "1.5px solid #E3E9E8", fontSize: 15, background: "#F7FAF9", boxSizing: "border-box", outline: "none", fontFamily: "inherit", color: "#10211E" };
 function Input({ value, onChange, type = "text", placeholder, required, autoComplete, name, inputMode, noAutofill }) {
-  const [ro, setRo] = useState(!!noAutofill);
-  return <input style={inputStyle} type={type} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} autoComplete={noAutofill ? "off" : autoComplete} name={name} inputMode={inputMode} readOnly={ro} onFocus={() => ro && setRo(false)} />;
+  return <input style={inputStyle} type={type} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} autoComplete={noAutofill ? "off" : autoComplete} name={name} inputMode={inputMode} />;
 }
 function Textarea({ value, onChange, placeholder, rows = 3 }) {
   return <textarea style={{ ...inputStyle, resize: "vertical" }} rows={rows} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} />;
@@ -3434,7 +3433,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B125</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B126</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
