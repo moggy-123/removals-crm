@@ -449,8 +449,9 @@ function Field({ label, children, required, hint }) {
   );
 }
 const inputStyle = { width: "100%", padding: "10px 13px", borderRadius: 11, border: "1.5px solid #E3E9E8", fontSize: 15, background: "#F7FAF9", boxSizing: "border-box", outline: "none", fontFamily: "inherit", color: "#10211E" };
-function Input({ value, onChange, type = "text", placeholder, required, autoComplete, name, inputMode }) {
-  return <input style={inputStyle} type={type} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} autoComplete={autoComplete} name={name} inputMode={inputMode} />;
+function Input({ value, onChange, type = "text", placeholder, required, autoComplete, name, inputMode, noAutofill }) {
+  const [ro, setRo] = useState(!!noAutofill);
+  return <input style={inputStyle} type={type} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} autoComplete={noAutofill ? "off" : autoComplete} name={name} inputMode={inputMode} readOnly={ro} onFocus={() => ro && setRo(false)} />;
 }
 function Textarea({ value, onChange, placeholder, rows = 3 }) {
   return <textarea style={{ ...inputStyle, resize: "vertical" }} rows={rows} value={value ?? ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} />;
@@ -1233,11 +1234,11 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
       </div>
 
       <SectionTitle>{f.toStore ? "Moving to (or store address)" : "Moving to"}</SectionTitle>
-      <Field label="Address"><Input value={f.toAddress1} onChange={v => set("toAddress1", v)} placeholder="House/flat & street" autoComplete="section-to address-line1" name="to-address1" /></Field>
+      <Field label="Address"><Input value={f.toAddress1} onChange={v => set("toAddress1", v)} placeholder="House/flat & street" noAutofill /></Field>
       <Field label="Address line 2"><Input value={f.toAddress2} onChange={v => set("toAddress2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Town"><Input value={f.toTown} onChange={v => set("toTown", v)} autoComplete="section-to address-level2" name="to-town" /></Field></div>
-        <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.toPostcode} onChange={v => set("toPostcode", v)} autoComplete="section-to postal-code" name="to-postcode" /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Town"><Input value={f.toTown} onChange={v => set("toTown", v)} noAutofill /></Field></div>
+        <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.toPostcode} onChange={v => set("toPostcode", v)} noAutofill /></Field></div>
       </div>
       <Field label="Property type"><Select value={f.toPropertyType} onChange={v => set("toPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
       <Field label="Floor / level"><Input value={f.toFloor} onChange={v => set("toFloor", v)} placeholder="e.g. Ground, 2nd" /></Field>
@@ -3429,7 +3430,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B123</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B124</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
