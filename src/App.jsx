@@ -1205,12 +1205,14 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
           Prefilled from {(data.jobs || []).some(jb => jb.customerId === customerId && (jb.toAddress1 || jb.toTown)) ? "their last move" : "their saved address"} — edit if needed.
         </div>
       )}
-      <Field label="Address"><Input value={f.fromAddress1} onChange={v => set("fromAddress1", v)} placeholder="House/flat & street" autoComplete="section-from address-line1" name="from-address1" /></Field>
+      <form autoComplete="off" onSubmit={e => e.preventDefault()} style={{ display: "contents" }}>
+      <Field label="Address"><Input value={f.fromAddress1} onChange={v => set("fromAddress1", v)} placeholder="House/flat & street" name="from-address1" /></Field>
       <Field label="Address line 2"><Input value={f.fromAddress2} onChange={v => set("fromAddress2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Town"><Input value={f.fromTown} onChange={v => set("fromTown", v)} autoComplete="section-from address-level2" name="from-town" /></Field></div>
-        <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.fromPostcode} onChange={v => set("fromPostcode", v)} autoComplete="section-from postal-code" name="from-postcode" /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Town"><Input value={f.fromTown} onChange={v => set("fromTown", v)} name="from-town" /></Field></div>
+        <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.fromPostcode} onChange={v => set("fromPostcode", v)} name="from-postcode" /></Field></div>
       </div>
+      </form>
       <Field label="Property type"><Select value={f.fromPropertyType} onChange={v => set("fromPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Bedrooms"><Input type="number" value={f.fromBedrooms} onChange={v => set("fromBedrooms", v)} placeholder="e.g. 3" /></Field></div>
@@ -1234,12 +1236,14 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
       </div>
 
       <SectionTitle>{f.toStore ? "Moving to (or store address)" : "Moving to"}</SectionTitle>
+      <form autoComplete="off" onSubmit={e => e.preventDefault()} style={{ display: "contents" }}>
       <Field label="Address"><Input value={f.toAddress1} onChange={v => set("toAddress1", v)} placeholder="House/flat & street" noAutofill /></Field>
       <Field label="Address line 2"><Input value={f.toAddress2} onChange={v => set("toAddress2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Town"><Input value={f.toTown} onChange={v => set("toTown", v)} noAutofill /></Field></div>
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.toPostcode} onChange={v => set("toPostcode", v)} noAutofill /></Field></div>
       </div>
+      </form>
       <Field label="Property type"><Select value={f.toPropertyType} onChange={v => set("toPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
       <Field label="Floor / level"><Input value={f.toFloor} onChange={v => set("toFloor", v)} placeholder="e.g. Ground, 2nd" /></Field>
       <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={f.toAccess} onChange={v => set("toAccess", v)} rows={2} /></Field>
@@ -3430,7 +3434,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B124</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B125</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
