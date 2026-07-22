@@ -108,7 +108,7 @@ function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(d
 const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
 
 const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost", "Let Go"];
-const JOB_STATUSES = ["Provisional", "Confirmed", "Completed"];
+const JOB_STATUSES = ["Provisional", "Confirmed", "Completed", "Let Go"];
 const PROPERTY_TYPES = ["House", "Flat / Apartment", "Bungalow", "Maisonette", "Office", "Storage Unit", "Other"];
 const QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Declined"];
 
@@ -561,7 +561,7 @@ function Dashboard({ data, setView, setData }) {
   const wonThisMonth = thisMonthEnq.filter(e => e.status === "Won").length;
   const convRate = thisMonthEnq.length ? Math.round((wonThisMonth / thisMonthEnq.length) * 100) : 0;
   const upcoming = jobs
-    .filter(j => j.status !== "Completed")
+    .filter(j => j.status !== "Completed" && j.status !== "Let Go")
     .flatMap(j => jobStages(j).filter(st => st.date && st.date > todayISO()).map(st => ({ j, st })))
     .sort((a, b) => a.st.date.localeCompare(b.st.date))
     .slice(0, 6);
@@ -648,7 +648,7 @@ function Dashboard({ data, setView, setData }) {
         <Stat label="Quoted" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-        <Stat label="Booked moves" value={jobs.filter(j => j.status !== "Completed").length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
+        <Stat label="Booked moves" value={jobs.filter(j => !["Completed","Let Go"].includes(j.status)).length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
         <Stat label="Booked this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
       </div>
 
@@ -3449,7 +3449,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B128</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B129</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
@@ -3828,6 +3828,19 @@ function JobDetail({ data, id, setView }) {
   }
   async function save() { if (maintClash()) return; await saveAndReload(upsertLocal(data, "jobs", buildRec())); }
   async function completeMove() { await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: "Completed", balancePaid: true }))); }
+  async function letGo() {
+    if (!confirm("Let this move go?\n\nIt'll be kept for your records but removed from the calendar, availability and upcoming moves. You can reinstate it later.")) return;
+    let d = upsertLocal(data, "jobs", buildRec({ status: "Let Go" }));
+    const enq = (data.enquiries || []).find(x => x.id === j.enquiryId);
+    if (enq) d = upsertLocal(d, "enquiries", { ...enq, status: "Let Go" });
+    await saveAndReload(d);
+  }
+  async function reinstate() {
+    let d = upsertLocal(data, "jobs", buildRec({ status: "Provisional" }));
+    const enq = (data.enquiries || []).find(x => x.id === j.enquiryId);
+    if (enq && enq.status === "Let Go") d = upsertLocal(d, "enquiries", { ...enq, status: "Won" });
+    await saveAndReload(d);
+  }
   async function confirmMove() {
     if (maintClash()) return;
     // First press on a provisional move: reveal the crew/vehicle pickers and jump to them.
@@ -3948,6 +3961,15 @@ function JobDetail({ data, id, setView }) {
           <Icon name="check" size={16} /> Mark move complete
         </Btn>
       )}
+      {["Provisional", "Confirmed"].includes(f.status) && (
+        <Btn variant="grey" style={{ width: "100%", marginTop: 10 }} onClick={letGo}>Let this move go</Btn>
+      )}
+      {f.status === "Let Go" && (
+        <>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 9, padding: "10px 12px", marginTop: 10 }}>This move has been let go — kept for your records but hidden from the calendar, availability and upcoming moves.</div>
+          <Btn variant="primary" style={{ width: "100%", marginTop: 10 }} onClick={reinstate}>Reinstate move</Btn>
+        </>
+      )}
       {f.status === "Completed" && (
         <div style={{ textAlign: "center", marginTop: 12, fontSize: 13, fontWeight: 700, color: "#059669" }}>✓ Move completed</div>
       )}
@@ -3972,7 +3994,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const showSurveys = show === "all" || show === "surveys";
   const showVeh = show === "all" || show === "servicing";
   const [anchor, setAnchor] = useState(() => initialDate ? new Date(initialDate + "T00:00") : new Date());
-  const jobs = (data.jobs || []).filter(j => j.moveDate);
+  const jobs = (data.jobs || []).filter(j => j.moveDate && j.status !== "Let Go");
   const today = new Date();
   const hasStaff = st => !!(st.crew && st.crew.length);
   const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
