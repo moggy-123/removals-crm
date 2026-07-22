@@ -107,7 +107,7 @@ function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(d
 // Brand
 const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
 
-const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost"];
+const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost", "Let Go"];
 const JOB_STATUSES = ["Provisional", "Confirmed", "Completed"];
 const PROPERTY_TYPES = ["House", "Flat / Apartment", "Bungalow", "Maisonette", "Office", "Storage Unit", "Other"];
 const QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Declined"];
@@ -115,6 +115,8 @@ const QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Declined"];
 const STATUS_META = {
   New:         { color: "#2563EB", bg: "#EFF6FF" },
   Surveyed:    { color: "#0891B2", bg: "#ECFEFF" },
+  Booked:      { color: "#0891B2", bg: "#ECFEFF" },
+  "Let Go":    { color: "#6B7280", bg: "#F3F4F6" },
   Quoted:      { color: "#D97706", bg: "#FFFBEB" },
   Won:         { color: "#059669", bg: "#ECFDF5" },
   Lost:        { color: "#DC2626", bg: "#FEF2F2" },
@@ -2863,14 +2865,20 @@ function CustomersList({ data, setView }) {
       {customers.length === 0 && <Empty icon="customers" text="No customers yet" />}
       {customers.map(c => {
         const jobs = (data.jobs || []).filter(j => j.customerId === c.id).length;
+        const latestEnq = (data.enquiries || []).filter(e => e.customerId === c.id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))[0];
+        const raw = latestEnq && latestEnq.status;
+        const badge = raw ? (raw === "New" || raw === "Surveyed" ? "Booked" : raw) : null;
         return (
           <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 700, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}{c.company ? ` · ${c.company}` : ""}</div>
                 <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{[c.phone, c.town].filter(Boolean).join(" · ") || "—"}</div>
               </div>
-              <span style={{ fontSize: 12, color: "#9CA3AF" }}>{jobs} move{jobs !== 1 ? "s" : ""}</span>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                {badge && <StatusBadge status={badge} />}
+                <span style={{ fontSize: 11.5, color: "#9CA3AF" }}>{jobs} move{jobs !== 1 ? "s" : ""}</span>
+              </div>
             </div>
           </Card>
         );
@@ -3441,7 +3449,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B127</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B128</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
