@@ -2523,6 +2523,19 @@ function MoveManageModal({ data, job, onClose }) {
     persist({ stages: days, status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true });
   };
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
+  const letGoMove = async () => {
+    if (!confirm("Let this move go?\n\nIt'll be kept for your records but removed from the calendar, availability and upcoming moves. You can reinstate it later.")) return;
+    let d2 = upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: "Let Go" });
+    const enq = (data.enquiries || []).find(x => x.id === job.enquiryId);
+    if (enq) d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Let Go" });
+    await saveAndReload(d2);
+  };
+  const reinstateMove = async () => {
+    let d2 = upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: "Provisional" });
+    const enq = (data.enquiries || []).find(x => x.id === job.enquiryId);
+    if (enq && enq.status === "Let Go") d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Won" });
+    await saveAndReload(d2);
+  };
   const reopenConfirmed = () => persist({ status: "Confirmed" });
   const revertProvisional = () => persist({ status: "Provisional" });
   async function removeMove() {
@@ -2580,6 +2593,13 @@ function MoveManageModal({ data, job, onClose }) {
       {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
       {f.status !== "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
 
+      {["Provisional", "Confirmed"].includes(f.status) && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={letGoMove}>Let this move go</Btn>}
+      {f.status === "Let Go" && (
+        <>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>Let go — kept for your records but hidden from the calendar, availability and upcoming moves.</div>
+          <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={reinstateMove}>Reinstate move</Btn>
+        </>
+      )}
       <Btn style={{ width: "100%", marginBottom: 10 }} onClick={() => persist()}><Icon name="check" size={16} /> Save</Btn>
       <Btn variant="danger" style={{ width: "100%" }} onClick={removeMove}><Icon name="trash" size={14} /> Remove move — back to Quoted</Btn>
     </Modal>
@@ -3449,7 +3469,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B129</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B130</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
