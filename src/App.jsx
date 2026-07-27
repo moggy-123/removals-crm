@@ -1406,7 +1406,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   const totals = inventoryTotals(Object.values(lines).filter(v => v.qty > 0).map(v => ({ cuFt: v.cuFt, m3: v.m3, kg: v.kg, qty: v.qty })));
   const freeTotals = (() => {
     let cuFt = 0;
-    Object.values(freeRooms).forEach(r => { cuFt += (Number(r.cuFt) || 0) + (Number(r.wardrobe) || 0) * 12; });
+    Object.values(freeRooms).forEach(r => { cuFt += (Number(r.cuFt) || 0) + (Number(r.wardrobe) || 0) * 15; });
     cuFt = Math.round(cuFt * 100) / 100;
     return { cuFt, m3: Math.round(cuFt * 0.0283168 * 10) / 10, kg: 0 };
   })();
@@ -1441,7 +1441,7 @@ function InventoryModal({ data, enquiry, onClose }) {
         if (text || cuFt) {
           inventory.push({ slot: "fh::" + room, room, name: (text.replace(/\s*\n\s*/g, " · ") || "(see volume)"), raw: text, cuFt: Math.round(cuFt * 100) / 100, m3: Math.round(cuFt * 0.0283168 * 1000) / 1000, kg: 0, qty: 1, freehand: true });
         }
-        if (wb > 0) inventory.push({ slot: "fhwb::" + room, room, name: "Hanging Wardrobe Box", cuFt: 12, m3: 0.34, kg: 18, qty: wb, freehand: true, wardrobe: true });
+        if (wb > 0) inventory.push({ slot: "fhwb::" + room, room, name: "Hanging Wardrobe Box", cuFt: 15, m3: 0.42, kg: 18, qty: wb, freehand: true, wardrobe: true });
       });
       if (dismantleNote.trim()) inventory.push({ slot: "fh-dismantle", room: "Dismantle / Reassemble", name: dismantleNote.trim().replace(/\s*\n\s*/g, " · "), raw: dismantleNote.trim(), cuFt: 0, m3: 0, kg: 0, qty: 1, freehand: true, dismantleNote: true });
       vol = freeTotals;
@@ -3469,7 +3469,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B131</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B132</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
