@@ -3056,7 +3056,7 @@ function CustomerDetail({ data, id, setView }) {
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: getStorageJobs(c).length ? 8 : 0 }}>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Storage jobs</div>
-          <Btn size="sm" onClick={() => { if (!customerHasStorageMove(data, c.id)) { alert("No accepted storage move for this customer.\n\nThe quote must be accepted (job Confirmed) and the move must include going into store — tick “Moving into store” on the enquiry or add an “Into store” day to the move plan."); return; } setJobForm("new"); }}>+ Add storage job</Btn>
+          <Btn size="sm" onClick={() => setJobForm("new")}>+ Add storage job</Btn>
         </div>
         {getStorageJobs(c).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 8 }}>No storage jobs yet.</div>}
         {getStorageJobs(c).map((j, idx) => (
@@ -3469,7 +3469,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B130</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B131</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
