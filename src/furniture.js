@@ -128,7 +128,7 @@ export const BOX_ITEMS = [
   { id: "box-standard", name: "Standard Box (medium)", cuFt: 3.0, m3: 0.085, kg: 10 },
   { id: "box-book", name: "Book Box (small)", cuFt: 2.0, m3: 0.057, kg: 12 },
   { id: "box-picture", name: "Picture / Mirror Box", cuFt: 3.0, m3: 0.085, kg: 8 },
-  { id: "box-wardrobe", name: "Wardrobe Box", cuFt: 12.0, m3: 0.34, kg: 18 },
+  { id: "box-wardrobe", name: "Wardrobe Box", cuFt: 15.0, m3: 0.42, kg: 18 },
 ];
 export const WARDROBE_BOX_ID = "box-wardrobe";
 
