@@ -2411,15 +2411,16 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
     kvWrap("To", e.toAccess);
   }
 
-  const stages = Array.isArray(e.stages) ? e.stages : [];
-  const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? v.name : ""; };
+  const _job = (data.jobs || []).find(j => j.enquiryId === e.id);
+  const stages = (_job && Array.isArray(_job.stages) && _job.stages.length) ? _job.stages : (Array.isArray(e.stages) ? e.stages : []);
+  const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? (v.reg ? `${v.name} (${v.reg})` : v.name) : ""; };
   heading("Move plan");
   if (!stages.length) { at("To be confirmed.", M, y, 9.5, font, navy); y -= 16; }
   else stages.forEach((d, i) => {
     ensure(40);
     const when = [d.date ? `${fmtUK(d.date)} (${dow(d.date)})` : "Date TBC", d.time].filter(Boolean).join(" · ");
     at(`Day ${i + 1}`, M, y, 9.5, bold, navy); at(`${d.type || "Move"}  —  ${when}`, M + 50, y, 9.5, font, navy); y -= 14;
-    if (forStaff) {
+    if (forStaff || forOffice) {
       const crew = (d.crew || []).join(", "); const vehs = (d.vehicleIds || []).map(vName).filter(Boolean).join(", ");
       at("Crew:", M + 50, y, 9, bold, grey); at(crew || "-", M + 84, y, 9, font, navy); y -= 12;
       at("Vehicle:", M + 50, y, 9, bold, grey); at(vehs || "-", M + 92, y, 9, font, navy); y -= 16;
@@ -3512,7 +3513,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B134</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B135</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
