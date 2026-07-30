@@ -2140,6 +2140,9 @@ async function buildQuotePdf(e, c) {
   const ref = c?.ref ? String(c.ref) : "";
   const fromAddr = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join("  ");
   const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join("  ");
+  const extraStr = list => (list || []).map(s => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(" "); return a ? a + (s.note ? ` (${s.note})` : "") : ""; }).filter(Boolean);
+  const fromFull = [fromAddr, ...extraStr(e.extraFrom)].filter(Boolean).join("   +   ");
+  const toFull = [toAddr, ...extraStr(e.extraTo)].filter(Boolean).join("   +   ");
   const surveyWhen = e.surveyDate ? fmtUK(e.surveyDate) : "";
   const moveWhen = e.preferredDate ? fmtUK(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
 
@@ -2161,7 +2164,8 @@ async function buildQuotePdf(e, c) {
   L(92, 92.5, surveyor); L(304, 92.5, surveyWhen); L(472, 93, ref, 13.2, bold, red);
   L(92, 109, c?.name); L(304, 109, c?.homePhone); L(470, 109, c?.phone);
   L(92, 126, c?.email); L(304, 126, moveWhen); L(472, 126, e.exchanged ? "Yes" : "No");
-  L(92, 144, fromAddr); L(92, 180, toAddr);
+  const fitSize = (t, maxW, base = 9, min = 6) => { let s = base; const tt = clean(t); while (s > min && font.widthOfTextAtSize(tt, s) > maxW) s -= 0.5; return s; };
+  L(92, 144, fromFull, fitSize(fromFull, 468)); L(92, 180, toFull, fitSize(toFull, 468));
   // ── MOVING grid: dynamic — one row per quote line, totals directly beneath ──
   {
     const GREY = rgb(0.5, 0.5, 0.5), HEADF = rgb(0.93, 0.93, 0.93), WHITE = rgb(1, 1, 1), BLACK = rgb(0, 0, 0);
@@ -3508,7 +3512,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B133</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B134</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
