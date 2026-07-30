@@ -2779,10 +2779,12 @@ function EnquiryDetail({ data, id, setView }) {
       <Card>
         <Row label="Move date" value={e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : (e.moveMonth ? fmtMonth(e.moveMonth) + " (month)" : "TBC")} />
         <Row label="From" value={[e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join(", ")} />
+        {(e.extraFrom || []).map((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); return a ? <Row key={"ef" + i} label={`+ Pickup ${i + 2}`} value={a + (s.note ? ` (${s.note})` : "")} /> : null; })}
         <Row label="From property" value={[e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.fromFloor].filter(Boolean).join(" · ")} />
         {e.fromAccess && <Row label="From access" value={e.fromAccess} />}
         {storeSummary(e) && <Row label="Storage" value={storeSummary(e)} />}
         <Row label="To" value={[e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join(", ")} />
+        {(e.extraTo || []).map((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); return a ? <Row key={"et" + i} label={`+ Delivery ${i + 2}`} value={a + (s.note ? ` (${s.note})` : "")} /> : null; })}
         <Row label="To property" value={[e.toPropertyType, e.toFloor].filter(Boolean).join(" · ")} />
         {e.toAccess && <Row label="To access" value={e.toAccess} />}
         {e.notes && <Row label="Notes" value={e.notes} />}
@@ -3513,7 +3515,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B135</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B136</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
