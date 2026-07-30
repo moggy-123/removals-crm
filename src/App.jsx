@@ -1089,8 +1089,13 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
     surveyor: e.surveyor || "",
     exchanged: e.exchanged || false,
+    extraFrom: Array.isArray(e.extraFrom) ? e.extraFrom : [],
+    extraTo: Array.isArray(e.extraTo) ? e.extraTo : [],
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const addStop = key => set(key, [...(f[key] || []), { id: uid(), address1: "", town: "", postcode: "", note: "" }]);
+  const setStop = (key, i, k, v) => set(key, (f[key] || []).map((x, ix) => ix === i ? { ...x, [k]: v } : x));
+  const rmStop = (key, i) => set(key, (f[key] || []).filter((_, ix) => ix !== i));
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [pickerKey, setPickerKey] = useState(0);
@@ -1229,6 +1234,22 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
       </div>
       <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={f.fromAccess} onChange={v => set("fromAccess", v)} rows={2} /></Field>
 
+      {(f.extraFrom || []).map((s, i) => (
+        <div key={s.id || i} style={{ border: "1px solid #E9EEED", borderRadius: 10, padding: 11, marginTop: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: TEAL_D }}>Extra pickup {i + 1}</span>
+            <button type="button" onClick={() => rmStop("extraFrom", i)} style={{ background: "none", border: "none", color: "#DC2626", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Remove</button>
+          </div>
+          <Field label="Address"><Input value={s.address1} onChange={v => setStop("extraFrom", i, "address1", v)} placeholder="House/flat & street" noAutofill /></Field>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><Field label="Town"><Input value={s.town} onChange={v => setStop("extraFrom", i, "town", v)} noAutofill /></Field></div>
+            <div style={{ width: 120 }}><Field label="Postcode"><Input value={s.postcode} onChange={v => setStop("extraFrom", i, "postcode", v)} noAutofill /></Field></div>
+          </div>
+          <Field label="Note" hint="e.g. lock-up, garage, storage unit"><Input value={s.note} onChange={v => setStop("extraFrom", i, "note", v)} /></Field>
+        </div>
+      ))}
+      <button type="button" onClick={() => addStop("extraFrom")} style={{ background: "#F0FDFA", border: `1px dashed ${TEAL}`, color: TEAL_D, borderRadius: 9, padding: "9px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "100%", marginTop: 8 }}>+ Add another pickup address</button>
+
       <div style={{ marginTop: 4, marginBottom: 4, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
         <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontSize: 15, fontWeight: 700, color: "#10211E" }}>
           <input type="checkbox" checked={!!f.toStore} onChange={e2 => set("toStore", e2.target.checked)} style={{ width: 18, height: 18, accentColor: TEAL }} />
@@ -1256,6 +1277,22 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
       <Field label="Property type"><Select value={f.toPropertyType} onChange={v => set("toPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
       <Field label="Floor / level"><Input value={f.toFloor} onChange={v => set("toFloor", v)} placeholder="e.g. Ground, 2nd" /></Field>
       <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={f.toAccess} onChange={v => set("toAccess", v)} rows={2} /></Field>
+
+      {(f.extraTo || []).map((s, i) => (
+        <div key={s.id || i} style={{ border: "1px solid #E9EEED", borderRadius: 10, padding: 11, marginTop: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: TEAL_D }}>Extra delivery {i + 1}</span>
+            <button type="button" onClick={() => rmStop("extraTo", i)} style={{ background: "none", border: "none", color: "#DC2626", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Remove</button>
+          </div>
+          <Field label="Address"><Input value={s.address1} onChange={v => setStop("extraTo", i, "address1", v)} placeholder="House/flat & street" noAutofill /></Field>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><Field label="Town"><Input value={s.town} onChange={v => setStop("extraTo", i, "town", v)} noAutofill /></Field></div>
+            <div style={{ width: 120 }}><Field label="Postcode"><Input value={s.postcode} onChange={v => setStop("extraTo", i, "postcode", v)} noAutofill /></Field></div>
+          </div>
+          <Field label="Note" hint="e.g. storage, second address"><Input value={s.note} onChange={v => setStop("extraTo", i, "note", v)} /></Field>
+        </div>
+      ))}
+      <button type="button" onClick={() => addStop("extraTo")} style={{ background: "#F0FDFA", border: `1px dashed ${TEAL}`, color: TEAL_D, borderRadius: 9, padding: "9px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "100%", marginTop: 8 }}>+ Add another delivery address</button>
 
       <Field label="General notes"><Textarea value={f.notes} onChange={v => set("notes", v.split("\n").slice(0, 8).join("\n"))} rows={8} /></Field>
 
@@ -2359,7 +2396,9 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
     y -= 2;
   };
   kv("Moving from", fromAddr);
+  (e.extraFrom || []).forEach((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); if (a) kv(`+ Pickup ${i + 2}`, a + (s.note ? `  (${s.note})` : "")); });
   kv("Moving to", toAddr);
+  (e.extraTo || []).forEach((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); if (a) kv(`+ Delivery ${i + 2}`, a + (s.note ? `  (${s.note})` : "")); });
   if (storeSummary(e)) kv("Storage", storeSummary(e));
 
   if (e.fromAccess || e.toAccess) {
@@ -3469,7 +3508,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B132</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B133</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
