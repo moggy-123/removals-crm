@@ -830,13 +830,14 @@ function SectionTitle({ children }) {
 function EnquiriesList({ data, setView, initialFilter }) {
   const [filter, setFilter] = useState(initialFilter || "Surveyed");
   const enquiries = data.enquiries || [];
-  const filters = [...ENQUIRY_STATUSES, "All"];
+  const filters = ["All", ...ENQUIRY_STATUSES];
   const moveCompleted = e => (data.jobs || []).some(j => j.enquiryId === e.id && j.status === "Completed");
   const moveOf = e => (data.jobs || []).find(j => j.enquiryId === e.id);
   const moveDateOf = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || "9999-99"; };
+  const baseList = enquiries.filter(e => !moveCompleted(e));
+  const countFor = f => f === "All" ? baseList.length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => e.status === f).length;
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
-  const shown = enquiries
-    .filter(e => !moveCompleted(e))
+  const shown = baseList
     .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : e.status === filter)
     .sort((a, b) => filter === "Won"
       ? moveDateOf(a).localeCompare(moveDateOf(b))
@@ -848,21 +849,28 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
         <Btn size="sm" onClick={() => setView({ screen: "newEnquiry" })}><Icon name="plus" size={14} /> New</Btn>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, background: "#E9EDEC", borderRadius: 14, padding: 4, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6, marginBottom: 10, scrollbarWidth: "none" }}>
         {filters.map(f => {
           const active = filter === f;
-          const alert = f === "Surveyed" && surveyedCount > 0;
+          const label = f === "Won" ? "Booked" : f;
+          const n = countFor(f);
+          const meta = STATUS_META[f] || { color: "#0E7C73", bg: "#EAF4F2" };
+          const accent = f === "All" ? "#374151" : (meta.color || "#374151");
           return (
             <button key={f} onClick={() => setFilter(f)} style={{
-              padding: "9px 4px", borderRadius: 10, border: "none", cursor: "pointer",
-              fontSize: 13.5, fontWeight: active ? 700 : 600, transition: "all .15s",
-              background: active ? "#fff" : "transparent",
-              color: active ? (alert ? "#DC2626" : NAVY) : (alert ? "#DC2626" : "#6B7280"),
-              boxShadow: active ? "0 1px 4px rgba(15,46,42,.12)" : "none",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+              flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 7,
+              padding: "8px 14px", borderRadius: 999, cursor: "pointer", whiteSpace: "nowrap",
+              border: active ? `1.5px solid ${accent}` : "1.5px solid #E5E9E8",
+              background: active ? accent : "#fff",
+              color: active ? "#fff" : "#43534F", fontSize: 13.5, fontWeight: 700,
+              boxShadow: active ? "0 2px 8px rgba(16,33,30,.14)" : "none", transition: "all .15s",
             }}>
-              {f === "Won" ? "Booked" : f}
-              {alert ? <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "#DC2626", borderRadius: 99, minWidth: 16, height: 16, lineHeight: "16px", padding: "0 4px", textAlign: "center" }}>{surveyedCount}</span> : null}
+              {label}
+              <span style={{
+                fontSize: 11.5, fontWeight: 800, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999,
+                background: active ? "rgba(255,255,255,.25)" : (meta.bg || "#EEF2F1"),
+                color: active ? "#fff" : accent,
+              }}>{n}</span>
             </button>
           );
         })}
@@ -3515,7 +3523,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B137</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B138</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
