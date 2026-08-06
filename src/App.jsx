@@ -65,15 +65,22 @@ function sheetsForJob(c, job) {
   const isFirst = jobs[0] && job && jobs[0].id === job.id;
   return ((c && c.storageInv) || []).filter(s => (job && s.jobId === job.id) || (!s.jobId && isFirst));
 }
+// A container is still "in store" if any of its items have quantity remaining after collections.
+function containerInStore(sheet, ct) {
+  const items = ct.items || [];
+  if (!items.length) return true; // no item detail — assume still in store
+  const collectedQty = name => (sheet.collections || []).reduce((n, col) => n + (col.items || []).filter(ci => ci.container === (ct.number || "") && ci.name === name).reduce((m, ci) => m + (Number(ci.qty) || 0), 0), 0);
+  return items.some(it => Math.max(0, (Number(it.qty) || 0) - collectedQty(it.name)) > 0);
+}
 // Container count + numbers are derived from the job's inventory sheets, not typed in.
 function jobContainerNos(c, job) {
   const nos = []; const seen = new Set();
-  sheetsForJob(c, job).forEach(s => (s.containers || []).forEach(ct => { const key = (ct.number || "").trim(); if (key && !seen.has(key)) { seen.add(key); nos.push(key); } }));
+  sheetsForJob(c, job).forEach(s => (s.containers || []).forEach(ct => { if (!containerInStore(s, ct)) return; const key = (ct.number || "").trim(); if (key && !seen.has(key)) { seen.add(key); nos.push(key); } }));
   return nos;
 }
 function jobContainerCount(c, job) {
   let n = 0; const seen = new Set();
-  sheetsForJob(c, job).forEach(s => (s.containers || []).forEach(ct => { const key = (ct.number || "").trim(); if (key) { if (!seen.has(key)) { seen.add(key); n++; } } else n++; }));
+  sheetsForJob(c, job).forEach(s => (s.containers || []).forEach(ct => { if (!containerInStore(s, ct)) return; const key = (ct.number || "").trim(); if (key) { if (!seen.has(key)) { seen.add(key); n++; } } else n++; }));
   return n;
 }
 // Loose items are captured on the inventory sheets; gather any notes for the job.
@@ -3523,7 +3530,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B138</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B139</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
