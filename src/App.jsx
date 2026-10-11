@@ -4195,11 +4195,6 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           <Btn size="sm" variant="grey" onClick={()=>setAnchor(new Date())}>Today</Btn>
           <span style={{ fontSize:17, fontWeight:800, letterSpacing:"-.01em", color:"#10211E" }}>{rangeLabel}</span>
         </div>
-        <div style={{ display: "inline-flex", background: "#E9EDEC", borderRadius: 12, padding: 4, gap: 3 }}>
-          {["agenda", "day", "week", "month"].map(m => (
-            <button key={m} onClick={() => setMode(m)} style={{ border: "none", background: mode === m ? "#fff" : "transparent", color: mode === m ? TEAL_D : "#6B7280", fontWeight: mode === m ? 700 : 600, fontSize: 13, padding: "7px 13px", borderRadius: 9, cursor: "pointer", textTransform: "capitalize", boxShadow: mode === m ? "0 1px 4px rgba(15,46,42,.12)" : "none" }}>{m}</button>
-          ))}
-        </div>
       </div>
 
       {/* Filter tiles — same style as the dashboard stat cards. Counts cover the period on screen. */}
@@ -4242,9 +4237,23 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         );
       })()}
 
-      <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
-        <Icon name="plus" size={16} /> New Enquiry
-      </Btn>
+      {/* View tiles — same size and style as the filter tiles above */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
+        {[["agenda", "Agenda", "This month & next"], ["day", "Day", "One day"], ["week", "Week", "7 days"], ["month", "Month", "Full month"]].map(([m, label, sub]) => {
+          const active = mode === m;
+          return (
+            <button key={m} onClick={() => setMode(m)} style={{
+              textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
+              background: active ? "#EAF4F2" : "#fff", borderRadius: 12, padding: "14px 12px",
+              border: active ? `2px solid ${TEAL}` : "2px solid #F3F4F6",
+              boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
+            }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: active ? TEAL : "#374151", lineHeight: 1 }}>{label}</div>
+              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 5, fontWeight: 600 }}>{sub}</div>
+            </button>
+          );
+        })}
+      </div>
 
       {showVeh && (() => {
         const nowIso = isoOf(today);
