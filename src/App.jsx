@@ -4202,17 +4202,49 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4, background: "#E9EDEC", borderRadius: 14, padding: 4, marginBottom: 14 }}>
-        {[["all", "All"], ["moves", "Moves"], ["surveys", "Surveys"], ["servicing", "🔧"]].map(([v, label]) => (
-          <button key={v} onClick={() => setShow(v)} style={{
-            border: "none", borderRadius: 10, padding: "9px 4px", fontSize: 13.5, cursor: "pointer",
-            fontWeight: show === v ? 700 : 600, transition: "all .15s",
-            background: show === v ? "#fff" : "transparent",
-            color: show === v ? NAVY : "#6B7280",
-            boxShadow: show === v ? "0 1px 4px rgba(15,46,42,.12)" : "none",
-          }}>{label}</button>
-        ))}
-      </div>
+      {/* Filter tiles — same style as the dashboard stat cards. Counts cover the period on screen. */}
+      {(() => {
+        let fromIso, toIso;
+        if (mode === "agenda") { fromIso = isoOf(today); toIso = isoOf(new Date(today.getFullYear(), today.getMonth() + 2, 0)); }
+        else if (mode === "day") { fromIso = toIso = isoOf(anchor); }
+        else if (mode === "week") { const s = startOfWeek(anchor); fromIso = isoOf(s); toIso = isoOf(addDays(s, 6)); }
+        else { fromIso = isoOf(new Date(anchor.getFullYear(), anchor.getMonth(), 1)); toIso = isoOf(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0)); }
+        const inR = d => d && d >= fromIso && d <= toIso;
+        const overlaps = b => b.start && b.start <= toIso && isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }) >= fromIso;
+        let movesN = 0; jobs.forEach(j => jobStages(j).forEach(st => { if (inR(st.date)) movesN++; }));
+        const surveysN = (data.enquiries || []).filter(en => inR(en.surveyDate) && en.status !== "Lost").length;
+        let servN = 0;
+        (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (overlaps(b)) servN++; }));
+        (data.staff || []).forEach(s => (s.away || []).forEach(b => { if (overlaps(b)) servN++; }));
+        const tiles = [
+          ["moves", "Moves", movesN, "#2563EB", "#EFF6FF"],
+          ["surveys", "Surveys", surveysN, AMBER, "#FFFBEB"],
+          ["servicing", "Servicing & time off", servN, "#64748B", "#F1F5F9"],
+          ["all", "All", movesN + surveysN + servN, TEAL, "#EAF4F2"],
+        ];
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+            {tiles.map(([v, label, n, color, bg]) => {
+              const active = show === v;
+              return (
+                <button key={v} onClick={() => setShow(v)} style={{
+                  textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
+                  background: active ? bg : "#fff", borderRadius: 12, padding: "14px 12px",
+                  border: active ? `2px solid ${color}` : "2px solid #F3F4F6",
+                  boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
+                }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>{n}</div>
+                  <div style={{ fontSize: 12, color: "#6B7280", marginTop: 5, fontWeight: 600 }}>{label}</div>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
+        <Icon name="plus" size={16} /> New Enquiry
+      </Btn>
 
       {showVeh && (() => {
         const nowIso = isoOf(today);
