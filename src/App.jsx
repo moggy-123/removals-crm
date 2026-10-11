@@ -854,10 +854,9 @@ function EnquiriesList({ data, setView, initialFilter }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
-        <Btn size="sm" onClick={() => setView({ screen: "newEnquiry" })}><Icon name="plus" size={14} /> New</Btn>
       </div>
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
         {[...ENQUIRY_STATUSES, "All"].map(f => {
           const active = filter === f;
           const label = f === "Won" ? "Booked" : f === "All" ? "All enquiries" : f;
@@ -878,6 +877,9 @@ function EnquiriesList({ data, setView, initialFilter }) {
           );
         })}
       </div>
+      <Btn variant="amber" style={{ width: "100%", marginBottom: 18 }} onClick={() => setView({ screen: "newEnquiry" })}>
+        <Icon name="plus" size={16} /> New Enquiry
+      </Btn>
       {shown.length === 0 && <Empty icon="enquiries" text="No enquiries here" />}
       {shown.map(e => (
         <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })}>
