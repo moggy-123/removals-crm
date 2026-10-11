@@ -622,10 +622,9 @@ function Dashboard({ data, setView, setData }) {
   );
 
   const Stat = ({ label, value, sub, color, onClick }) => (
-    <div onClick={onClick} style={{ flex: 1, background: "#fff", borderRadius: 12, padding: "14px 12px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", cursor: onClick ? "pointer" : "default", border: "1px solid #F3F4F6", minWidth: 0 }}>
-      <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 5, fontWeight: 600 }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{sub}</div>}
+    <div onClick={onClick} style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 7, background: "#fff", borderRadius: 10, padding: "7px 12px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", cursor: onClick ? "pointer" : "default", border: "2px solid #F3F4F6", minWidth: 0 }}>
+      <div style={{ fontSize: 17, fontWeight: 800, color, lineHeight: 1.4, flexShrink: 0 }}>{value}</div>
+      <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600, lineHeight: 1.4, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}{sub && <span style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}> · {sub}</span>}</div>
     </div>
   );
 
@@ -647,23 +646,23 @@ function Dashboard({ data, setView, setData }) {
           ))}
         </Card>
       )}
-      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
         <Stat label="Open enquiries" value={open.length} color={TEAL} onClick={() => setView({ screen: "enquiries", filter: "Open" })} />
         <Stat label="Quoted" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
       </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         <Stat label="Booked moves" value={jobs.filter(j => !["Completed","Let Go"].includes(j.status)).length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
-        <Stat label="Booked this month" value={`${convRate}%`} sub={`${wonThisMonth}/${thisMonthEnq.length} enquiries`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
+        <Stat label="Booked (month)" value={`${convRate}%`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
       </div>
 
-      <Btn variant="amber" style={{ width: "100%", marginBottom: 14 }} onClick={() => setView({ screen: "newEnquiry" })}>
-        <Icon name="plus" size={16} /> New Enquiry
-      </Btn>
+      <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 18px", borderRadius: 10, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
+        <Icon name="plus" size={15} /> New Enquiry
+      </button>
 
       <div style={{ display: "flex", gap: 8, marginBottom: dashShow ? 12 : 18 }}>
-        <Btn variant={dashShow === "surveys" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")}>Surveys</Btn>
-        <Btn variant={dashShow === "moves" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")}>Moves</Btn>
-        <Btn variant={dashShow === "servicing" ? "primary" : "grey"} style={{ flex: 1 }} onClick={() => setDashShow(dashShow === "servicing" ? "" : "servicing")}>Servicing</Btn>
+        <button onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: "none", fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "surveys" ? TEAL : "#fff", color: dashShow === "surveys" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Surveys</button>
+        <button onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: "none", fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "moves" ? TEAL : "#fff", color: dashShow === "moves" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Moves</button>
+        <button onClick={() => setDashShow(dashShow === "servicing" ? "" : "servicing")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: "none", fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "servicing" ? TEAL : "#fff", color: dashShow === "servicing" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Servicing</button>
       </div>
 
       {(dashShow === "" || dashShow === "surveys") && (() => {
