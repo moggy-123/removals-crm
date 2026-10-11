@@ -631,9 +631,6 @@ function Dashboard({ data, setView, setData }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-        <SyncControl data={data} setData={setData} compact />
-      </div>
       {pastProvisional.length > 0 && (
         <Card style={{ border: "1px solid #FDE68A", background: "#FFFBEB", marginBottom: 14 }}>
           <div style={{ fontWeight: 800, color: "#92400E", marginBottom: 6, fontSize: 14 }}>Provisional bookings past their date</div>
@@ -853,7 +850,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
+        <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
       </div>
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
@@ -2935,7 +2932,7 @@ function CustomersList({ data, setView }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Customers</h2>
+        <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Customers</h2>
       </div>
 
       {showRefPanel && false && <div />}
@@ -3527,7 +3524,7 @@ function CompanyView({ data, setView, setData }) {
 
   return (
     <div>
-      <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
+      <h2 className="rm-page-title" style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
       <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B139</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
@@ -5459,7 +5456,7 @@ function StorageView({ data, setView }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#10211E" }}>Storage</h2>
+        <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#10211E" }}>Storage</h2>
       </div>
 
       <Card style={{ background: "#F4FBF9", border: "1px solid #CDE7E2" }}>
@@ -5506,6 +5503,9 @@ function StorageView({ data, setView }) {
     </div>
   );
 }
+
+// Page names shown in the green top bar on phones
+const PAGE_TITLES = { enquiries: "Enquiries", calendar: "Calendar", customers: "Customers", storage: "Storage", company: "Company" };
 
 export default function App() {
   const [data, setData] = useState(loadData);
@@ -5703,14 +5703,15 @@ export default function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#EEF3F2" }}>
       <ResponsiveStyles device={device} />
+      <style>{".rm-page-title, div:has(> .rm-page-title:only-child){display:none}"}</style>
       <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: "rgba(255,255,255,.16)", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Icon name="truck" size={23} color="#fff" />
           </div>
           <div>
-            <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", letterSpacing: "-.02em", lineHeight: 1.15 }}>Removals CRM</div>
-            <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>Enquiries &amp; moves</div>
+            <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", letterSpacing: "-.02em", lineHeight: 1.15 }}>{PAGE_TITLES[view.screen] || "Removals CRM"}</div>
+            <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>{PAGE_TITLES[view.screen] ? "Removals CRM" : <>Enquiries &amp; moves</>}</div>
           </div>
         </div>
         <SyncDot />
