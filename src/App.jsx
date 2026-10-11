@@ -4183,16 +4183,6 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
 
   return (
     <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:14 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-          <div style={{ display:"flex", gap:5 }}>
-            <button onClick={()=>navg(-1)} style={navBtn}>‹</button>
-            <button onClick={()=>navg(1)} style={navBtn}>›</button>
-          </div>
-          <Btn size="sm" variant="grey" onClick={()=>setAnchor(new Date())}>Today</Btn>
-          <span style={{ fontSize:17, fontWeight:800, letterSpacing:"-.01em", color:"#10211E" }}>{rangeLabel}</span>
-        </div>
-      </div>
 
       {/* Filter tiles — same style as the dashboard stat cards. Counts cover the period on screen. */}
       {(() => {
@@ -4250,6 +4240,17 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
             </button>
           );
         })}
+      </div>
+
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:14 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <div style={{ display:"flex", gap:5 }}>
+            <button onClick={()=>navg(-1)} style={navBtn}>‹</button>
+            <button onClick={()=>navg(1)} style={navBtn}>›</button>
+          </div>
+          <Btn size="sm" variant="grey" onClick={()=>setAnchor(new Date())}>Today</Btn>
+          <span style={{ fontSize:17, fontWeight:800, letterSpacing:"-.01em", color:"#10211E" }}>{rangeLabel}</span>
+        </div>
       </div>
 
       {showVeh && (() => {
