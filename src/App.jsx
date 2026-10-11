@@ -853,7 +853,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
       </div>
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
         {[...ENQUIRY_STATUSES, "All"].map(f => {
           const active = filter === f;
           const label = f === "Won" ? "Booked" : f === "All" ? "All enquiries" : f;
@@ -864,18 +864,18 @@ function EnquiriesList({ data, setView, initialFilter }) {
             <button key={f} onClick={() => setFilter(f)} style={{
               gridColumn: f === "All" ? "1 / -1" : "auto",
               textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
-              background: active ? meta.bg : "#fff", borderRadius: 8, padding: "2px 10px", display: "flex", alignItems: "baseline", gap: 6,
+              background: active ? meta.bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", alignItems: "baseline", gap: 7,
               border: active ? `2px solid ${accent}` : "2px solid #F3F4F6",
               boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
             }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: accent, lineHeight: 1.4 }}>{n}</div>
-              <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, lineHeight: 1.4, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: accent, lineHeight: 1.4 }}>{n}</div>
+              <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600, lineHeight: 1.4, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
             </button>
           );
         })}
       </div>
-      <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "1px 18px", borderRadius: 8, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 13, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
-        <Icon name="plus" size={13} /> New Enquiry
+      <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 18px", borderRadius: 10, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
+        <Icon name="plus" size={15} /> New Enquiry
       </button>
       {shown.length === 0 && <Empty icon="enquiries" text="No enquiries here" />}
       {shown.map(e => (
@@ -4205,18 +4205,18 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           ["all", "All", movesN + surveysN + servN, TEAL, "#EAF4F2"],
         ];
         return (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
             {tiles.map(([v, label, n, color, bg]) => {
               const active = show === v;
               return (
                 <button key={v} onClick={() => setShow(v)} style={{
                   textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
-                  background: active ? bg : "#fff", borderRadius: 8, padding: "2px 10px", display: "flex", alignItems: "baseline", gap: 6,
+                  background: active ? bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", alignItems: "baseline", gap: 7,
                   border: active ? `2px solid ${color}` : "2px solid #F3F4F6",
                   boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
                 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color, lineHeight: 1.4 }}>{n}</div>
-                  <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, lineHeight: 1.4, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color, lineHeight: 1.4 }}>{n}</div>
+                  <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600, lineHeight: 1.4, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
                 </button>
               );
             })}
@@ -4225,18 +4225,18 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       })()}
 
       {/* View tiles — same size and style as the filter tiles above */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 18 }}>
         {[["agenda", "Agenda", "2 months"], ["day", "Day", "One day"], ["week", "Week", "7 days"], ["month", "Month", "Full month"]].map(([m, label, sub]) => {
           const active = mode === m;
           return (
             <button key={m} onClick={() => setMode(m)} style={{
               textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
-              background: active ? "#EAF4F2" : "#fff", borderRadius: 8, padding: "2px 10px", display: "flex", alignItems: "baseline", gap: 6,
+              background: active ? "#EAF4F2" : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", alignItems: "baseline", gap: 7,
               border: active ? `2px solid ${TEAL}` : "2px solid #F3F4F6",
               boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
             }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: active ? TEAL : "#374151", lineHeight: 1.4 }}>{label}</div>
-              <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, lineHeight: 1.4, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: active ? TEAL : "#374151", lineHeight: 1.4 }}>{label}</div>
+              <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600, lineHeight: 1.4, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
             </button>
           );
         })}
