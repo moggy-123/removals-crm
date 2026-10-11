@@ -856,28 +856,24 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
         <Btn size="sm" onClick={() => setView({ screen: "newEnquiry" })}><Icon name="plus" size={14} /> New</Btn>
       </div>
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6, marginBottom: 10, scrollbarWidth: "none" }}>
-        {filters.map(f => {
+      {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
+        {[...ENQUIRY_STATUSES, "All"].map(f => {
           const active = filter === f;
-          const label = f === "Won" ? "Booked" : f;
+          const label = f === "Won" ? "Booked" : f === "All" ? "All enquiries" : f;
           const n = countFor(f);
-          const meta = STATUS_META[f] || { color: "#0E7C73", bg: "#EAF4F2" };
+          const meta = STATUS_META[f] || { color: "#374151", bg: "#F3F4F6" };
           const accent = f === "All" ? "#374151" : (meta.color || "#374151");
           return (
             <button key={f} onClick={() => setFilter(f)} style={{
-              flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 7,
-              padding: "8px 14px", borderRadius: 999, cursor: "pointer", whiteSpace: "nowrap",
-              border: active ? `1.5px solid ${accent}` : "1.5px solid #E5E9E8",
-              background: active ? accent : "#fff",
-              color: active ? "#fff" : "#43534F", fontSize: 13.5, fontWeight: 700,
-              boxShadow: active ? "0 2px 8px rgba(16,33,30,.14)" : "none", transition: "all .15s",
+              gridColumn: f === "All" ? "1 / -1" : "auto",
+              textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
+              background: active ? meta.bg : "#fff", borderRadius: 12, padding: "14px 12px",
+              border: active ? `2px solid ${accent}` : "2px solid #F3F4F6",
+              boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
             }}>
-              {label}
-              <span style={{
-                fontSize: 11.5, fontWeight: 800, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999,
-                background: active ? "rgba(255,255,255,.25)" : (meta.bg || "#EEF2F1"),
-                color: active ? "#fff" : accent,
-              }}>{n}</span>
+              <div style={{ fontSize: 24, fontWeight: 800, color: accent, lineHeight: 1 }}>{n}</div>
+              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 5, fontWeight: 600 }}>{label}</div>
             </button>
           );
         })}
