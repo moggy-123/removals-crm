@@ -4064,7 +4064,7 @@ function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"a
 
 function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
   const [mode, setMode] = useState(initialMode || "agenda");
-  const [show, setShow] = useState(initialShow || "all");
+  const show = "all"; // filter tiles removed — calendar always shows everything
   const showMoves = show === "all" || show === "moves";
   const showSurveys = show === "all" || show === "surveys";
   const showVeh = show === "all" || show === "servicing";
@@ -4182,46 +4182,6 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
 
   return (
     <div>
-
-      {/* Filter tiles — same style as the dashboard stat cards. Counts cover the period on screen. */}
-      {(() => {
-        let fromIso, toIso;
-        if (mode === "agenda") { fromIso = isoOf(today); toIso = isoOf(new Date(today.getFullYear(), today.getMonth() + 2, 0)); }
-        else if (mode === "day") { fromIso = toIso = isoOf(anchor); }
-        else if (mode === "week") { const s = startOfWeek(anchor); fromIso = isoOf(s); toIso = isoOf(addDays(s, 6)); }
-        else { fromIso = isoOf(new Date(anchor.getFullYear(), anchor.getMonth(), 1)); toIso = isoOf(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0)); }
-        const inR = d => d && d >= fromIso && d <= toIso;
-        const overlaps = b => b.start && b.start <= toIso && isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }) >= fromIso;
-        let movesN = 0; jobs.forEach(j => jobStages(j).forEach(st => { if (inR(st.date)) movesN++; }));
-        const surveysN = (data.enquiries || []).filter(en => inR(en.surveyDate) && en.status !== "Lost").length;
-        let servN = 0;
-        (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (overlaps(b)) servN++; }));
-        (data.staff || []).forEach(s => (s.away || []).forEach(b => { if (overlaps(b)) servN++; }));
-        const tiles = [
-          ["moves", "Moves", movesN, "#2563EB", "#EFF6FF"],
-          ["surveys", "Surveys", surveysN, AMBER, "#FFFBEB"],
-          ["servicing", "Servicing & time off", servN, "#64748B", "#F1F5F9"],
-          ["all", "All", movesN + surveysN + servN, TEAL, "#EAF4F2"],
-        ];
-        return (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-            {tiles.map(([v, label, n, color, bg]) => {
-              const active = show === v;
-              return (
-                <button key={v} onClick={() => setShow(v)} style={{
-                  textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
-                  background: active ? bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", alignItems: "baseline", gap: 7,
-                  border: active ? `2px solid ${color}` : "2px solid #F3F4F6",
-                  boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
-                }}>
-                  <div style={{ fontSize: 17, fontWeight: 800, color, lineHeight: 1.4 }}>{n}</div>
-                  <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600, lineHeight: 1.4, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
-                </button>
-              );
-            })}
-          </div>
-        );
-      })()}
 
       {/* View tiles — same size and style as the filter tiles above */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 18 }}>
