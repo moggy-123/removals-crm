@@ -1565,6 +1565,7 @@ function InventoryModal({ data, enquiry, onClose }) {
     const customSlots = Object.entries(lines).filter(([, v]) => v.catalogId == null && v.room === label && matches(v.name));
     if (search && catItems.length === 0 && customSlots.length === 0) return null;
     const sectionQty = Object.values(lines).filter(v => v.room === label && v.qty > 0).reduce((s, v) => s + v.qty, 0);
+    const sectionCuFt = Math.round(Object.values(lines).filter(v => v.room === label && v.qty > 0).reduce((s, v) => s + (Number(v.cuFt) || 0) * v.qty, 0));
     const isOpen = search ? true : openSection === label;
     const Stepper = ({ slot, meta }) => {
       const q = lines[slot]?.qty || 0;
@@ -1583,21 +1584,21 @@ function InventoryModal({ data, enquiry, onClose }) {
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {isBedroom && beds.length > 1 && <span onClick={e => { e.stopPropagation(); removeBedroom(label); }} style={{ color: "#DC2626", fontSize: 13, fontWeight: 600 }}>Remove</span>}
             {isLounge && lounges.length > 1 && <span onClick={e => { e.stopPropagation(); removeLounge(label); }} style={{ color: "#DC2626", fontSize: 13, fontWeight: 600 }}>Remove</span>}
-            {sectionQty > 0 && <span style={{ background: TEAL, color: "#fff", borderRadius: 99, fontSize: 12, padding: "1px 8px", fontWeight: 700 }}>{sectionQty}</span>}
+            {sectionQty > 0 && <span style={{ background: TEAL, color: "#fff", borderRadius: 99, fontSize: 12, padding: "1px 8px", fontWeight: 700, whiteSpace: "nowrap" }}>{sectionQty} item{sectionQty !== 1 ? "s" : ""} · {sectionCuFt} cu ft</span>}
             <span style={{ color: "#9CA3AF" }}>{isOpen ? "▾" : "▸"}</span>
           </span>
         </button>
         {isOpen && (
           <div style={{ padding: "4px 0" }}>
-            {catItems.map(it => {
+            {catItems.map((it, rowIx) => {
               const slot = `${label}::${it.id}`;
               const isCustom = typeof it.id === "string" && it.id.startsWith("cust_");
               const q = lines[slot]?.qty || 0;
               return (
-                <div key={slot} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+                <div key={slot} style={invRowStyle(q, rowIx)}>
                   <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>
-                      <span style={{ color: q < 0 ? "#9CA3AF" : "#111827", textDecoration: q < 0 ? "line-through" : "none" }}>{it.name}</span>
+                    <div style={{ fontSize: 14 }}>
+                      <span style={invName(q)}>{it.name}</span>
                       {isCustom && <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}> · custom</span>}
                       {q < 0 && <span style={{ fontSize: 10, color: "#DC2626", fontWeight: 700 }}> · not moving</span>}
                     </div>
@@ -1611,11 +1612,11 @@ function InventoryModal({ data, enquiry, onClose }) {
                 </div>
               );
             })}
-            {customSlots.map(([slot, v]) => (
-              <div key={slot} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+            {customSlots.map(([slot, v], j) => (
+              <div key={slot} style={invRowStyle(v.qty, catItems.length + j)}>
                 <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500 }}>
-                    <span style={{ color: v.qty < 0 ? "#9CA3AF" : "#111827", textDecoration: v.qty < 0 ? "line-through" : "none" }}>{v.name}</span>
+                  <div style={{ fontSize: 14 }}>
+                    <span style={invName(v.qty)}>{v.name}</span>
                     <span style={{ fontSize: 10, color: TEAL, fontWeight: 700 }}> · custom</span>
                     {v.qty < 0 && <span style={{ fontSize: 10, color: "#DC2626", fontWeight: 700 }}> · not moving</span>}
                   </div>
@@ -1661,13 +1662,13 @@ function InventoryModal({ data, enquiry, onClose }) {
         </div>
         <div style={{ border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
           {all.length === 0 && <div style={{ padding: 14, fontSize: 13, color: "#9CA3AF" }}>No items match “{search}”.</div>}
-          {all.map(it => {
+          {all.map((it, rowIx) => {
             const slot = `${room}::${it.id}`;
             const q = lines[slot]?.qty || 0;
             return (
-              <div key={it.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderTop: "1px solid #F9FAFB" }}>
+              <div key={it.id} style={invRowStyle(q, rowIx, "center")}>
                 <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: q < 0 ? "#9CA3AF" : "#111827" }}>{it.name}{q > 0 && <span style={{ fontSize: 11, color: TEAL, fontWeight: 700 }}> · {q} in {room}</span>}</div>
+                  <div style={{ fontSize: 14 }}><span style={invName(q)}>{it.name}</span>{q > 0 && <span style={{ fontSize: 11, color: TEAL, fontWeight: 700 }}> · {q} in {room}</span>}</div>
                   <div style={{ fontSize: 11, color: "#9CA3AF" }}>{it.cuFt} cu ft · {it.kg} kg</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1781,8 +1782,18 @@ function InventoryModal({ data, enquiry, onClose }) {
     </Modal>
   );
 }
+// Inventory rows: alternate shading, teal when counted, red when not moving
+function invRowStyle(q, i, align = "flex-start") {
+  return {
+    display: "flex", alignItems: align, justifyContent: "space-between", padding: "9px 14px 9px 10px",
+    borderTop: "1px solid #E3E9E8",
+    borderLeft: `4px solid ${q > 0 ? TEAL : q < 0 ? "#DC2626" : "transparent"}`,
+    background: q > 0 ? "#E6F4F1" : q < 0 ? "#FEF2F2" : (i % 2 ? "#F4F7F6" : "#fff"),
+  };
+}
+const invName = q => ({ color: q < 0 ? "#B91C1C" : "#111827", fontWeight: q !== 0 ? 800 : 500, textDecoration: q < 0 ? "line-through" : "none" });
 function stepBtn(active) {
-  return { width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", fontSize: 18, fontWeight: 700, background: active ? "#E6F4F1" : "#F3F4F6", color: active ? TEAL : "#9CA3AF", lineHeight: 1 };
+  return { width: 38, height: 38, flexShrink: 0, borderRadius: 9, border: "none", cursor: "pointer", fontSize: 22, fontWeight: 700, background: active ? "#D3ECE7" : "#F3F4F6", color: active ? TEAL : "#9CA3AF", lineHeight: 1 };
 }
 
 // ── Quote builder ───────────────────────────────────────────────────────────
