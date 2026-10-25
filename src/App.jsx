@@ -2456,8 +2456,9 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
         at(t, M + 10, y, 9.5, font, navy); y -= 13;
       });
       if (staying.length) {
-        ensure(13); at("Not moving:", M + 10, y, 9, bold, grey); y -= 12;
-        staying.forEach(it => { ensure(12); at(`-  ${Math.abs(it.qty)} x ${it.name}`, M + 18, y, 9, font, grey); y -= 12; });
+        const red = rgb(0.86, 0.15, 0.15);
+        ensure(13); at("NOT MOVING:", M + 10, y, 9.5, bold, red); y -= 13;
+        staying.forEach(it => { ensure(13); at(`-  ${Math.abs(it.qty)} x ${it.name}`, M + 18, y, 9.5, bold, red); y -= 13; });
       }
       y -= 4;
     });
