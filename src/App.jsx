@@ -2916,12 +2916,23 @@ function EnquiryDetail({ data, id, setView }) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         {quoteDone && !["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-        <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
-        {!linkedJob && <Btn variant="grey" onClick={setFollowUp}>⏰ Follow-up</Btn>}
-        {!["Won", "Lost"].includes(e.status) && <Btn variant="grey" onClick={markLost}>Mark Lost</Btn>}
-        <Btn variant="danger" size="sm" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
-      </div>
+      {(() => {
+        const showFu = !linkedJob, showLost = !["Won", "Lost"].includes(e.status);
+        const n = (showFu ? 1 : 0) + (showLost ? 1 : 0);
+        const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
+        return <>
+          {n > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${n}, 1fr)`, gap: 8, marginTop: 8 }}>
+              {showFu && <Btn variant="primary" style={eq} onClick={setFollowUp}>⏰ Follow-up</Btn>}
+              {showLost && <Btn style={{ ...eq, background: "#fff", color: "#B91C1C", border: "1.5px solid #FCA5A5", boxShadow: "none" }} onClick={markLost}>✕ Mark Lost</Btn>}
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+            <Btn style={eq} onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
+            <Btn variant="danger" style={eq} onClick={del}><Icon name="trash" size={15} /> Delete</Btn>
+          </div>
+        </>;
+      })()}
 
       {showEdit && <EnquiryForm data={data} editEnquiry={e} onClose={() => setShowEdit(false)} />}
       {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
