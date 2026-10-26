@@ -2781,6 +2781,16 @@ function EnquiryDetail({ data, id, setView }) {
   }
 
   const rec = recommendVehicle(e.volumeCuFt);
+  // Step-by-step: survey → move plan → quote → provisional move
+  const surveyDone = !!(e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won"].includes(e.status));
+  const planDone = !!((e.stages && e.stages.length) || linkedJob);
+  const quoteDone = Number(e.quoteTotal) > 0;
+  const showPlanCard = surveyDone || planDone;
+  const showQuoteCard = planDone || quoteDone;
+  const nextHint = !surveyDone ? "Next: complete the survey — the move plan appears once it's done."
+    : !planDone ? "Next: add the move plan — the quote appears once it's done."
+    : !quoteDone && !["Won", "Lost"].includes(e.status) ? "Next: build the quote — you can then create the provisional move."
+    : "";
 
   return (
     <div>
@@ -2821,6 +2831,7 @@ function EnquiryDetail({ data, id, setView }) {
               {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³ · ${e.weightKg} kg` : "Not surveyed yet"}
             </div>
             {e.volumeCuFt > 0 && <div style={{ fontSize: 13, color: TEAL, fontWeight: 600, marginTop: 2 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads}` : ""}</div>}
+            {((e.inventory && e.inventory.length) || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "surveyPdf", id: e.id })}><Icon name="quote" size={14} /> Survey &amp; move plan PDF</Btn> : null}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
             <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
@@ -2829,8 +2840,8 @@ function EnquiryDetail({ data, id, setView }) {
         </div>
       </Card>
 
-      {/* Move plan */}
-      <Card>
+      {/* Move plan — shown once the survey is complete */}
+      {showPlanCard && <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, color: "#111827" }}>Move plan</div>
@@ -2850,7 +2861,7 @@ function EnquiryDetail({ data, id, setView }) {
           </div>
           <Btn size="sm" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {(e.stages && e.stages.length) ? "Edit" : "Add"}</Btn>
         </div>
-      </Card>
+      </Card>}
 
       {linkedJob && (
         <Card>
@@ -2869,8 +2880,8 @@ function EnquiryDetail({ data, id, setView }) {
         </Card>
       )}
 
-      {/* Quote */}
-      <Card>
+      {/* Quote — shown once the move plan is complete */}
+      {showQuoteCard && <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontWeight: 700, color: "#111827" }}>Quote</div>
@@ -2882,8 +2893,9 @@ function EnquiryDetail({ data, id, setView }) {
           <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {e.quoteTotal ? "Edit" : "Build"}</Btn>
         </div>
         {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
-        {((e.inventory && e.inventory.length) || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "surveyPdf", id: e.id })}><Icon name="quote" size={14} /> Survey &amp; move plan PDF</Btn> : null}
-      </Card>
+      </Card>}
+
+      {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
       {e.followUpDate && (
         <Card style={{ background: "#FFFBEB" }}>
@@ -2893,7 +2905,7 @@ function EnquiryDetail({ data, id, setView }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {!["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
+        {quoteDone && !["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
         {e.status === "Won" && linkedJob && <Btn variant="grey" style={{ flex: 1 }} onClick={() => setShowMove(true)}>Manage move</Btn>}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
