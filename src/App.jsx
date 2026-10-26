@@ -2807,8 +2807,8 @@ function EnquiryDetail({ data, id, setView }) {
       </div>
       {customer && (
         <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          {customer.phone && <Btn variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
-          {customer.email && <Btn variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
+          {customer.phone && <Btn variant="primary" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
+          {customer.email && <Btn variant="primary" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
           <MessageButton size="md" variant="primary" customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />
         </div>
       )}
@@ -2916,7 +2916,7 @@ function EnquiryDetail({ data, id, setView }) {
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
         <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
-        <Btn variant="grey" onClick={setFollowUp}>⏰ Follow-up</Btn>
+        {!linkedJob && <Btn variant="grey" onClick={setFollowUp}>⏰ Follow-up</Btn>}
         {!["Won", "Lost"].includes(e.status) && <Btn variant="grey" onClick={markLost}>Mark Lost</Btn>}
         <Btn variant="danger" size="sm" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
       </div>
