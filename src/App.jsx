@@ -1413,9 +1413,13 @@ function InventoryModal({ data, enquiry, onClose }) {
   function addCustom(label, catalogRoom) {
     const name = (prompt("Item name?") || "").trim();
     if (!name) return;
-    const cuFt = parseFloat(prompt("Approx volume in cubic feet? (e.g. 20)") || "");
+    const cuFtRaw = prompt("Approx volume in cubic feet? (e.g. 20)");
+    if (cuFtRaw === null) return; // Cancel
+    const cuFt = parseFloat(cuFtRaw);
     if (!cuFt || cuFt <= 0) { alert("Please enter a number for cubic feet."); return; }
-    const kg = parseFloat(prompt("Approx weight in kg? (optional, e.g. 30)") || "") || 0;
+    const kgRaw = prompt("Approx weight in kg? (optional, e.g. 30)");
+    if (kgRaw === null) return; // Cancel
+    const kg = parseFloat(kgRaw) || 0;
     const id = "cust_" + uid();
     const item = { id, room: catalogRoom || label, name, cuFt: Math.round(cuFt * 100) / 100, m3: Math.round(cuFt * 0.0283168 * 1000) / 1000, kg: Math.round(kg) };
     setCustomItems(addCustomItemToCatalog(item));          // saved permanently to the list
@@ -2114,7 +2118,7 @@ function MessageModal({ customer, ctx, onClose }) {
     const nl = tpls.filter(t => t.title !== cur.title); saveTemplates(nl); setTpls(nl);
     const first = nl[0]; setSel(first?.title || ""); setText(first ? fillTemplate(first.body, fullCtx) : "");
   }
-  function setBiz() { const v = (prompt("Your business name (used in messages):", getBusinessName()) || "").trim(); localStorage.setItem("removals_business_name", v); pick(sel); }
+  function setBiz() { const raw = prompt("Your business name (used in messages):", getBusinessName()); if (raw === null) return; localStorage.setItem("removals_business_name", raw.trim()); pick(sel); }
   const linkBtn = { background: "transparent", border: "none", color: TEAL, fontWeight: 600, fontSize: 13, cursor: "pointer", padding: 0 };
   return (
     <Modal title={`Message ${customer.name || ""}`} onClose={onClose}>
@@ -2773,8 +2777,9 @@ function EnquiryDetail({ data, id, setView }) {
     window.location.reload();
   }
   async function markLost() {
-    const reason = prompt("Reason lost? (optional)") || "";
-    await setStatus("Lost", { lostReason: reason });
+    const reason = prompt("Reason lost? (optional)");
+    if (reason === null) return; // Cancel pressed — leave the enquiry as it is
+    await setStatus("Lost", { lostReason: reason.trim() });
   }
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const setFollowUp = () => setFollowUpOpen(true);
