@@ -2863,6 +2863,22 @@ function EnquiryDetail({ data, id, setView }) {
         </div>
       </Card>}
 
+      {/* Quote — shown once the move plan is complete */}
+      {showQuoteCard && <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 700, color: "#111827" }}>Quote</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
+              {e.quoteTotal ? `${gbp(e.quoteTotal)} · ${e.quoteStatus}` : "No quote yet"}
+              {e.quoteSentDate ? ` · sent ${fmtDateShort(e.quoteSentDate)}` : ""}
+            </div>
+          </div>
+          <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {e.quoteTotal ? "Edit" : "Build"}</Btn>
+        </div>
+        {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
+      </Card>}
+
+      {/* Manage move — below the quote once a provisional move exists */}
       {linkedJob && (
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
@@ -2880,21 +2896,6 @@ function EnquiryDetail({ data, id, setView }) {
         </Card>
       )}
 
-      {/* Quote — shown once the move plan is complete */}
-      {showQuoteCard && <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "#111827" }}>Quote</div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
-              {e.quoteTotal ? `${gbp(e.quoteTotal)} · ${e.quoteStatus}` : "No quote yet"}
-              {e.quoteSentDate ? ` · sent ${fmtDateShort(e.quoteSentDate)}` : ""}
-            </div>
-          </div>
-          <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {e.quoteTotal ? "Edit" : "Build"}</Btn>
-        </div>
-        {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
-      </Card>}
-
       {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
       {e.followUpDate && (
@@ -2906,7 +2907,6 @@ function EnquiryDetail({ data, id, setView }) {
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         {quoteDone && !["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
-        {e.status === "Won" && linkedJob && <Btn variant="grey" style={{ flex: 1 }} onClick={() => setShowMove(true)}>Manage move</Btn>}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
         <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
