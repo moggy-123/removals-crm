@@ -2076,11 +2076,14 @@ function getBusinessName() { return localStorage.getItem("removals_business_name
 function fillTemplate(body, ctx) { return (body || "").replace(/\{(\w+)\}/g, (_, k) => (ctx[k] != null && ctx[k] !== "") ? ctx[k] : ""); }
 function waNumber(phone) { let d = (phone || "").replace(/[^\d]/g, ""); if (d.startsWith("0")) d = "44" + d.slice(1); return d; }
 
-function MessageButton({ customer, ctx, size = "sm", variant = "grey" }) {
+// Call · Message · Email — one row, equal widths, same teal style
+const contactRowStyle = n => ({ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, n)}, 1fr)`, gap: 8 });
+const contactBtn = { width: "100%", minWidth: 0, padding: "10px 6px", whiteSpace: "nowrap" };
+function MessageButton({ customer, ctx, size = "sm", variant = "grey", style }) {
   const [open, setOpen] = useState(false);
   if (!customer) return null;
   return (<>
-    <Btn size={size} variant={variant} onClick={() => setOpen(true)}>💬 Message</Btn>
+    <Btn size={size} variant={variant} style={style} onClick={() => setOpen(true)}>💬 Message</Btn>
     {open && <MessageModal customer={customer} ctx={ctx || {}} onClose={() => setOpen(false)} />}
   </>);
 }
@@ -2806,10 +2809,10 @@ function EnquiryDetail({ data, id, setView }) {
         <StatusBadge status={e.status} />
       </div>
       {customer && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          {customer.phone && <Btn variant="primary" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
-          {customer.email && <Btn variant="primary" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
-          <MessageButton size="md" variant="primary" customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />
+        <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 14 }}>
+          {customer.phone && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
+          <MessageButton size="md" variant="primary" style={contactBtn} customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />
+          {customer.email && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
         </div>
       )}
 
@@ -3179,12 +3182,14 @@ function CustomerDetail({ data, id, setView }) {
           </div>
         ) : null)}
       </Card>
+      <div style={{ ...contactRowStyle(1 + !!c.phone + !!c.email), marginBottom: 8 }}>
+        {c.phone && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; }}>📞 Call</Btn>}
+        <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" style={contactBtn} />
+        {c.email && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
+      </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
-        <Btn variant="grey" onClick={() => setFollowUpOpen(true)}>⏰ {c.followUpDate ? "Follow-up ·" + fmtUK(c.followUpDate).slice(0, 5) : "Follow-up"}</Btn>
-        <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" />
-        {c.phone && <Btn variant="grey" onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; }}>📞 Call</Btn>}
-        {c.email && <Btn variant="grey" onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
+        {!(data.jobs || []).some(j => j.customerId === c.id && j.status === "Provisional") && <Btn variant="grey" onClick={() => setFollowUpOpen(true)}>⏰ {c.followUpDate ? "Follow-up ·" + fmtUK(c.followUpDate).slice(0, 5) : "Follow-up"}</Btn>}
         <Btn size="sm" variant="danger" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
       </div>
 
@@ -3985,11 +3990,15 @@ function JobDetail({ data, id, setView }) {
         <StatusBadge status={f.status} />
       </div>
       {customer && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {customer.phone && <Btn variant="grey" onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
-          {customer.email && <Btn variant="grey" onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
-          <MessageButton size="md" variant="primary" customer={customer} ctx={{ ref: moveRef(data, j), date: j.moveDate ? fmtDate(j.moveDate) : "", time: (jobStages(j)[0]?.time) || j.startTime || "", price: gbp(j.price), deposit: gbp(j.deposit), balance: gbp((Number(j.price) || 0) - (Number(j.deposit) || 0)) }} />
-          {j.enquiryId && <Btn size="sm" variant="grey" onClick={() => setView({ screen: "enquiryDetail", id: j.enquiryId })}>View enquiry</Btn>}
+        <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 12 }}>
+          {customer.phone && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
+          <MessageButton size="md" variant="primary" style={contactBtn} customer={customer} ctx={{ ref: moveRef(data, j), date: j.moveDate ? fmtDate(j.moveDate) : "", time: (jobStages(j)[0]?.time) || j.startTime || "", price: gbp(j.price), deposit: gbp(j.deposit), balance: gbp((Number(j.price) || 0) - (Number(j.deposit) || 0)) }} />
+          {customer.email && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
+        </div>
+      )}
+      {customer && j.enquiryId && (
+        <div style={{ marginBottom: 12 }}>
+          <Btn size="sm" variant="grey" onClick={() => setView({ screen: "enquiryDetail", id: j.enquiryId })}>View enquiry</Btn>
         </div>
       )}
 
