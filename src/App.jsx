@@ -487,15 +487,16 @@ function DayTypeSelect({ value, onChange }) {
   );
 }
 function Btn({ children, onClick, variant = "primary", size = "md", disabled, style: extra, type = "button" }) {
-  const base = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 11, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer", border: "none", fontFamily: "inherit", transition: "transform .15s, opacity .15s" };
+  // One button family across the app: same shape, border, weight and shadow — only the colour changes.
+  const base = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 11, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer", border: "1.5px solid transparent", fontFamily: "inherit", lineHeight: 1.2, transition: "transform .15s, opacity .15s", boxShadow: "0 1px 3px rgba(16,33,30,.10)" };
   const v = {
-    primary: { background: TEAL, color: "#fff", boxShadow: "0 4px 12px rgba(14,124,115,.26)" },
-    amber: { background: AMBER, color: "#fff", boxShadow: "0 4px 12px rgba(245,158,11,.30)" },
-    ghost: { background: "#EEF3F2", color: TEAL_D },
-    danger: { background: "#FEE2E2", color: "#DC2626" },
-    grey: { background: "#EEF3F2", color: "#34433F" },
+    primary: { background: TEAL, borderColor: TEAL, color: "#fff", boxShadow: "0 3px 10px rgba(14,124,115,.24)" },
+    amber: { background: AMBER, borderColor: AMBER, color: "#fff", boxShadow: "0 3px 10px rgba(245,158,11,.28)" },
+    ghost: { background: "#fff", borderColor: "#BFDCD7", color: TEAL_D },
+    danger: { background: "#FEF2F2", borderColor: "#FCA5A5", color: "#B91C1C" },
+    grey: { background: "#fff", borderColor: "#D3DDDB", color: "#24403B" },
   };
-  const p = size === "sm" ? { padding: "7px 13px", fontSize: 13 } : { padding: "10px 18px", fontSize: 14 };
+  const p = size === "sm" ? { padding: "8px 14px", fontSize: 13.5 } : { padding: "11px 18px", fontSize: 14.5 };
   return <button type={type} className={size === "sm" ? "rm-btn-sm" : "rm-btn"} style={{ ...base, ...v[variant], ...p, opacity: disabled ? .5 : 1, ...extra }} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 function Card({ children, onClick, style: extra }) {
@@ -660,9 +661,9 @@ function Dashboard({ data, setView, setData }) {
       </button>
 
       <div style={{ display: "flex", gap: 8, marginBottom: dashShow ? 12 : 18 }}>
-        <button onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: "none", fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "surveys" ? TEAL : "#fff", color: dashShow === "surveys" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Surveys</button>
-        <button onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: "none", fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "moves" ? TEAL : "#fff", color: dashShow === "moves" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Moves</button>
-        <button onClick={() => setDashShow(dashShow === "servicing" ? "" : "servicing")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: "none", fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "servicing" ? TEAL : "#fff", color: dashShow === "servicing" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Servicing</button>
+        <button onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `1.5px solid ${dashShow === "surveys" ? TEAL : "#D3DDDB"}`, fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "surveys" ? TEAL : "#fff", color: dashShow === "surveys" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Surveys</button>
+        <button onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `1.5px solid ${dashShow === "moves" ? TEAL : "#D3DDDB"}`, fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "moves" ? TEAL : "#fff", color: dashShow === "moves" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Moves</button>
+        <button onClick={() => setDashShow(dashShow === "servicing" ? "" : "servicing")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `1.5px solid ${dashShow === "servicing" ? TEAL : "#D3DDDB"}`, fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "servicing" ? TEAL : "#fff", color: dashShow === "servicing" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Servicing</button>
       </div>
 
       {(dashShow === "" || dashShow === "surveys") && (() => {
@@ -2924,7 +2925,7 @@ function EnquiryDetail({ data, id, setView }) {
           {n > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: `repeat(${n}, 1fr)`, gap: 8, marginTop: 8 }}>
               {showFu && <Btn variant="primary" style={eq} onClick={setFollowUp}>⏰ Follow-up</Btn>}
-              {showLost && <Btn style={{ ...eq, background: "#fff", color: "#B91C1C", border: "1.5px solid #FCA5A5", boxShadow: "none" }} onClick={markLost}>✕ Mark Lost</Btn>}
+              {showLost && <Btn variant="grey" style={{ ...eq, color: "#B91C1C" }} onClick={markLost}>✕ Mark Lost</Btn>}
             </div>
           )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
@@ -3076,7 +3077,7 @@ function CommLogForm({ data, customer, entry, preset, onClose }) {
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>{type === "Call" ? "Description of call" : "Message / notes"}</div>
-        <button onClick={paste} style={{ background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: NAVY, cursor: "pointer" }}>📋 Paste from clipboard</button>
+        <button onClick={paste} style={{ background: "#fff", border: "1.5px solid #D3DDDB", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: NAVY, cursor: "pointer" }}>📋 Paste from clipboard</button>
       </div>
       <Textarea value={note} onChange={setNote} placeholder={type === "Call" ? "What was discussed on the call" : "What was said / sent"} />
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
@@ -3196,11 +3197,17 @@ function CustomerDetail({ data, id, setView }) {
         <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" style={contactBtn} />
         {c.email && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
       </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-        <Btn onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
-        {!(data.jobs || []).some(j => j.customerId === c.id && j.status === "Provisional") && <Btn variant="grey" onClick={() => setFollowUpOpen(true)}>⏰ {c.followUpDate ? "Follow-up ·" + fmtUK(c.followUpDate).slice(0, 5) : "Follow-up"}</Btn>}
-        <Btn size="sm" variant="danger" onClick={del}><Icon name="trash" size={14} /> Delete</Btn>
-      </div>
+      {(() => {
+        const showFu = !(data.jobs || []).some(j => j.customerId === c.id && j.status === "Provisional");
+        const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${showFu ? 3 : 2}, 1fr)`, gap: 8, marginBottom: 6 }}>
+            <Btn style={eq} onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
+            {showFu && <Btn variant="grey" style={eq} onClick={() => setFollowUpOpen(true)}>⏰ {c.followUpDate ? fmtUK(c.followUpDate).slice(0, 5) : "Follow-up"}</Btn>}
+            <Btn variant="danger" style={eq} onClick={del}><Icon name="trash" size={15} /> Delete</Btn>
+          </div>
+        );
+      })()}
 
       <SectionTitle>Enquiries</SectionTitle>
       {enquiries.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>None yet.</div>}
@@ -3990,7 +3997,7 @@ function JobDetail({ data, id, setView }) {
 
   return (
     <div>
-      <button onClick={() => setView({ screen: "enquiries", filter: "Won" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "10px 16px", fontSize: 15.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
+      <button onClick={() => setView({ screen: "enquiries", filter: "Won" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: "1.5px solid #D3DDDB", borderRadius: 10, padding: "10px 16px", fontSize: 15.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 8px" }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D, letterSpacing: ".02em" }}>{moveRef(data, j)}</div>
@@ -4486,7 +4493,7 @@ function ResponsiveStyles({ device }) {
   `;
   const phone = `
     input,select,textarea{font-size:16px!important;padding:14px 14px!important}
-    .rm-btn{padding:13px 18px!important;font-size:15px!important}.rm-btn-sm{padding:9px 13px!important;font-size:13.5px!important}
+    .rm-btn{padding:12px 18px!important;font-size:15px!important}.rm-btn-sm{padding:9px 14px!important;font-size:13.5px!important}
     .rm-modal{border-radius:22px 22px 0 0!important}
   `;
   const wideCss = `
@@ -4965,7 +4972,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
-      <button onClick={leave} style={{ display: "inline-flex", alignItems: "center", background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Back</button>
+      <button onClick={leave} style={{ display: "inline-flex", alignItems: "center", background: "#fff", border: "1.5px solid #D3DDDB", borderRadius: 11, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Back</button>
       <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{editRec ? "Edit storage inventory" : "New storage inventory"}</h2>
 
       <Card>
@@ -5290,7 +5297,7 @@ function PartCollectionForm({ data, setView, recId }) {
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
-      <button onClick={() => setView({ screen: "customerDetail", id: cust.id })} style={{ display: "inline-flex", alignItems: "center", background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Back</button>
+      <button onClick={() => setView({ screen: "customerDetail", id: cust.id })} style={{ display: "inline-flex", alignItems: "center", background: "#fff", border: "1.5px solid #D3DDDB", borderRadius: 10, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Back</button>
       <h2 style={{ margin: "0 0 2px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Items collected by customer</h2>
       <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 14 }}>{cust.name} · sheet {rec.date ? fmtUK(rec.date) : ""}</div>
 
