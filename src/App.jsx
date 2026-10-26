@@ -4077,6 +4077,8 @@ function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"a
 function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
   const [mode, setMode] = useState(initialMode || "agenda");
   const show = "all"; // filter tiles removed — calendar always shows everything
+  const [availOpen, setAvailOpen] = useState(false);
+  const [availPick, setAvailPick] = useState(null); // date chosen inside the availability dropdown
   const showMoves = show === "all" || show === "moves";
   const showSurveys = show === "all" || show === "surveys";
   const showVeh = show === "all" || show === "servicing";
@@ -4097,6 +4099,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const staffOffOnIso = iso => { const out = []; (data.staff || []).forEach(s => ((s.away) || []).forEach(b => { if (b.start) { const total = Math.max(1, Number(b.days) || 1); const end = isoAdd(b.start, { days: total - 1 }); if (iso >= b.start && iso <= end) { const dayNo = Math.round((new Date(iso + "T00:00") - new Date(b.start + "T00:00")) / 86400000) + 1; out.push({ s, b, dayNo, total }); } } })); return out; };
   const staffOffOnCal = d => showStaffOff ? staffOffOnIso(isoOf(d)) : [];
 
+  useEffect(() => { setAvailPick(null); }, [mode, anchor]);
   function navg(dir){ if(mode==="month") setAnchor(new Date(anchor.getFullYear(), anchor.getMonth()+dir, 1)); else if(mode==="week") setAnchor(addDays(anchor, 7*dir)); else setAnchor(addDays(anchor, dir)); }
 
   let rangeLabel = "";
@@ -4168,7 +4171,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const availChip = (label, booked) => (    <span style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:99, fontSize:12.5, fontWeight:700,
       background: booked ? "#F2F5F4" : "#E7F2F0", color: booked ? "#B7C3C0" : TEAL_D,
       textDecoration: booked ? "line-through" : "none", border: booked ? "1px solid #EAEFEE" : "1px solid #CDE7E2" }}>
-      <span style={{ width:8, height:8, borderRadius:99, background: booked ? "#C4D0CD" : "#22C55E" }} />{label}{booked ? " · booked" : ""}
+      <span style={{ width:8, height:8, borderRadius:99, background: booked ? "#C4D0CD" : "#22C55E" }} />{label}{booked && !label.includes(" · ") ? " · booked" : ""}
     </span>
   );
   const AvailPanel = ({ d }) => {
@@ -4188,6 +4191,54 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Staff</div>
           <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>{staffActive.map(s => { const off = staffAwayReason(s, isoOf(d)); return <span key={s.id}>{availChip(off ? `${s.name} · ${off}` : s.name, bs.has(s.name))}</span>; })}</div>
         </>}
+      </div>
+    );
+  };
+
+  // ── Staff & vehicle availability dropdown (shown on every view) ──
+  const availDefault = (() => {
+    const t = isoOf(today);
+    if (mode === "day") return isoOf(anchor);
+    if (mode === "week") { const s0 = isoOf(startOfWeek(anchor)), e0 = isoOf(addDays(startOfWeek(anchor), 6)); return t >= s0 && t <= e0 ? t : s0; }
+    if (mode === "month") { const s0 = isoOf(new Date(anchor.getFullYear(), anchor.getMonth(), 1)), e0 = isoOf(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0)); return t >= s0 && t <= e0 ? t : s0; }
+    return t;
+  })();
+  const availIso = (mode === "day" ? null : availPick) || availDefault;
+  const renderAvail = () => {
+    const d = new Date(availIso + "T00:00");
+    const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
+    const vehicles = data.vehicles || [];
+    const staffActive = (data.staff || []).filter(s => s.active !== false);
+    if (!vehicles.length && !staffActive.length) return null;
+    const freeV = vehicles.filter(v => !bv.has(v.id)).length;
+    const freeS = staffActive.filter(s => !bs.has(s.name)).length;
+    const step = n => setAvailPick(isoOf(addDays(d, n)));
+    return (
+      <div style={{ background: "#fff", border: "1px solid #E9EEED", borderRadius: 12, marginBottom: 14, boxShadow: "0 1px 2px rgba(16,33,30,.05)", overflow: "hidden" }}>
+        <button onClick={() => setAvailOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: "#10211E" }}>Staff & vehicle availability</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {!availOpen && <span style={{ fontSize: 12, fontWeight: 700, color: (freeV || freeS) ? TEAL_D : "#B7C3C0" }}>{freeV} van{freeV !== 1 ? "s" : ""} · {freeS} crew free</span>}
+            <span style={{ color: "#9CA3AF" }}>{availOpen ? "▾" : "▸"}</span>
+          </span>
+        </button>
+        {availOpen && (
+          <div style={{ padding: "0 14px 14px", borderTop: "1px solid #F2F5F4" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 12px" }}>
+              {mode !== "day" && <button onClick={() => step(-1)} style={{ ...navBtn, width: 32, height: 32, fontSize: 18 }}>‹</button>}
+              <span style={{ flex: 1, textAlign: mode === "day" ? "left" : "center", fontSize: 13.5, fontWeight: 800, color: sameDay(d, today) ? AMBER : "#10211E" }}>{fmtDate(availIso)} ({dow(availIso)}){sameDay(d, today) ? " · Today" : ""}</span>
+              {mode !== "day" && <button onClick={() => step(1)} style={{ ...navBtn, width: 32, height: 32, fontSize: 18 }}>›</button>}
+            </div>
+            {vehicles.length > 0 && <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 6 }}>Vehicles</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: staffActive.length ? 12 : 0 }}>{vehicles.map(v => { const out = vehOutOn(v, availIso); return <span key={v.id}>{availChip(out ? `${v.name} · servicing` : v.name, bv.has(v.id))}</span>; })}</div>
+            </>}
+            {staffActive.length > 0 && <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 6 }}>Staff</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{staffActive.map(s => { const off = staffAwayReason(s, availIso); return <span key={s.id}>{availChip(off ? `${s.name} · ${off}` : s.name, bs.has(s.name))}</span>; })}</div>
+            </>}
+          </div>
+        )}
       </div>
     );
   };
@@ -4223,6 +4274,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           <span style={{ fontSize:17, fontWeight:800, letterSpacing:"-.01em", color:"#10211E" }}>{rangeLabel}</span>
         </div>
       </div>
+
+      {renderAvail()}
 
       {showVeh && (() => {
         const nowIso = isoOf(today);
@@ -4346,7 +4399,6 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
             <div style={{ background: isToday?"#FFF7E8":"#F4F7F6", border:"1px solid #E9EEED", borderRadius:12, padding:"10px 14px", marginBottom:12, fontSize:13, fontWeight:800, color:"#2c3c38" }}>
               {evs.length} move{evs.length!==1?"s":""}{svs.length?` · ${svs.length} survey${svs.length!==1?"s":""}`:""} · {CAL_DOW[(anchor.getDay()+6)%7]} {anchor.getDate()} {CAL_MON[anchor.getMonth()]}
             </div>
-            <AvailPanel d={anchor} />
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {svs.map(en => <SurveyCard key={en.id} en={en} big />)}
               {maintOn(anchor).map((mm,ix) => <MaintCard key={"m"+ix} v={mm.v} b={mm.b} big />)}
@@ -4385,6 +4437,8 @@ function ResponsiveStyles({ device }) {
   const wide = device !== "phone";
   const common = `
     html,body{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+    html,body,#root{height:100%;overflow:hidden;overscroll-behavior:none}
+    *{overscroll-behavior:none}
     *{-webkit-text-size-adjust:100%;text-size-adjust:100%}
     *{scrollbar-width:thin;scrollbar-color:#CBD6D3 transparent}
     ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#CBD6D3;border-radius:9px}
