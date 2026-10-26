@@ -3126,8 +3126,7 @@ function CustomerDetail({ data, id, setView }) {
   }
   return (
     <div>
-      <button onClick={() => setView({ screen: "customers" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, padding: "10px 16px", fontSize: 15.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 14px" }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D }}>#{c.ref} </span> : ""}{c.name}</h2>
         <StatusBadge status={c.custType} />
       </div>
