@@ -1832,13 +1832,19 @@ function QuoteModal({ data, enquiry, onClose }) {
       status: ["Won", "Lost"].includes(enquiry.status) ? enquiry.status : (total > 0 ? "Quoted" : enquiry.status),
     };
   }
+  // Keep the linked move's price in step with the quote total
+  function withMovePrice(d, rec) {
+    const job = (d.jobs || []).find(j => j.enquiryId === enquiry.id);
+    return job && Number(job.price) !== Number(rec.quoteTotal) ? upsertLocal(d, "jobs", { ...job, price: rec.quoteTotal }) : d;
+  }
   async function saveDraft() {
-    await saveAndReload(upsertLocal(data, "enquiries", buildRecord(enquiry.quoteStatus || "Draft")));
+    const rec = buildRecord(enquiry.quoteStatus || "Draft");
+    await saveAndReload(withMovePrice(upsertLocal(data, "enquiries", rec), rec));
   }
   async function send() {
     const rec = buildRecord("Sent", todayISO());
     // local-first save, then open email
-    const stamped = stampData(upsertLocal(data, "enquiries", rec));
+    const stamped = stampData(withMovePrice(upsertLocal(data, "enquiries", rec), rec));
     localStorage.setItem(DB_KEY, JSON.stringify(stamped));
     pushChangedOnly(stamped).catch(() => {});
     const body = encodeURIComponent(
