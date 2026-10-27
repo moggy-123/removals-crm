@@ -694,8 +694,11 @@ function Dashboard({ data, setView, setData }) {
   const _now = new Date();
   const nowHM = String(_now.getHours()).padStart(2, "0") + ":" + String(_now.getMinutes()).padStart(2, "0");
   const surveyLapsed = e => e.surveyDate < todayIso || (e.surveyDate === todayIso && !!e.surveyTime && e.surveyTime <= nowHM);
+  const isSurveyed = e => !!(e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won", "Lost", "Let Go"].includes(e.status));
+  // Upcoming surveys, plus today's that have passed but aren't marked surveyed (shown red).
+  // Earlier days' missed surveys live in the red "Missed survey" box at the top instead.
   const upcomingSurveys = enquiries
-    .filter(e => e.surveyDate && e.status !== "Lost" && !surveyLapsed(e))
+    .filter(e => e.surveyDate && e.status !== "Lost" && (!surveyLapsed(e) || (e.surveyDate === todayIso && !isSurveyed(e))))
     .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
   const vehicles = data.vehicles || [];
@@ -779,18 +782,22 @@ function Dashboard({ data, setView, setData }) {
         const list = upcomingSurveys.filter(e => inWindow(e.surveyDate));
         return (
         <div style={{ marginBottom: 18 }}>
-          {list.length === 0 ? <Empty icon="calendar" text="No surveys this month or next" /> : list.map(e => (
-            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FBE3B3", background: "#FFFBF2" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "#B45309", textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(e.surveyDate)} ({dow(e.surveyDate)}){e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
+          {list.length === 0 ? <Empty icon="calendar" text="No surveys this month or next" /> : list.map(e => { const overdue = surveyLapsed(e) && !isSurveyed(e); return (
+            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={overdue ? { borderColor: "#FCA5A5", background: "#FEF2F2" } : { borderColor: "#FBE3B3", background: "#FFFBF2" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  {overdue && <div style={{ fontSize: 10, fontWeight: 800, color: "#B91C1C", textTransform: "uppercase", letterSpacing: ".05em" }}>⚠️ Time passed — not marked surveyed</div>}
+                  <div style={{ fontSize: 10, fontWeight: 800, color: overdue ? "#B91C1C" : "#B45309", textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(e.surveyDate)} ({dow(e.surveyDate)}){e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
                 </div>
-                <StatusBadge status={enqBadge(data, e)} />
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                  <StatusBadge status={enqBadge(data, e)} />
+                  {overdue && <Btn size="sm" variant="grey" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => { ev.stopPropagation(); saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: true, status: e.status === "New" ? "Surveyed" : e.status })); }}>✓ Surveyed</Btn>}
+                </div>
               </div>
             </Card>
-          ))}
+          ); })}
         </div>
         );
       })()}
