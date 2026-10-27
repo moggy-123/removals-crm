@@ -433,6 +433,15 @@ function upsertLocal(data, table, record) {
   return { ...data, [table]: next };
 }
 
+// Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
+const BUILD_LABEL = (() => {
+  const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
+  const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
+  if (!t || isNaN(t)) return "B140";
+  const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
+  return `B140 · ${when}${sha ? ` (${sha})` : ""}`;
+})();
+
 // ── Icons ───────────────────────────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = "currentColor" }) => {
   const paths = {
@@ -3688,7 +3697,7 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 className="rm-page-title" style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build B139</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build {BUILD_LABEL}</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Card style={{ marginBottom: 0 }}>
