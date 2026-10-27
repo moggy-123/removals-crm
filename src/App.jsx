@@ -472,7 +472,7 @@ function StatusBadge({ status }) {
   const label = status === "Won" ? "Booked" : (status === "Booked" || status === "In Progress") ? "Confirmed" : status;
   const m = STATUS_META[status] || { color: "#6B7280", bg: "#F3F4F6" };
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 10px", borderRadius: 99, fontSize: 12, fontWeight: 600, color: m.color, background: m.bg, border: `1px solid ${m.color}33` }}>
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 10px", borderRadius: 99, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0, color: m.color, background: m.bg, border: `1px solid ${m.color}33` }}>
       {label}
     </span>
   );
@@ -605,6 +605,14 @@ function enqStatus(e) {
   if (!e) return "";
   if (e.status === "New" && e.surveyDate) return isMissedSurvey(e) ? "Survey missed" : "Survey booked";
   return e.status;
+}
+// Badge for an enquiry anywhere in the app: once it has a move, show the move's status
+// (Provisional / Confirmed / Completed) so it matches the move cards.
+function enqBadge(data, e) {
+  if (!e) return "";
+  const j = (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go");
+  if (j) return (j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : j.status;
+  return enqStatus(e);
 }
 // Which Enquiries tile an enquiry belongs to (missed surveys sit under "Survey booked").
 const enqGroup = e => (e.status === "New" && e.surveyDate) ? "Survey booked" : e.status;
@@ -775,7 +783,7 @@ function Dashboard({ data, setView, setData }) {
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
                 </div>
-                <StatusBadge status={enqStatus(e)} />
+                <StatusBadge status={enqBadge(data, e)} />
               </div>
             </Card>
           ))}
@@ -874,7 +882,7 @@ function Dashboard({ data, setView, setData }) {
                     <button onClick={ev => { ev.stopPropagation(); const rec = fu.kind === "enquiry" ? (data.enquiries || []).find(x => x.id === fu.id) : (data.customers || []).find(x => x.id === fu.id); if (rec) setEditFu({ record: rec, table: fu.kind === "enquiry" ? "enquiries" : "customers" }); }} style={{ background: "none", border: "none", color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0 0" }}>Edit / reschedule</button>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                    {fu.kind === "enquiry" && <StatusBadge status={enqStatus((data.enquiries || []).find(x => x.id === fu.id) || { status: fu.status })} />}
+                    {fu.kind === "enquiry" && <StatusBadge status={enqBadge(data, (data.enquiries || []).find(x => x.id === fu.id) || { status: fu.status })} />}
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                       {showCall && btn("#0E7C73", "📞 Call", () => { logComm(fu.customerId, { type: "Call" }); window.location.href = `tel:${phone}`; })}
                       {showText && btn("#2563EB", "💬 Text", () => { logComm(fu.customerId, { type: "Text" }); window.location.href = `sms:${phone}`; })}
@@ -988,8 +996,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-              <StatusBadge status={enqStatus(e)} />
-              {(() => { const j = moveOf(e); return j ? <span style={{ fontSize: 11.5, fontWeight: 700, color: (STATUS_META[j.status] || {}).color || "#6B7280" }}>Move: {j.status === "Booked" || j.status === "In Progress" ? "Confirmed" : j.status}</span> : null; })()}
+              <StatusBadge status={enqBadge(data, e)} />
             </div>
           </div>
         </Card>
@@ -2920,7 +2927,7 @@ function EnquiryDetail({ data, id, setView }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 10px" }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, e.customerId)}</h2>
-        <StatusBadge status={enqStatus(e)} />
+        <StatusBadge status={enqBadge(data, e)} />
       </div>
       {customer && (
         <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 14 }}>
@@ -3362,7 +3369,7 @@ function CustomerDetail({ data, id, setView }) {
         <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 14, color: "#111827" }}>{e.fromTown || "—"} → {e.toTown || "—"} · {fmtDateShort(e.preferredDate)}</div>
-            <StatusBadge status={enqStatus(e)} />
+            <StatusBadge status={enqBadge(data, e)} />
           </div>
           {e.status === "Lost" && <div style={{ fontSize: 13, color: "#B91C1C", fontWeight: 600, marginTop: 6 }}>Lost reason: {e.lostReason || "none given"}</div>}
         </Card>
