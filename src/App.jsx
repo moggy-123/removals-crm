@@ -2809,6 +2809,7 @@ function EnquiryDetail({ data, id, setView }) {
   const [showMove, setShowMove] = useState(false);
   useEffect(() => {
     try { if (sessionStorage.getItem("removals_open_plan") === id) { sessionStorage.removeItem("removals_open_plan"); setShowPlan(true); } } catch {}
+    try { if (sessionStorage.getItem("removals_open_edit") === id) { sessionStorage.removeItem("removals_open_edit"); setShowEdit(true); } } catch {}
   }, [id]);
   const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name || "Vehicle";
   const customer = (data.customers || []).find(c => c.id === e?.customerId);
@@ -3214,6 +3215,35 @@ function CustomerDetail({ data, id, setView }) {
   if (!c) return <div style={{ padding: 20 }}>Customer not found.</div>;
   const enquiries = (data.enquiries || []).filter(e => e.customerId === id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   const jobs = (data.jobs || []).filter(j => j.customerId === id);
+  // Storage and move options only appear once the customer has been surveyed (or already has a move / storage job).
+  // A lost / let-go enquiry doesn't count, even if it was surveyed before it was lost.
+  const surveyedEnq = enquiries.some(e => !["Lost", "Let Go"].includes(e.status) && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won"].includes(e.status)));
+  const showMoveStorage = surveyedEnq || jobs.length > 0 || getStorageJobs(c).length > 0;
+  const latest = enquiries[0];
+  const openEnquiryEdit = en => { try { sessionStorage.setItem("removals_open_edit", en.id); } catch {} setView({ screen: "enquiryDetail", id: en.id }); };
+  async function reopenAndRebook(en) {
+    try { sessionStorage.setItem("removals_open_edit", en.id); sessionStorage.setItem("removals_view", JSON.stringify({ screen: "enquiryDetail", id: en.id })); } catch {}
+    await saveAndReload(upsertLocal(data, "enquiries", { ...en, status: "New", lostReason: "", surveyDate: "", surveyTime: "", surveyDone: false }));
+  }
+  const surveyPanel = (() => {
+    if (showMoveStorage) return null;
+    let line, btn;
+    if (!latest) { line = "No enquiry yet."; btn = <Btn size="sm" onClick={() => setView({ screen: "newEnquiry", customerId: c.id })}>+ New enquiry</Btn>; }
+    else if (["Lost", "Let Go"].includes(latest.status)) { line = `Enquiry ${latest.status === "Lost" ? "lost" : "let go"}${latest.lostReason ? ` — ${latest.lostReason}` : ""}. Changed their mind?`; btn = <Btn size="sm" onClick={() => reopenAndRebook(latest)}>📅 Rebook survey</Btn>; }
+    else if (isMissedSurvey(latest)) { line = `Survey missed — was due ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)}).`; btn = <Btn size="sm" onClick={() => openEnquiryEdit(latest)}>📅 Rebook survey</Btn>; }
+    else if (latest.surveyDate) { line = `Survey booked: ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)})${latest.surveyTime ? ` · ${latest.surveyTime}` : ""}.`; btn = <Btn size="sm" variant="grey" onClick={() => openEnquiryEdit(latest)}>📅 Rebook survey</Btn>; }
+    else { line = "Survey not booked yet."; btn = <Btn size="sm" onClick={() => openEnquiryEdit(latest)}>📅 Book survey</Btn>; }
+    return (
+      <Card>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 6 }}>Survey</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 13.5, color: "#374151", fontWeight: 600 }}>{line}</div>
+          <div style={{ flexShrink: 0 }}>{btn}</div>
+        </div>
+        <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 8 }}>Storage and move options appear once the survey is done.</div>
+      </Card>
+    );
+  })();
   async function del() {
     if (!confirm(`Delete ${c.name}?${customerDeleteSummary(data, c.id)} This can't be undone.`)) return;
     SAVING_IN_PROGRESS = true; showSavingOverlay();
@@ -3236,6 +3266,8 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
+      {surveyPanel}
+      {showMoveStorage && (
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: getStorageJobs(c).length ? 8 : 0 }}>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Storage jobs</div>
@@ -3277,6 +3309,7 @@ function CustomerDetail({ data, id, setView }) {
           </div>
         ) : null)}
       </Card>
+      )}
       <div style={{ ...contactRowStyle(1 + !!c.phone + !!c.email), marginBottom: 8 }}>
         {c.phone && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; }}>📞 Call</Btn>}
         <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" style={contactBtn} />
@@ -3306,8 +3339,8 @@ function CustomerDetail({ data, id, setView }) {
         </Card>
       ))}
 
-      <SectionTitle>Booked moves</SectionTitle>
-      {jobs.filter(j => j.status !== "Completed").length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>None yet.</div>}
+      {showMoveStorage && <SectionTitle>Booked moves</SectionTitle>}
+      {showMoveStorage && jobs.filter(j => j.status !== "Completed").length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>None yet.</div>}
       {jobs.filter(j => j.status !== "Completed").sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || "")).map(j => (
         <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
