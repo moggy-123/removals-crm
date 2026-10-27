@@ -3137,6 +3137,11 @@ function CustomersList({ data, setView }) {
         // Once there's an active move, show the move's status (Provisional / Confirmed) — like the Home screen.
         const activeMove = cJobs.filter(j => !["Completed", "Let Go"].includes(j.status)).sort((x, y) => (jobMoveDate(x) || "").localeCompare(jobMoveDate(y) || ""))[0];
         const badge = activeMove ? activeMove.status : (latestEnq ? enqStatus(latestEnq) : null);
+        // Quote still to build / email (surveyed, no move yet)
+        const qe = (data.enquiries || []).filter(e => e.customerId === c.id && !["Lost", "Let Go", "Won"].includes(e.status) && !cJobs.some(j => j.enquiryId === e.id)
+          && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted"].includes(e.status))
+          && !(Number(e.quoteTotal) > 0 && ["Sent", "Accepted"].includes(e.quoteStatus)));
+        const quoteFlag = qe.length ? (qe.some(e => Number(e.quoteTotal) > 0) ? { t: "⚠️ Quote not emailed", c: "#C2410C" } : { t: "Quote to build", c: "#0369A1" }) : null;
         return (
           <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -3146,7 +3151,9 @@ function CustomersList({ data, setView }) {
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                 {badge && <StatusBadge status={badge} />}
-                <span style={{ fontSize: 11.5, color: "#9CA3AF" }}>{jobs} move{jobs !== 1 ? "s" : ""}</span>
+                {quoteFlag
+                  ? <span style={{ fontSize: 11.5, fontWeight: 800, color: quoteFlag.c, whiteSpace: "nowrap" }}>{quoteFlag.t}</span>
+                  : <span style={{ fontSize: 11.5, color: "#9CA3AF" }}>{jobs} move{jobs !== 1 ? "s" : ""}</span>}
               </div>
             </div>
           </Card>
