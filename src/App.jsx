@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { pullFromCloud, pushToCloud, pushOne, deleteRecord, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
+import { pullFromCloud, pushToCloud, pushOne, deleteRecord as deleteRecordRaw, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
@@ -331,6 +331,24 @@ function addTombstone(id) {
 function getTombstones() {
   try { return JSON.parse(localStorage.getItem(TOMB_KEY) || "[]"); } catch { return []; }
 }
+// Delete a record in the cloud and CHECK it has actually gone. Supabase reports success even
+// when its permissions silently block a delete, which used to leave "deleted" vans/staff in the
+// cloud — they then reappeared (as duplicates) after a reset. Throws if the row is still there.
+async function deleteRecord(table, id) {
+  await deleteRecordRaw(table, id);
+  const { data: left, error } = await supabase.from(table).select("id").eq("id", id);
+  if (error) throw error;
+  if (left && left.length) throw new Error(`The cloud did not allow deleting this ${table} record`);
+}
+// Deleted on this device but still in the cloud? Try again (runs on every successful sync).
+async function purgeTombstoned(cloud) {
+  const dead = new Set(getTombstones());
+  if (!dead.size) return;
+  for (const t of ["customers", "enquiries", "jobs", "vehicles", "staff"]) {
+    for (const r of (cloud[t] || [])) { if (dead.has(r.id)) { try { await deleteRecord(t, r.id); } catch {} } }
+  }
+}
+
 // Lift tombstones (used by Restore so deleted records can come back)
 function removeTombstones(ids) {
   try {
@@ -357,7 +375,9 @@ async function doPullSync(setData, setSyncStatus, opts) {
   if (!force && now - LAST_SYNC_AT < 30000) return; // throttle
   LAST_SYNC_AT = now;
   try {
-    const merged = mergeAll(await pullFromCloud(), loadData());
+    const cloud = await pullFromCloud();
+    purgeTombstoned(cloud).catch(() => {});
+    const merged = mergeAll(cloud, loadData());
     localStorage.setItem(DB_KEY, JSON.stringify(merged));
     pushChangedOnly(merged).catch(() => {});
     setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
@@ -3517,6 +3537,63 @@ function OrphanCleanup({ data, setData }) {
   );
 }
 
+// Find vans with the same name/reg and staff with the same name.
+function findDuplicates(data) {
+  const group = (arr, key) => { const g = {}; (arr || []).forEach(r => { const k = key(r); if (k) (g[k] = g[k] || []).push(r); }); return Object.values(g).filter(x => x.length > 1); };
+  return {
+    vehicles: group(data.vehicles, v => (v.name || v.reg || "").trim().toLowerCase()),
+    staff: group(data.staff, s => (s.name || "").trim().toLowerCase()),
+  };
+}
+function DuplicateCleanup({ data, setData }) {
+  const dups = findDuplicates(data);
+  const extra = dups.vehicles.reduce((n, g) => n + g.length - 1, 0) + dups.staff.reduce((n, g) => n + g.length - 1, 0);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  async function clean() {
+    const names = [...dups.vehicles, ...dups.staff].map(g => g[0].name).join(", ");
+    if (!confirm(`Merge ${extra} duplicate${extra !== 1 ? "s" : ""} (${names})?\n\nOne copy of each is kept. Bookings, servicing and holidays from the copies are moved onto it, so nothing is lost.`)) return;
+    setBusy(true);
+    let d = loadData();
+    const usage = id => (d.jobs || []).reduce((n, j) => n + ((j.vehicleIds || []).includes(id) || j.vehicleId === id ? 1 : 0) + jobStages(j).filter(st => (st.vehicleIds || []).includes(id)).length, 0);
+    const failed = [];
+    for (const g of dups.vehicles) {
+      const cur = g.map(v => (d.vehicles || []).find(x => x.id === v.id) || v);
+      const keep = cur.slice().sort((a, b) => usage(b.id) - usage(a.id) || (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+      const gone = cur.filter(v => v.id !== keep.id), goneIds = new Set(gone.map(v => v.id));
+      const fix = ids => Array.from(new Set((ids || []).map(id => goneIds.has(id) ? keep.id : id)));
+      const fixStages = st => Array.isArray(st) ? st.map(x => ({ ...x, vehicleIds: fix(x.vehicleIds) })) : st;
+      d = { ...d,
+        jobs: (d.jobs || []).map(j => ({ ...j, vehicleIds: fix(j.vehicleIds), vehicleId: goneIds.has(j.vehicleId) ? keep.id : j.vehicleId, stages: fixStages(j.stages) })),
+        enquiries: (d.enquiries || []).map(e => ({ ...e, stages: fixStages(e.stages) })) };
+      const bookings = {}; [keep, ...gone].forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { bookings[b.id || (b.start + b.type)] = b; }));
+      d = upsertLocal(d, "vehicles", { ...keep, maint: { ...(keep.maint || {}), bookings: Object.values(bookings) }, updatedAt: Date.now() });
+      for (const v of gone) { addTombstone(v.id); try { await deleteRecord("vehicles", v.id); } catch { failed.push(v.name); } d = { ...d, vehicles: d.vehicles.filter(x => x.id !== v.id) }; }
+    }
+    for (const g of dups.staff) {
+      const cur = g.map(s => (d.staff || []).find(x => x.id === s.id) || s);
+      const keep = cur.slice().sort((a, b) => (b.active !== false) - (a.active !== false) || (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+      const gone = cur.filter(s => s.id !== keep.id);
+      const away = {}; [keep, ...gone].forEach(s => (s.away || []).forEach(b => { away[b.id || (b.start + "|" + b.days)] = b; }));
+      d = upsertLocal(d, "staff", { ...keep, away: Object.values(away), updatedAt: Date.now() });
+      for (const s of gone) { addTombstone(s.id); try { await deleteRecord("staff", s.id); } catch { failed.push(s.name); } d = { ...d, staff: d.staff.filter(x => x.id !== s.id) }; }
+    }
+    setBusy(false);
+    if (failed.length) alert(`Merged on this device. The cloud copy of ${failed.join(", ")} couldn't be deleted yet (offline, or the cloud is blocking deletes). The app will keep retrying each time it syncs.`);
+    await saveAndReload(d);
+  }
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 4 }}>Merge duplicate vans &amp; staff</div>
+      <div style={{ fontSize: 12, color: "#94A4A0", marginBottom: 8 }}>{extra ? `Found: ${[...dups.vehicles, ...dups.staff].map(g => `${g[0].name} ×${g.length}`).join(", ")}.` : "Finds vans or staff that appear more than once and merges them into one."}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <Btn size="sm" variant={extra ? "danger" : "grey"} disabled={busy || !extra} onClick={clean}>{busy ? "Merging…" : extra ? `Merge ${extra} duplicate${extra !== 1 ? "s" : ""}` : "None found"}</Btn>
+        {msg && <div style={{ fontSize: 12.5, color: msg.startsWith("Merged ") ? "#15803D" : "#B45309", fontWeight: 700 }}>{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
 function CompanyView({ data, setView, setData }) {
   const restoreRef = useRef(null);
   const [restoring, setRestoring] = useState(false);
@@ -3587,6 +3664,7 @@ function CompanyView({ data, setView, setData }) {
           <h4 style={{ margin: "0 0 2px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Sync</h4>
           <SyncControl data={data} setData={setData} />
           <OrphanCleanup data={data} setData={setData} />
+          <DuplicateCleanup data={data} setData={setData} />
         </Card>
         <Card style={{ marginBottom: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -3713,7 +3791,7 @@ function VehicleForm({ data, onClose, editVehicle }) {
   async function del() {
     if (!confirm("Delete this vehicle?")) return;
     addTombstone(v.id); SAVING_IN_PROGRESS = true; showSavingOverlay();
-    try { await deleteRecord("vehicles", v.id); } catch {}
+    try { await deleteRecord("vehicles", v.id); } catch (err) { alert("Removed from this device, but the cloud copy couldn't be deleted yet — the app will retry when it next syncs.\n\n" + ((err && err.message) || "")); }
     const d2 = { ...data, vehicles: (data.vehicles || []).filter(x => x.id !== v.id) };
     localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
   }
@@ -3795,7 +3873,7 @@ function StaffForm({ data, onClose, editStaff }) {
   async function del() {
     if (!confirm("Delete this staff member?")) return;
     addTombstone(s.id); SAVING_IN_PROGRESS = true; showSavingOverlay();
-    try { await deleteRecord("staff", s.id); } catch {}
+    try { await deleteRecord("staff", s.id); } catch (err) { alert("Removed from this device, but the cloud copy couldn't be deleted yet — the app will retry when it next syncs.\n\n" + ((err && err.message) || "")); }
     const d2 = { ...data, staff: (data.staff || []).filter(x => x.id !== s.id) };
     localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
   }
