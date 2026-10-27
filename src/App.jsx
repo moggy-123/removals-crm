@@ -600,6 +600,39 @@ async function markLostFlow(data, en) {
   await saveAndReload(withLost(data, en, reason.trim()));
 }
 
+// Survey date/time has passed and it hasn't been done (includes earlier today).
+function surveyOverdue(e) {
+  if (!e || !e.surveyDate || e.surveyDone || (e.inventory && e.inventory.length) || e.status !== "New") return false;
+  const t = todayISO();
+  if (e.surveyDate < t) return true;
+  if (e.surveyDate === t && e.surveyTime) { const n = new Date(); return e.surveyTime <= String(n.getHours()).padStart(2, "0") + ":" + String(n.getMinutes()).padStart(2, "0"); }
+  return false;
+}
+// Quick pop-up to give an out-of-date survey a new date/time. Once saved it's a normal "Survey booked" again.
+function RescheduleSurveyModal({ data, enquiry, onClose }) {
+  const tomorrow = isoAdd(todayISO(), { days: 1 });
+  const [date, setDate] = useState(enquiry.surveyDate && enquiry.surveyDate >= todayISO() ? enquiry.surveyDate : tomorrow);
+  const [time, setTime] = useState(enquiry.surveyTime || "");
+  const [surveyor, setSurveyor] = useState(enquiry.surveyor || "");
+  const surveyors = Array.from(new Set([...(data.staff || []).filter(s => s.role === "Surveyor").map(s => s.name), surveyor].filter(Boolean)));
+  async function save() {
+    if (!date) { alert("Pick the new survey date."); return; }
+    await saveAndReload(upsertLocal(data, "enquiries", { ...enquiry, surveyDate: date, surveyTime: time, surveyor, surveyDone: false, status: "New", lostReason: "" }));
+  }
+  return (
+    <Modal title={`Reschedule survey — ${custName(data, enquiry.customerId)}`} onClose={onClose}>
+      {enquiry.surveyDate && <div style={{ fontSize: 13, color: "#B91C1C", fontWeight: 600, marginBottom: 12 }}>Was due {fmtDate(enquiry.surveyDate)} ({dow(enquiry.surveyDate)}){enquiry.surveyTime ? ` · ${enquiry.surveyTime}` : ""}</div>}
+      <Field label="New survey date"><Input type="date" value={date} onChange={setDate} /></Field>
+      <Field label="Time"><Input type="time" value={time} onChange={setTime} /></Field>
+      {surveyors.length > 0 && <Field label="Surveyor"><Select value={surveyor} onChange={setSurveyor} options={surveyors} placeholder="Select surveyor…" /></Field>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8, marginTop: 6 }}>
+        <Btn variant="grey" style={{ width: "100%" }} onClick={onClose}>Cancel</Btn>
+        <Btn style={{ width: "100%" }} onClick={save}>📅 Save new date</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 // What an enquiry's badge says: a New enquiry with a survey date shows "Survey booked" (or "Survey missed").
 function enqStatus(e) {
   if (!e) return "";
@@ -641,6 +674,7 @@ function Dashboard({ data, setView, setData }) {
   const jobs = data.jobs || [];
   const [dashShow, setDashShow] = useState("");
   const [editFu, setEditFu] = useState(null);
+  const [resched, setResched] = useState(null);
   const open = enquiries.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status));
   const quotesOut = enquiries.filter(e => e.status === "Quoted");
   const now = new Date();
@@ -740,7 +774,7 @@ function Dashboard({ data, setView, setData }) {
                   <div style={{ fontSize: 12.5, color: "#991B1B", marginBottom: 8 }}>Was due {fmtDate(en.surveyDate)} ({dow(en.surveyDate)}){en.surveyTime ? ` · ${en.surveyTime}` : ""}{en.surveyor ? ` · ${en.surveyor}` : ""}</div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                  <Btn size="sm" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 }} onClick={() => setView({ screen: "enquiryDetail", id: en.id })}>Rebook</Btn>
+                  <Btn size="sm" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 }} onClick={() => setResched(en)}>Reschedule</Btn>
                   <Btn size="sm" variant="grey" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 }} onClick={() => markDone(en)}>✓ Surveyed</Btn>
                   <Btn size="sm" variant="grey" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13, color: "#B91C1C" }} onClick={() => markLost(en)}>✕ Lost</Btn>
                 </div>
@@ -808,6 +842,7 @@ function Dashboard({ data, setView, setData }) {
                   <StatusBadge status={enqBadge(data, e)} />
                   {stage === "needQuote" && <Btn size="sm" variant="amber" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => openQuote(ev, e)}>Build quote</Btn>}
                   {stage === "notSent" && <Btn size="sm" variant="amber" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => openQuote(ev, e)}>📧 Email quote</Btn>}
+                  {overdue && <Btn size="sm" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => { ev.stopPropagation(); setResched(e); }}>📅 Reschedule</Btn>}
                   {overdue && <Btn size="sm" variant="grey" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => { ev.stopPropagation(); saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: true, status: e.status === "New" ? "Surveyed" : e.status })); }}>✓ Surveyed</Btn>}
                 </div>
               </div>
@@ -923,6 +958,7 @@ function Dashboard({ data, setView, setData }) {
         </>
       )}
 
+      {resched && <RescheduleSurveyModal data={data} enquiry={resched} onClose={() => setResched(null)} />}
       {editFu && <FollowUpModal data={data} record={editFu.record} table={editFu.table} onClose={() => setEditFu(null)} />}
 
       {dashShow !== "surveys" && dashShow !== "servicing" && (() => {
@@ -2865,6 +2901,7 @@ function EnquiryDetail({ data, id, setView }) {
   const [showPlan, setShowPlan] = useState(false);
   const [showMove, setShowMove] = useState(false);
   const [rebook, setRebook] = useState(false);
+  const [showResched, setShowResched] = useState(false);
   useEffect(() => {
     try { if (sessionStorage.getItem("removals_open_plan") === id) { sessionStorage.removeItem("removals_open_plan"); setShowPlan(true); } } catch {}
     try { if (sessionStorage.getItem("removals_open_edit") === id) { sessionStorage.removeItem("removals_open_edit"); setShowEdit(true); } } catch {}
@@ -2983,7 +3020,7 @@ function EnquiryDetail({ data, id, setView }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontWeight: 700, color: "#111827" }}>Survey / Inventory</div>
-            {e.surveyDate && <div style={{ fontSize: 13, color: TEAL_D, fontWeight: 600, marginTop: 2 }}>📅 {fmtDate(e.surveyDate)}{e.surveyTime ? ` · ${e.surveyTime}` : ""}</div>}
+            {e.surveyDate && <div style={{ fontSize: 13, color: surveyOverdue(e) ? "#B91C1C" : TEAL_D, fontWeight: 600, marginTop: 2 }}>📅 {fmtDate(e.surveyDate)}{e.surveyTime ? ` · ${e.surveyTime}` : ""}{surveyOverdue(e) ? " — date passed, not surveyed" : ""}</div>}
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
               {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³ · ${e.weightKg} kg` : "Not surveyed yet"}
             </div>
@@ -2991,6 +3028,7 @@ function EnquiryDetail({ data, id, setView }) {
             {((e.inventory && e.inventory.length) || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "surveyPdf", id: e.id })}><Icon name="quote" size={14} /> Survey &amp; move plan PDF</Btn> : null}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
+            {surveyOverdue(e) && <Btn size="sm" variant="danger" onClick={() => setShowResched(true)}>📅 Reschedule</Btn>}
             <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
             {e.surveyDate && (() => { const surveyed = e.surveyDone || ["Surveyed", "Quoted", "Won"].includes(e.status); return <Btn size="sm" variant={surveyed ? "grey" : "primary"} onClick={async () => { const done = !surveyed; await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{surveyed ? "✓ Surveyed" : "Mark surveyed"}</Btn>; })()}
           </div>
@@ -3086,6 +3124,7 @@ function EnquiryDetail({ data, id, setView }) {
       {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
       {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
+      {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
       {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
       {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
       {showMove && linkedJob && <MoveManageModal data={data} job={linkedJob} onClose={() => setShowMove(false)} />}
@@ -3259,6 +3298,7 @@ function CustomerDetail({ data, id, setView }) {
   const [showEdit, setShowEdit] = useState(false);
   const [jobForm, setJobForm] = useState(null);
   const [commForm, setCommForm] = useState(false);
+  const [resched, setResched] = useState(null);
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [sheetBusy, setSheetBusy] = useState(false);
   async function openSheet(rec) {
@@ -3323,7 +3363,7 @@ function CustomerDetail({ data, id, setView }) {
     let line, btn;
     if (!latest) { line = "No enquiry yet."; btn = <Btn size="sm" onClick={() => setView({ screen: "newEnquiry", customerId: c.id })}>+ New enquiry</Btn>; }
     else if (["Lost", "Let Go"].includes(latest.status)) { line = `Enquiry ${latest.status === "Lost" ? "lost" : "let go"}${latest.lostReason ? ` — ${latest.lostReason}` : ""}. Changed their mind?`; btn = <Btn size="sm" onClick={() => reopenAndRebook(latest)}>📅 Rebook survey</Btn>; }
-    else if (isMissedSurvey(latest)) { line = `Survey missed — was due ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)}).`; btn = <Btn size="sm" onClick={() => openEnquiryEdit(latest)}>📅 Rebook survey</Btn>; }
+    else if (surveyOverdue(latest)) { line = `Survey missed — was due ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)})${latest.surveyTime ? ` · ${latest.surveyTime}` : ""}.`; btn = <Btn size="sm" onClick={() => setResched(latest)}>📅 Reschedule</Btn>; }
     else if (latest.surveyDate) { line = `Survey booked: ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)})${latest.surveyTime ? ` · ${latest.surveyTime}` : ""}.`; btn = <Btn size="sm" variant="grey" onClick={() => openEnquiryEdit(latest)}>📅 Rebook survey</Btn>; }
     else { line = "Survey not booked yet."; btn = <Btn size="sm" onClick={() => openEnquiryEdit(latest)}>📅 Book survey</Btn>; }
     return (
@@ -3459,6 +3499,7 @@ function CustomerDetail({ data, id, setView }) {
       )}
       {showEdit && <CustomerForm data={data} editCustomer={c} onClose={() => setShowEdit(false)} />}
       {jobForm && <StorageJobForm data={data} customer={c} job={jobForm === "new" ? null : jobForm} onClose={() => setJobForm(null)} />}
+      {resched && <RescheduleSurveyModal data={data} enquiry={resched} onClose={() => setResched(null)} />}
       {commForm && <CommLogForm data={data} customer={c} entry={commForm.entry} preset={commForm.preset} onClose={() => setCommForm(null)} />}
       {followUpOpen && <FollowUpModal data={data} record={c} table="customers" onClose={() => setFollowUpOpen(false)} />}
 
