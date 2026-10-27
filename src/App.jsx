@@ -697,8 +697,14 @@ function Dashboard({ data, setView, setData }) {
   const isSurveyed = e => !!(e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won", "Lost", "Let Go"].includes(e.status));
   // Upcoming surveys, plus today's that have passed but aren't marked surveyed (shown red).
   // Earlier days' missed surveys live in the red "Missed survey" box at the top instead.
+  // A survey stays on Home until its quote has been built AND emailed (or a move is created).
+  const hasMove = e => (data.jobs || []).some(j => j.enquiryId === e.id);
+  const quoteBuilt = e => Number(e.quoteTotal) > 0;
+  const quoteSent = e => quoteBuilt(e) && ["Sent", "Accepted"].includes(e.quoteStatus);
+  const surveyStage = e => !isSurveyed(e) ? (surveyLapsed(e) ? "overdue" : "booked") : !quoteBuilt(e) ? "needQuote" : !quoteSent(e) ? "notSent" : "done";
   const upcomingSurveys = enquiries
-    .filter(e => e.surveyDate && e.status !== "Lost" && (!surveyLapsed(e) || (e.surveyDate === todayIso && !isSurveyed(e))))
+    .filter(e => e.surveyDate && !["Lost", "Let Go", "Won"].includes(e.status) && !hasMove(e))
+    .filter(e => { const st = surveyStage(e); return st === "booked" || (st === "overdue" && e.surveyDate === todayIso) || st === "needQuote" || st === "notSent"; })
     .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
   const vehicles = data.vehicles || [];
@@ -779,20 +785,29 @@ function Dashboard({ data, setView, setData }) {
       </div>
 
       {(dashShow === "" || dashShow === "surveys") && (() => {
-        const list = upcomingSurveys.filter(e => inWindow(e.surveyDate));
+        const list = upcomingSurveys.filter(e => surveyStage(e) !== "booked" || inWindow(e.surveyDate));
+        const openQuote = (ev, e) => { ev.stopPropagation(); try { sessionStorage.setItem("removals_open_quote", e.id); } catch {} setView({ screen: "enquiryDetail", id: e.id }); };
+        const STAGE = {
+          booked:    { card: { borderColor: "#FBE3B3", background: "#FFFBF2" }, col: "#B45309", note: "" },
+          overdue:   { card: { borderColor: "#FCA5A5", background: "#FEF2F2" }, col: "#B91C1C", note: "⚠️ Time passed — not marked surveyed" },
+          needQuote: { card: { borderColor: "#BAE6FD", background: "#F0F9FF" }, col: "#0369A1", note: "✓ Surveyed — quote still to build" },
+          notSent:   { card: { borderColor: "#FCA5A5", background: "#FFF7ED" }, col: "#C2410C", note: "⚠️ Quote built but not emailed yet" },
+        };
         return (
         <div style={{ marginBottom: 18 }}>
-          {list.length === 0 ? <Empty icon="calendar" text="No surveys this month or next" /> : list.map(e => { const overdue = surveyLapsed(e) && !isSurveyed(e); return (
-            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={overdue ? { borderColor: "#FCA5A5", background: "#FEF2F2" } : { borderColor: "#FBE3B3", background: "#FFFBF2" }}>
+          {list.length === 0 ? <Empty icon="calendar" text="No surveys this month or next" /> : list.map(e => { const stage = surveyStage(e); const S = STAGE[stage] || STAGE.booked; const overdue = stage === "overdue"; return (
+            <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={S.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
-                  {overdue && <div style={{ fontSize: 10, fontWeight: 800, color: "#B91C1C", textTransform: "uppercase", letterSpacing: ".05em" }}>⚠️ Time passed — not marked surveyed</div>}
-                  <div style={{ fontSize: 10, fontWeight: 800, color: overdue ? "#B91C1C" : "#B45309", textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(e.surveyDate)} ({dow(e.surveyDate)}){e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
+                  {S.note && <div style={{ fontSize: 10, fontWeight: 800, color: S.col, textTransform: "uppercase", letterSpacing: ".05em" }}>{S.note}{stage === "notSent" ? ` · ${gbp(e.quoteTotal)}` : ""}</div>}
+                  <div style={{ fontSize: 10, fontWeight: 800, color: S.col, textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(e.surveyDate)} ({dow(e.surveyDate)}){e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                   <StatusBadge status={enqBadge(data, e)} />
+                  {stage === "needQuote" && <Btn size="sm" variant="amber" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => openQuote(ev, e)}>Build quote</Btn>}
+                  {stage === "notSent" && <Btn size="sm" variant="amber" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => openQuote(ev, e)}>📧 Email quote</Btn>}
                   {overdue && <Btn size="sm" variant="grey" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => { ev.stopPropagation(); saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: true, status: e.status === "New" ? "Surveyed" : e.status })); }}>✓ Surveyed</Btn>}
                 </div>
               </div>
@@ -2854,6 +2869,7 @@ function EnquiryDetail({ data, id, setView }) {
     try { if (sessionStorage.getItem("removals_open_plan") === id) { sessionStorage.removeItem("removals_open_plan"); setShowPlan(true); } } catch {}
     try { if (sessionStorage.getItem("removals_open_edit") === id) { sessionStorage.removeItem("removals_open_edit"); setShowEdit(true); } } catch {}
     try { if (sessionStorage.getItem("removals_rebook") === id) { sessionStorage.removeItem("removals_rebook"); setRebook(true); } } catch {}
+    try { if (sessionStorage.getItem("removals_open_quote") === id) { sessionStorage.removeItem("removals_open_quote"); setShowQuote(true); } } catch {}
   }, [id]);
   const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name || "Vehicle";
   const customer = (data.customers || []).find(c => c.id === e?.customerId);
