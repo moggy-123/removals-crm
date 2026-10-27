@@ -563,6 +563,12 @@ function moveRef(data, job) {
   const seq = moveSeqOf(data, job);
   return (c && c.ref) ? `#${c.ref}/${seq}` : `Move ${seq}`;
 }
+// A survey is "missed" when its date has passed and it was never done (not surveyed, no inventory).
+function isMissedSurvey(e, todayIso = todayISO()) {
+  return !!(e && e.surveyDate && e.surveyDate < todayIso && !e.surveyDone && !(e.inventory && e.inventory.length)
+    && !["Surveyed", "Quoted", "Won", "Lost", "Let Go"].includes(e.status));
+}
+function missedSurveys(data) { const t = todayISO(); return (data.enquiries || []).filter(e => isMissedSurvey(e, t)).sort((a, b) => a.surveyDate.localeCompare(b.surveyDate)); }
 function autoCompletePastMoves(d) {
   const todayIso = todayISO();
   let changed = false;
@@ -651,6 +657,31 @@ function Dashboard({ data, setView, setData }) {
 
   return (
     <div>
+      {(() => {
+        const missed = missedSurveys(data);
+        if (!missed.length) return null;
+        const markDone = en => saveAndReload(upsertLocal(data, "enquiries", { ...en, surveyDone: true, status: en.status === "New" ? "Surveyed" : en.status }));
+        const markLost = en => { const r = prompt("Reason lost? (optional)"); if (r === null) return; saveAndReload(upsertLocal(data, "enquiries", { ...en, status: "Lost", lostReason: r.trim() })); };
+        return (
+          <Card style={{ border: "1px solid #FCA5A5", background: "#FEF2F2", marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, color: "#991B1B", marginBottom: 4, fontSize: 14 }}>⚠️ Missed survey{missed.length !== 1 ? "s" : ""} ({missed.length})</div>
+            <div style={{ fontSize: 12.5, color: "#991B1B", marginBottom: 4 }}>The survey date has passed but it hasn't been marked as done.</div>
+            {missed.map(en => (
+              <div key={en.id} style={{ padding: "10px 0 4px", borderTop: "1px solid #FECACA" }}>
+                <div onClick={() => setView({ screen: "enquiryDetail", id: en.id })} style={{ cursor: "pointer" }}>
+                  <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, en.customerId)}</div>
+                  <div style={{ fontSize: 12.5, color: "#991B1B", marginBottom: 8 }}>Was due {fmtDate(en.surveyDate)} ({dow(en.surveyDate)}){en.surveyTime ? ` · ${en.surveyTime}` : ""}{en.surveyor ? ` · ${en.surveyor}` : ""}</div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                  <Btn size="sm" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 }} onClick={() => setView({ screen: "enquiryDetail", id: en.id })}>Rebook</Btn>
+                  <Btn size="sm" variant="grey" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 }} onClick={() => markDone(en)}>✓ Surveyed</Btn>
+                  <Btn size="sm" variant="grey" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13, color: "#B91C1C" }} onClick={() => markLost(en)}>✕ Lost</Btn>
+                </div>
+              </div>
+            ))}
+          </Card>
+        );
+      })()}
       {pastProvisional.length > 0 && (
         <Card style={{ border: "1px solid #FDE68A", background: "#FFFBEB", marginBottom: 14 }}>
           <div style={{ fontWeight: 800, color: "#92400E", marginBottom: 6, fontSize: 14 }}>Provisional bookings past their date</div>
@@ -4284,10 +4315,12 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   );
   const SurveyCard = ({ en, big }) => {
     const done = en.surveyDone || en.status === "Surveyed";
+    const missed = isMissedSurvey(en);
+    const bg = missed ? "#FEF2F2" : done ? "#F1F9F4" : "#FFFBF2", bd = missed ? "#FCA5A5" : done ? "#BBE6C9" : "#FBE3B3", bar = missed ? "#DC2626" : done ? "#22C55E" : AMBER, tc = missed ? "#B91C1C" : done ? "#15803D" : AMBER;
     return (
     <div onClick={() => setView({ screen:"enquiryDetail", id:en.id })}
-      style={{ background: done?"#F1F9F4":"#FFFBF2", border:`1px solid ${done?"#BBE6C9":"#FBE3B3"}`, borderLeft:`4px solid ${done?"#22C55E":AMBER}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
-      <div style={{ fontSize: big?11:9.5, fontWeight:800, color: done?"#15803D":AMBER, textTransform:"uppercase", letterSpacing:".05em" }}>{done?"✓ Surveyed":"Survey"}{en.surveyTime ? ` · ${en.surveyTime}` : ""}</div>
+      style={{ background: bg, border:`1px solid ${bd}`, borderLeft:`4px solid ${bar}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
+      <div style={{ fontSize: big?11:9.5, fontWeight:800, color: tc, textTransform:"uppercase", letterSpacing:".05em" }}>{missed ? "⚠️ Missed survey" : done ? "✓ Surveyed" : "Survey"}{en.surveyTime ? ` · ${en.surveyTime}` : ""}</div>
       <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, en.customerId)}</div>
       <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:1, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{en.fromTown || "—"} → {en.toTown || "—"}</div>
     </div>
@@ -4467,7 +4500,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           cells.push(
             <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:92, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
               <div style={{ alignSelf:"flex-start", fontSize:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
-              {svs.slice(0,2).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color:"#92591A", background:"#FFF6E6", borderLeft:`3px solid ${AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>📋 {custName(data,en.customerId)}</div>)}
+              {svs.slice(0,2).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color: isMissedSurvey(en) ? "#B91C1C" : "#92591A", background: isMissedSurvey(en) ? "#FEE2E2" : "#FFF6E6", borderLeft:`3px solid ${isMissedSurvey(en) ? "#DC2626" : AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>📋 {custName(data,en.customerId)}</div>)}
               {evs.slice(0,3).map((m,ix) => <div key={ix} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(m)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data,m.job.customerId)}{m.stage.type?` · ${m.stage.type}`:""}</div>)}
               {mnt.slice(0,2).map((mm,ix) => <div key={"m"+ix} style={{ fontSize:10.5, fontWeight:700, color:"#475569", background:"#EEF2F7", borderLeft:"3px solid #64748B", borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>🔧 {mm.v.name} · {mm.b.type}</div>)}
               {total>5 && <div style={{ fontSize:10, color:"#94A4A0", fontWeight:700 }}>+{total-5} more</div>}
@@ -5766,6 +5799,10 @@ export default function App() {
     { id: "storage",   icon: "box",       label: "Storage",   phone: "Storage" },
     { id: "company",   icon: "company",   label: "Company",   phone: "Company" },
   ];
+  const missedCount = missedSurveys(data).length;
+  const navBadge = id => id === "enquiries" && missedCount > 0
+    ? <span style={{ position: "absolute", top: 4, left: "calc(50% + 6px)", minWidth: 18, height: 18, padding: "0 5px", borderRadius: 99, background: "#DC2626", color: "#fff", fontSize: 11, fontWeight: 800, lineHeight: "18px", textAlign: "center", boxShadow: "0 0 0 2px #fff" }}>{missedCount}</span>
+    : null;
   const sectionKey = sectionFor(view.screen);
   const activeTab = ["dashboard", "calendar", "company", "storage"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
 
@@ -5835,6 +5872,7 @@ export default function App() {
                   background: on ? "linear-gradient(90deg,#E6F3F1,#EDF6F5)" : "transparent", color: on ? TEAL_D : "#43534F" }}>
                   {on && <span style={{ position: "absolute", left: -12, top: 9, bottom: 9, width: 3.5, borderRadius: "0 4px 4px 0", background: AMBER }} />}
                   <Icon name={n.icon} size={20} color={on ? TEAL : "#7C8B87"} /> {n.label}
+                  {n.id === "enquiries" && missedCount > 0 && <span style={{ marginLeft: "auto", minWidth: 20, height: 20, padding: "0 6px", borderRadius: 99, background: "#DC2626", color: "#fff", fontSize: 11.5, fontWeight: 800, lineHeight: "20px", textAlign: "center" }}>{missedCount}</span>}
                 </button>
               );
             })}
@@ -5874,7 +5912,8 @@ export default function App() {
         {NAV.map(n => {
           const on = activeTab === n.id;
           return (
-            <button key={n.id} onClick={() => setView({ screen: n.id })} style={{ flex: 1, padding: "11px 0 16px", background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+            <button key={n.id} onClick={() => setView({ screen: n.id })} style={{ position: "relative", flex: 1, padding: "11px 0 16px", background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+              {navBadge(n.id)}
               <Icon name={n.icon} size={24} color={on ? TEAL : "#9CA3AF"} />
               <span style={{ fontSize: 10.5, fontWeight: 700, color: on ? TEAL : "#9CA3AF" }}>{n.phone}</span>
               {on && <span style={{ width: 16, height: 2.5, borderRadius: 99, background: AMBER }} />}
