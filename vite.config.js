@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // Stamped automatically on every Vercel build, shown on the Company screen
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __BUILD_SHA__: JSON.stringify((process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7)),
+  },
   plugins: [
     react(),
     VitePWA({
