@@ -3097,10 +3097,12 @@ function CustomersList({ data, setView }) {
       <div style={{ marginBottom: 12 }}><Input value={q} onChange={setQ} placeholder="🔍 Search customers…" /></div>
       {customers.length === 0 && <Empty icon="customers" text="No customers yet" />}
       {customers.map(c => {
-        const jobs = (data.jobs || []).filter(j => j.customerId === c.id).length;
+        const cJobs = (data.jobs || []).filter(j => j.customerId === c.id);
+        const jobs = cJobs.length;
         const latestEnq = (data.enquiries || []).filter(e => e.customerId === c.id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))[0];
-        const raw = latestEnq && latestEnq.status;
-        const badge = latestEnq ? enqStatus(latestEnq) : null;
+        // Once there's an active move, show the move's status (Provisional / Confirmed) — like the Home screen.
+        const activeMove = cJobs.filter(j => !["Completed", "Let Go"].includes(j.status)).sort((x, y) => (jobMoveDate(x) || "").localeCompare(jobMoveDate(y) || ""))[0];
+        const badge = activeMove ? activeMove.status : (latestEnq ? enqStatus(latestEnq) : null);
         return (
           <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
