@@ -572,6 +572,32 @@ function moveRef(data, job) {
   const seq = moveSeqOf(data, job);
   return (c && c.ref) ? `#${c.ref}/${seq}` : `Move ${seq}`;
 }
+// Mark an enquiry lost (the reason shows on the customer screen under that enquiry).
+function withLost(d, en, reason) {
+  return upsertLocal(d, "enquiries", { ...en, status: "Lost", lostReason: reason });
+}
+// Delete a customer together with their enquiries and moves, everywhere (this device + cloud).
+async function deleteCustomerFully(d, customerId) {
+  const enqs = (d.enquiries || []).filter(e => e.customerId === customerId);
+  const jobs = (d.jobs || []).filter(j => j.customerId === customerId);
+  for (const [t, recs] of [["jobs", jobs], ["enquiries", enqs], ["customers", [{ id: customerId }]]]) {
+    for (const r of recs) { addTombstone(r.id); try { await deleteRecord(t, r.id); } catch {} }
+  }
+  const gone = new Set([customerId, ...enqs.map(e => e.id), ...jobs.map(j => j.id)]);
+  return { ...d, customers: (d.customers || []).filter(x => !gone.has(x.id)), enquiries: (d.enquiries || []).filter(x => !gone.has(x.id)), jobs: (d.jobs || []).filter(x => !gone.has(x.id)) };
+}
+function customerDeleteSummary(d, customerId) {
+  const ne = (d.enquiries || []).filter(e => e.customerId === customerId).length, nj = (d.jobs || []).filter(j => j.customerId === customerId).length;
+  const bits = [ne ? `${ne} enquir${ne === 1 ? "y" : "ies"}` : "", nj ? `${nj} move${nj === 1 ? "" : "s"}` : ""].filter(Boolean);
+  return bits.length ? ` This also deletes their ${bits.join(" and ")}.` : "";
+}
+// Ask for a reason and mark lost. Cancel = no change.
+async function markLostFlow(data, en) {
+  const reason = prompt("Reason lost? (optional)");
+  if (reason === null) return;
+  await saveAndReload(withLost(data, en, reason.trim()));
+}
+
 // A survey is "missed" when its date has passed and it was never done (not surveyed, no inventory).
 function isMissedSurvey(e, todayIso = todayISO()) {
   return !!(e && e.surveyDate && e.surveyDate < todayIso && !e.surveyDone && !(e.inventory && e.inventory.length)
@@ -670,7 +696,7 @@ function Dashboard({ data, setView, setData }) {
         const missed = missedSurveys(data);
         if (!missed.length) return null;
         const markDone = en => saveAndReload(upsertLocal(data, "enquiries", { ...en, surveyDone: true, status: en.status === "New" ? "Surveyed" : en.status }));
-        const markLost = en => { const r = prompt("Reason lost? (optional)"); if (r === null) return; saveAndReload(upsertLocal(data, "enquiries", { ...en, status: "Lost", lostReason: r.trim() })); };
+        const markLost = en => markLostFlow(data, en, setView);
         return (
           <Card style={{ border: "1px solid #FCA5A5", background: "#FEF2F2", marginBottom: 14 }}>
             <div style={{ fontWeight: 800, color: "#991B1B", marginBottom: 4, fontSize: 14 }}>⚠️ Missed survey{missed.length !== 1 ? "s" : ""} ({missed.length})</div>
@@ -2836,11 +2862,7 @@ function EnquiryDetail({ data, id, setView }) {
     setView({ screen: "enquiryDetail", id: e.id });
     window.location.reload();
   }
-  async function markLost() {
-    const reason = prompt("Reason lost? (optional)");
-    if (reason === null) return; // Cancel pressed — leave the enquiry as it is
-    await setStatus("Lost", { lostReason: reason.trim() });
-  }
+  async function markLost() { await markLostFlow(data, e, setView); }
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const setFollowUp = () => setFollowUpOpen(true);
   async function del() {
@@ -3193,11 +3215,9 @@ function CustomerDetail({ data, id, setView }) {
   const enquiries = (data.enquiries || []).filter(e => e.customerId === id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   const jobs = (data.jobs || []).filter(j => j.customerId === id);
   async function del() {
-    if (!confirm("Delete this customer?")) return;
-    addTombstone(c.id);
+    if (!confirm(`Delete ${c.name}?${customerDeleteSummary(data, c.id)} This can't be undone.`)) return;
     SAVING_IN_PROGRESS = true; showSavingOverlay();
-    try { await deleteRecord("customers", c.id); } catch {}
-    const d2 = { ...data, customers: (data.customers || []).filter(x => x.id !== c.id) };
+    const d2 = await deleteCustomerFully(data, c.id);
     localStorage.setItem(DB_KEY, JSON.stringify(d2));
     SAVING_IN_PROGRESS = false; setView({ screen: "customers" }); window.location.reload();
   }
@@ -3282,6 +3302,7 @@ function CustomerDetail({ data, id, setView }) {
             <div style={{ fontSize: 14, color: "#111827" }}>{e.fromTown || "—"} → {e.toTown || "—"} · {fmtDateShort(e.preferredDate)}</div>
             <StatusBadge status={e.status} />
           </div>
+          {e.status === "Lost" && <div style={{ fontSize: 13, color: "#B91C1C", fontWeight: 600, marginTop: 6 }}>Lost reason: {e.lostReason || "none given"}</div>}
         </Card>
       ))}
 
