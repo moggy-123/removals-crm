@@ -121,6 +121,8 @@ const QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Declined"];
 
 const STATUS_META = {
   New:         { color: "#2563EB", bg: "#EFF6FF" },
+  "Survey booked": { color: "#7C3AED", bg: "#F5F3FF" },
+  "Survey missed": { color: "#DC2626", bg: "#FEF2F2" },
   Surveyed:    { color: "#0891B2", bg: "#ECFEFF" },
   Booked:      { color: "#0891B2", bg: "#ECFEFF" },
   "Let Go":    { color: "#6B7280", bg: "#F3F4F6" },
@@ -598,6 +600,15 @@ async function markLostFlow(data, en) {
   await saveAndReload(withLost(data, en, reason.trim()));
 }
 
+// What an enquiry's badge says: a New enquiry with a survey date shows "Survey booked" (or "Survey missed").
+function enqStatus(e) {
+  if (!e) return "";
+  if (e.status === "New" && e.surveyDate) return isMissedSurvey(e) ? "Survey missed" : "Survey booked";
+  return e.status;
+}
+// Which Enquiries tile an enquiry belongs to (missed surveys sit under "Survey booked").
+const enqGroup = e => (e.status === "New" && e.surveyDate) ? "Survey booked" : e.status;
+
 // A survey is "missed" when its date has passed and it was never done (not surveyed, no inventory).
 function isMissedSurvey(e, todayIso = todayISO()) {
   return !!(e && e.surveyDate && e.surveyDate < todayIso && !e.surveyDone && !(e.inventory && e.inventory.length)
@@ -764,7 +775,7 @@ function Dashboard({ data, setView, setData }) {
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
                 </div>
-                <StatusBadge status={e.status} />
+                <StatusBadge status={enqStatus(e)} />
               </div>
             </Card>
           ))}
@@ -863,7 +874,7 @@ function Dashboard({ data, setView, setData }) {
                     <button onClick={ev => { ev.stopPropagation(); const rec = fu.kind === "enquiry" ? (data.enquiries || []).find(x => x.id === fu.id) : (data.customers || []).find(x => x.id === fu.id); if (rec) setEditFu({ record: rec, table: fu.kind === "enquiry" ? "enquiries" : "customers" }); }} style={{ background: "none", border: "none", color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0 0" }}>Edit / reschedule</button>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                    {fu.kind === "enquiry" && <StatusBadge status={fu.status} />}
+                    {fu.kind === "enquiry" && <StatusBadge status={enqStatus((data.enquiries || []).find(x => x.id === fu.id) || { status: fu.status })} />}
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                       {showCall && btn("#0E7C73", "📞 Call", () => { logComm(fu.customerId, { type: "Call" }); window.location.href = `tel:${phone}`; })}
                       {showText && btn("#2563EB", "💬 Text", () => { logComm(fu.customerId, { type: "Text" }); window.location.href = `sms:${phone}`; })}
@@ -925,10 +936,10 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const moveOf = e => (data.jobs || []).find(j => j.enquiryId === e.id);
   const moveDateOf = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || "9999-99"; };
   const baseList = enquiries.filter(e => !moveCompleted(e));
-  const countFor = f => f === "All" ? baseList.length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => e.status === f).length;
+  const countFor = f => f === "All" ? baseList.length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => enqGroup(e) === f).length;
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
   const shown = baseList
-    .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : e.status === filter)
+    .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : enqGroup(e) === filter)
     .sort((a, b) => filter === "Won"
       ? moveDateOf(a).localeCompare(moveDateOf(b))
       : (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -940,7 +951,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
       </div>
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-        {[...ENQUIRY_STATUSES, "All"].map(f => {
+        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New"), "All"].map(f => {
           const active = filter === f;
           const label = f === "Won" ? "Booked" : f === "All" ? "All enquiries" : f;
           const n = countFor(f);
@@ -948,7 +959,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
           const accent = f === "All" ? "#374151" : (meta.color || "#374151");
           return (
             <button key={f} onClick={() => setFilter(f)} style={{
-              gridColumn: f === "All" ? "1 / -1" : "auto",
+              gridColumn: "auto",
               textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
               background: active ? meta.bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", alignItems: "baseline", gap: 7,
               border: active ? `2px solid ${accent}` : "2px solid #F3F4F6",
@@ -977,7 +988,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-              <StatusBadge status={e.status} />
+              <StatusBadge status={enqStatus(e)} />
               {(() => { const j = moveOf(e); return j ? <span style={{ fontSize: 11.5, fontWeight: 700, color: (STATUS_META[j.status] || {}).color || "#6B7280" }}>Move: {j.status === "Booked" || j.status === "In Progress" ? "Confirmed" : j.status}</span> : null; })()}
             </div>
           </div>
@@ -1172,14 +1183,14 @@ function parseEnquiryEmail(text) {
   return out;
 }
 
-function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
+function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) {
   const e = editEnquiry || {};
   const [customerId, setCustomerId] = useState(e.customerId || initialCustomerId || "");
   useEffect(() => { if (!e.id && initialCustomerId) selectCustomer(initialCustomerId); /* eslint-disable-next-line */ }, []);
   const [newCust, setNewCust] = useState({ name: "", phone: "", email: "" });
   const [f, setF] = useState({
     preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false, moveMonth: e.moveMonth || "",
-    surveyDate: e.surveyDate || "", surveyTime: e.surveyTime || "",
+    surveyDate: reopen ? "" : (e.surveyDate || ""), surveyTime: reopen ? "" : (e.surveyTime || ""),
     fromAddress1: e.fromAddress1 || "", fromAddress2: e.fromAddress2 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
     fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
     toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
@@ -1242,13 +1253,14 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
     }
     const rec = {
       id: e.id || uid(), customerId: cid,
-      status: e.status || "New",
+      status: reopen ? "New" : (e.status || "New"),
+      surveyDone: reopen ? false : !!e.surveyDone,
       enquiryDate: e.enquiryDate || todayISO(),
       ...f,
       inventory: e.inventory || [], volumeCuFt: e.volumeCuFt || 0, volumeM3: e.volumeM3 || 0, weightKg: e.weightKg || 0,
       extras: e.extras || [], quoteLines: e.quoteLines || [], quoteVat: e.quoteVat || false,
       quoteTotal: e.quoteTotal || 0, quoteStatus: e.quoteStatus || "Draft", quoteSentDate: e.quoteSentDate || "",
-      followUpDate: e.followUpDate || "", followUpNote: e.followUpNote || "", lostReason: e.lostReason || "",
+      followUpDate: e.followUpDate || "", followUpNote: e.followUpNote || "", lostReason: reopen ? "" : (e.lostReason || ""),
       createdAt: e.createdAt || new Date().toISOString(),
     };
     data2 = upsertLocal(data2, "enquiries", rec);
@@ -1257,7 +1269,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId }) {
   }
 
   return (
-    <Modal title={e.id ? "Edit Enquiry" : "New Enquiry"} onClose={onClose}>
+    <Modal title={reopen ? "Rebook survey" : e.id ? "Edit Enquiry" : "New Enquiry"} onClose={onClose}>
       {!e.id && (
         <Field label="Customer" required>
           {!pasteOpen
@@ -2069,7 +2081,9 @@ function MovePlanModal({ data, enquiry, onClose }) {
     const clashes = [];
     days.forEach((d, i) => { if (d.date) (d.vehicleIds || []).forEach(vid => { const vv = (data.vehicles || []).find(x => x.id === vid); if (vv && vehOutOn(vv, d.date)) clashes.push(`${vv.name} on day ${i + 1} (${fmtUK(d.date)})`); }); });
     if (clashes.length) { alert(`These vehicles are booked out for servicing/MOT and can't be used:\n\n${clashes.join("\n")}\n\nRemove them or move the maintenance date.`); return; }
-    let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days });
+    // Plan deleted (no days left) before any move exists → step back to "Surveyed".
+    const stepBack = !days.length && !linkedJob && enquiry.status === "Quoted";
+    let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days, ...(stepBack ? { status: "Surveyed", surveyDone: true } : {}) });
     if (linkedJob) {
       const newStages = days.map((day, i) => {
         const ex = (linkedJob.stages || [])[i] || {};
@@ -2152,6 +2166,13 @@ function MovePlanModal({ data, enquiry, onClose }) {
       {linkedJob && <div style={{ fontSize: 12, color: "#0F766E", background: "#F0FDFA", border: "1px solid #CCFBF1", borderRadius: 9, padding: "8px 11px", marginBottom: 12 }}>This move is on the calendar. Saving updates its days, staff and vehicles.</div>}
       <Btn variant="grey" size="sm" onClick={addDay} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>
       <Btn style={{ width: "100%" }} onClick={save}><Icon name="check" size={16} /> {linkedJob ? "Save & update move" : "Save plan"}</Btn>
+      {!linkedJob && (enquiry.stages || []).length > 0 && (
+        <Btn variant="danger" style={{ width: "100%", marginTop: 8 }} onClick={async () => {
+          if (!confirm("Delete the whole move plan?" + (enquiry.status === "Quoted" ? " The enquiry will go back to Surveyed." : ""))) return;
+          await saveAndReload(upsertLocal(data, "enquiries", { ...enquiry, stages: [], ...(enquiry.status === "Quoted" ? { status: "Surveyed", surveyDone: true } : {}) }));
+          onClose();
+        }}><Icon name="trash" size={15} /> Delete move plan</Btn>
+      )}
     </Modal>
   );
 }
@@ -2810,9 +2831,11 @@ function EnquiryDetail({ data, id, setView }) {
   const [showQuote, setShowQuote] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [showMove, setShowMove] = useState(false);
+  const [rebook, setRebook] = useState(false);
   useEffect(() => {
     try { if (sessionStorage.getItem("removals_open_plan") === id) { sessionStorage.removeItem("removals_open_plan"); setShowPlan(true); } } catch {}
     try { if (sessionStorage.getItem("removals_open_edit") === id) { sessionStorage.removeItem("removals_open_edit"); setShowEdit(true); } } catch {}
+    try { if (sessionStorage.getItem("removals_rebook") === id) { sessionStorage.removeItem("removals_rebook"); setRebook(true); } } catch {}
   }, [id]);
   const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name || "Vehicle";
   const customer = (data.customers || []).find(c => c.id === e?.customerId);
@@ -2897,7 +2920,7 @@ function EnquiryDetail({ data, id, setView }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 10px" }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, e.customerId)}</h2>
-        <StatusBadge status={e.status} />
+        <StatusBadge status={enqStatus(e)} />
       </div>
       {customer && (
         <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 14 }}>
@@ -3026,7 +3049,7 @@ function EnquiryDetail({ data, id, setView }) {
         </>;
       })()}
 
-      {showEdit && <EnquiryForm data={data} editEnquiry={e} onClose={() => setShowEdit(false)} />}
+      {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
       {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
       {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
@@ -3077,7 +3100,7 @@ function CustomersList({ data, setView }) {
         const jobs = (data.jobs || []).filter(j => j.customerId === c.id).length;
         const latestEnq = (data.enquiries || []).filter(e => e.customerId === c.id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))[0];
         const raw = latestEnq && latestEnq.status;
-        const badge = raw || null;
+        const badge = latestEnq ? enqStatus(latestEnq) : null;
         return (
           <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -3224,9 +3247,10 @@ function CustomerDetail({ data, id, setView }) {
   const showMoveStorage = surveyedEnq || jobs.length > 0 || getStorageJobs(c).length > 0;
   const latest = enquiries[0];
   const openEnquiryEdit = en => { try { sessionStorage.setItem("removals_open_edit", en.id); } catch {} setView({ screen: "enquiryDetail", id: en.id }); };
-  async function reopenAndRebook(en) {
-    try { sessionStorage.setItem("removals_open_edit", en.id); sessionStorage.setItem("removals_view", JSON.stringify({ screen: "enquiryDetail", id: en.id })); } catch {}
-    await saveAndReload(upsertLocal(data, "enquiries", { ...en, status: "New", lostReason: "", surveyDate: "", surveyTime: "", surveyDone: false }));
+  // Opens the enquiry's edit form. It only goes back to "New" if you tap Save — Cancel leaves it lost.
+  function reopenAndRebook(en) {
+    try { sessionStorage.setItem("removals_open_edit", en.id); sessionStorage.setItem("removals_rebook", en.id); } catch {}
+    setView({ screen: "enquiryDetail", id: en.id });
   }
   const surveyPanel = (() => {
     if (showMoveStorage) return null;
@@ -3336,7 +3360,7 @@ function CustomerDetail({ data, id, setView }) {
         <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 14, color: "#111827" }}>{e.fromTown || "—"} → {e.toTown || "—"} · {fmtDateShort(e.preferredDate)}</div>
-            <StatusBadge status={e.status} />
+            <StatusBadge status={enqStatus(e)} />
           </div>
           {e.status === "Lost" && <div style={{ fontSize: 13, color: "#B91C1C", fontWeight: 600, marginTop: 6 }}>Lost reason: {e.lostReason || "none given"}</div>}
         </Card>
