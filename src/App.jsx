@@ -3288,6 +3288,29 @@ function CustomerDetail({ data, id, setView }) {
     try { sessionStorage.setItem("removals_open_edit", en.id); sessionStorage.setItem("removals_rebook", en.id); } catch {}
     setView({ screen: "enquiryDetail", id: en.id });
   }
+  // Quote still to build / still to email for a surveyed enquiry with no move yet
+  const quotePanel = (() => {
+    const pending = enquiries.filter(e => !["Lost", "Let Go", "Won"].includes(e.status) && !jobs.some(j => j.enquiryId === e.id)
+      && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted"].includes(e.status))
+      && !(Number(e.quoteTotal) > 0 && ["Sent", "Accepted"].includes(e.quoteStatus)));
+    if (!pending.length) return null;
+    const openQuote = e => { try { sessionStorage.setItem("removals_open_quote", e.id); } catch {} setView({ screen: "enquiryDetail", id: e.id }); };
+    return pending.map(e => {
+      const built = Number(e.quoteTotal) > 0;
+      return (
+        <Card key={"q" + e.id} style={built ? { borderColor: "#FCA5A5", background: "#FFF7ED" } : { borderColor: "#BAE6FD", background: "#F0F9FF" }}>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: built ? "#C2410C" : "#0369A1", marginBottom: 6 }}>Quote</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 13.5, color: "#374151", fontWeight: 600 }}>
+              {built ? `⚠️ Quote built (${gbp(e.quoteTotal)}) but not emailed yet.` : "✓ Surveyed — quote still to build."}
+              <div style={{ fontSize: 12, color: "#6A7B77", fontWeight: 500, marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
+            </div>
+            <div style={{ flexShrink: 0 }}><Btn size="sm" variant="amber" onClick={() => openQuote(e)}>{built ? "📧 Email quote" : "Build quote"}</Btn></div>
+          </div>
+        </Card>
+      );
+    });
+  })();
   const surveyPanel = (() => {
     if (showMoveStorage) return null;
     let line, btn;
@@ -3330,6 +3353,7 @@ function CustomerDetail({ data, id, setView }) {
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
       {surveyPanel}
+      {quotePanel}
       {showMoveStorage && (
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: getStorageJobs(c).length ? 8 : 0 }}>
