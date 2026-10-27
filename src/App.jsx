@@ -738,7 +738,7 @@ function Dashboard({ data, setView, setData }) {
         <Stat label="Quoted" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <Stat label="Booked moves" value={jobs.filter(j => !["Completed","Let Go"].includes(j.status)).length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
+        <Stat label="Active moves" value={jobs.filter(j => !["Completed","Let Go"].includes(j.status)).length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
         <Stat label="Booked (month)" value={`${convRate}%`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
       </div>
 
@@ -976,7 +976,10 @@ function EnquiriesList({ data, setView, initialFilter }) {
                 {e.quoteTotal ? ` · ${gbp(e.quoteTotal)}` : ""}
               </div>
             </div>
-            <StatusBadge status={(() => { const j = (data.jobs || []).find(x => x.enquiryId === e.id); return j ? j.status : e.status; })()} />
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+              <StatusBadge status={e.status} />
+              {(() => { const j = moveOf(e); return j ? <span style={{ fontSize: 11.5, fontWeight: 700, color: (STATUS_META[j.status] || {}).color || "#6B7280" }}>Move: {j.status === "Booked" || j.status === "In Progress" ? "Confirmed" : j.status}</span> : null; })()}
+            </div>
           </div>
         </Card>
       ))}
@@ -3074,7 +3077,7 @@ function CustomersList({ data, setView }) {
         const jobs = (data.jobs || []).filter(j => j.customerId === c.id).length;
         const latestEnq = (data.enquiries || []).filter(e => e.customerId === c.id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))[0];
         const raw = latestEnq && latestEnq.status;
-        const badge = raw ? (raw === "New" || raw === "Surveyed" ? "Booked" : raw) : null;
+        const badge = raw || null;
         return (
           <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -3339,7 +3342,7 @@ function CustomerDetail({ data, id, setView }) {
         </Card>
       ))}
 
-      {showMoveStorage && <SectionTitle>Booked moves</SectionTitle>}
+      {showMoveStorage && <SectionTitle>Moves</SectionTitle>}
       {showMoveStorage && jobs.filter(j => j.status !== "Completed").length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>None yet.</div>}
       {jobs.filter(j => j.status !== "Completed").sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || "")).map(j => (
         <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
@@ -3398,14 +3401,14 @@ function CustomerDetail({ data, id, setView }) {
 
 // ── Jobs (booked moves) ─────────────────────────────────────────────────────
 function JobsList({ data, setView }) {
-  const [filter, setFilter] = useState("Booked");
+  const [filter, setFilter] = useState("Upcoming");
   const jobs = (data.jobs || [])
     .filter(j => filter === "All" ? true : filter === "Completed" ? j.status === "Completed" : j.status !== "Completed")
     .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""));
-  const filters = ["Booked", "Completed", "All"];
+  const filters = ["Upcoming", "Completed", "All"];
   return (
     <div>
-      <h2 style={{ margin: "0 0 12px", fontSize: 20, fontWeight: 800, color: "#111827" }}>Booked Moves</h2>
+      <h2 style={{ margin: "0 0 12px", fontSize: 20, fontWeight: 800, color: "#111827" }}>Moves</h2>
       <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 6 }}>
         {filters.map(f => (
           <button key={f} onClick={() => setFilter(f)} style={{ padding: "6px 14px", borderRadius: 99, border: "none", whiteSpace: "nowrap", cursor: "pointer", fontSize: 13, fontWeight: 600, background: filter === f ? TEAL : "#F3F4F6", color: filter === f ? "#fff" : "#6B7280" }}>{f}</button>
