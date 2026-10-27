@@ -690,8 +690,12 @@ function Dashboard({ data, setView, setData }) {
     if (j.enquiryId) { const en = (data.enquiries || []).find(e => e.id === j.enquiryId); if (en) d = upsertLocal(d, "enquiries", { ...en, stages: [], status: en.status === "Won" ? "Quoted" : en.status }); }
     await saveAndReload(d);
   }
+  // Drop surveys once their date/time has passed (no time set = stays until the end of that day).
+  const _now = new Date();
+  const nowHM = String(_now.getHours()).padStart(2, "0") + ":" + String(_now.getMinutes()).padStart(2, "0");
+  const surveyLapsed = e => e.surveyDate < todayIso || (e.surveyDate === todayIso && !!e.surveyTime && e.surveyTime <= nowHM);
   const upcomingSurveys = enquiries
-    .filter(e => e.surveyDate && e.status !== "Lost" && e.surveyDate >= todayIso)
+    .filter(e => e.surveyDate && e.status !== "Lost" && !surveyLapsed(e))
     .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
   const vehicles = data.vehicles || [];
