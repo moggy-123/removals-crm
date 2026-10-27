@@ -987,7 +987,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
         {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New"), "All"].map(f => {
           const active = filter === f;
-          const label = f === "Won" ? "Booked" : f === "All" ? "All enquiries" : f;
+          const label = f === "Won" ? "Moves Booked" : f === "All" ? "All enquiries" : f;
           const n = countFor(f);
           const meta = STATUS_META[f] || { color: "#374151", bg: "#F3F4F6" };
           const accent = f === "All" ? "#374151" : (meta.color || "#374151");
