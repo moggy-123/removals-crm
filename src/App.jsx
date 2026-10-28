@@ -3289,7 +3289,9 @@ function CustomersList({ data, setView }) {
         const latestEnq = (data.enquiries || []).filter(e => e.customerId === c.id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))[0];
         // Once there's an active move, show the move's status (Provisional / Confirmed) — like the Home screen.
         const activeMove = cJobs.filter(j => !["Completed", "Let Go"].includes(j.status)).sort((x, y) => (jobMoveDate(x) || "").localeCompare(jobMoveDate(y) || ""))[0];
-        const badge = activeMove ? activeMove.status : (latestEnq ? enqStatus(latestEnq) : null);
+        // Active move → its status; otherwise the latest enquiry's badge (which shows "Completed" once its move is done)
+        const lastDone = cJobs.filter(j => j.status === "Completed").sort((x, y) => (jobMoveDate(y) || "").localeCompare(jobMoveDate(x) || ""))[0];
+        const badge = activeMove ? activeMove.status : latestEnq ? enqBadge(data, latestEnq) : lastDone ? "Completed" : null;
         // Quote still to build / email (surveyed, no move yet)
         const qe = (data.enquiries || []).filter(e => e.customerId === c.id && !["Lost", "Let Go", "Won"].includes(e.status) && !cJobs.some(j => j.enquiryId === e.id)
           && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted"].includes(e.status))
