@@ -732,6 +732,8 @@ function Dashboard({ data, setView, setData }) {
   const [dashShow, setDashShow] = useState("");
   const [editFu, setEditFu] = useState(null);
   const [resched, setResched] = useState(null);
+  const [todoOpen, setTodoOpen] = useState(() => { try { return localStorage.getItem("removals_todo_hidden") !== "1"; } catch { return true; } });
+  const toggleTodo = () => setTodoOpen(o => { try { localStorage.setItem("removals_todo_hidden", o ? "1" : "0"); } catch {} return !o; });
   const open = enquiries.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status));
   const quotesOut = enquiries.filter(e => e.status === "Quoted");
   const now = new Date();
@@ -876,9 +878,16 @@ function Dashboard({ data, setView, setData }) {
         items.sort((a, b) => a.p - b.p || (a.sort || "").localeCompare(b.sort || ""));
         return (
           <>
-            <SectionTitle>To do ({items.length})</SectionTitle>
-            {items.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0", marginBottom: 14 }}>✓ All caught up — nothing to do.</div>}
-            {items.map(it => {
+            <button onClick={toggleTodo} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "18px 0 8px", padding: "10px 14px", background: "#fff", border: `1.5px solid ${items.length ? "#FCA5A5" : "#E3E9E8"}`, borderRadius: 12, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 1px 3px rgba(0,0,0,.06)" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "#10211E", textTransform: "uppercase", letterSpacing: ".05em" }}>To do</span>
+                {items.length > 0
+                  ? <span style={{ minWidth: 24, height: 24, padding: "0 7px", borderRadius: 99, background: "#DC2626", color: "#fff", fontSize: 13, fontWeight: 800, lineHeight: "24px", textAlign: "center" }}>{items.length}</span>
+                  : <span style={{ fontSize: 12.5, fontWeight: 700, color: "#15803D" }}>✓ All caught up</span>}
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#6A7B77" }}>{todoOpen ? "Hide ▾" : "Show ▸"}</span>
+            </button>
+            {todoOpen && items.map(it => {
               const acts = it.acts.filter(Boolean);
               const open = it.onOpen || (() => go(it.e));
               return (
