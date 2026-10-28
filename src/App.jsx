@@ -4432,7 +4432,7 @@ function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"a
 function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
   const [mode, setMode] = useState(initialMode || "agenda");
   // What to show — pick any mix of moves / surveys / servicing (remembered on this device)
-  const CAL_TYPES = [["moves", "🚚 Moves"], ["surveys", "📋 Surveys"], ["servicing", "🔧 Servicing & time off"]];
+  const CAL_TYPES = [["moves", "🚚 Moves"], ["surveys", "📋 Surveys"], ["servicing", "🔧 Servicing"]];
   const [types, setTypes] = useState(() => {
     if (initialShow && ["moves", "surveys", "servicing"].includes(initialShow)) return [initialShow];
     try { const t = JSON.parse(localStorage.getItem("removals_cal_types") || "null"); if (Array.isArray(t) && t.length) return t; } catch {}
@@ -4463,7 +4463,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const bookedStaffOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || [])); const iso = isoOf(d); (data.staff || []).forEach(st => { if (staffOffOn(st, iso)) s.add(st.name); }); return s; };
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
-  const showStaffOff = types.includes("servicing");
+  const showStaffOff = true; // staff time off always shows, whatever is ticked
   const staffOffOnIso = iso => { const out = []; (data.staff || []).forEach(s => ((s.away) || []).forEach(b => { if (b.start) { const total = Math.max(1, Number(b.days) || 1); const end = isoAdd(b.start, { days: total - 1 }); if (iso >= b.start && iso <= end) { const dayNo = Math.round((new Date(iso + "T00:00") - new Date(b.start + "T00:00")) / 86400000) + 1; out.push({ s, b, dayNo, total }); } } })); return out; };
   const staffOffOnCal = d => showStaffOff ? staffOffOnIso(isoOf(d)) : [];
 
