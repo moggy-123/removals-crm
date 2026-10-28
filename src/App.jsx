@@ -795,7 +795,7 @@ function Dashboard({ data, setView, setData }) {
   const surveyStage = e => !isSurveyed(e) ? (surveyLapsed(e) ? "overdue" : "booked") : !quoteBuilt(e) ? "needQuote" : !quoteSent(e) ? "notSent" : "done";
   const upcomingSurveys = enquiries
     .filter(e => e.surveyDate && !["Lost", "Let Go", "Won"].includes(e.status) && !hasMove(e))
-    .filter(e => { const st = surveyStage(e); return st === "booked" || (st === "overdue" && e.surveyDate === todayIso) || st === "needQuote" || st === "notSent"; })
+    .filter(e => surveyStage(e) === "booked")
     .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
   const vehicles = data.vehicles || [];
@@ -815,47 +815,6 @@ function Dashboard({ data, setView, setData }) {
 
   return (
     <div>
-      {(() => {
-        const missed = missedSurveys(data);
-        if (!missed.length) return null;
-        const markDone = en => saveAndReload(upsertLocal(data, "enquiries", { ...en, surveyDone: true, status: en.status === "New" ? "Surveyed" : en.status }));
-        const markLost = en => markLostFlow(data, en, setView);
-        return (
-          <Card style={{ border: "1px solid #FCA5A5", background: "#FEF2F2", marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, color: "#991B1B", marginBottom: 4, fontSize: 14 }}>⚠️ Missed survey{missed.length !== 1 ? "s" : ""} ({missed.length})</div>
-            <div style={{ fontSize: 12.5, color: "#991B1B", marginBottom: 4 }}>The survey date has passed but it hasn't been marked as done.</div>
-            {missed.map(en => (
-              <div key={en.id} style={{ padding: "10px 0 4px", borderTop: "1px solid #FECACA" }}>
-                <div onClick={() => setView({ screen: "enquiryDetail", id: en.id })} style={{ cursor: "pointer" }}>
-                  <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, en.customerId)}</div>
-                  <div style={{ fontSize: 12.5, color: "#991B1B", marginBottom: 8 }}>Was due {fmtDate(en.surveyDate)} ({dow(en.surveyDate)}){en.surveyTime ? ` · ${en.surveyTime}` : ""}{en.surveyor ? ` · ${en.surveyor}` : ""}</div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                  <Btn size="sm" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 }} onClick={() => setResched(en)}>Reschedule</Btn>
-                  <Btn size="sm" variant="grey" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 }} onClick={() => markDone(en)}>✓ Surveyed</Btn>
-                  <Btn size="sm" variant="grey" style={{ width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13, color: "#B91C1C" }} onClick={() => markLost(en)}>✕ Lost</Btn>
-                </div>
-              </div>
-            ))}
-          </Card>
-        );
-      })()}
-      {pastProvisional.length > 0 && (
-        <Card style={{ border: "1px solid #FDE68A", background: "#FFFBEB", marginBottom: 14 }}>
-          <div style={{ fontWeight: 800, color: "#92400E", marginBottom: 6, fontSize: 14 }}>Provisional bookings past their date</div>
-          <div style={{ fontSize: 12.5, color: "#92400E", marginBottom: 6 }}>These moves are still provisional and their date has passed. Change the date or remove the booking.</div>
-          {pastProvisional.map(({ j, last }) => (
-            <div key={j.id} style={{ padding: "10px 0 4px", borderTop: "1px solid #FDE68A" }}>
-              <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 12.5, color: "#92400E", marginBottom: 8 }}>Was {fmtDate(last)} ({dow(last)}) · {jobStages(j).length} day{jobStages(j).length !== 1 ? "s" : ""}</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Btn size="sm" onClick={() => changeDate(j)}>Change date</Btn>
-                <Btn size="sm" variant="grey" onClick={() => removeBooking(j)} style={{ color: "#B91C1C", borderColor: "#FCA5A5" }}>Remove booking</Btn>
-              </div>
-            </div>
-          ))}
-        </Card>
-      )}
       <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
         <Stat label="Open enquiries" value={open.length} color={TEAL} onClick={() => setView({ screen: "enquiries", filter: "Open" })} />
         <Stat label="Quoted" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
@@ -868,6 +827,77 @@ function Dashboard({ data, setView, setData }) {
       <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 18px", borderRadius: 10, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
         <Icon name="plus" size={15} /> New Enquiry
       </button>
+
+      {/* ── To do: every reminder in one list, most urgent first ── */}
+      {(() => {
+        const items = [];
+        const phoneOf = cid => { const c = (data.customers || []).find(x => x.id === cid) || {}; return c.phone || c.homePhone || ""; };
+        const markDone = en => saveAndReload(upsertLocal(data, "enquiries", { ...en, surveyDone: true, status: en.status === "New" ? "Surveyed" : en.status }));
+        const openQuote = en => { try { sessionStorage.setItem("removals_open_quote", en.id); } catch {} setView({ screen: "enquiryDetail", id: en.id }); };
+        const openEdit = en => { try { sessionStorage.setItem("removals_open_edit", en.id); } catch {} setView({ screen: "enquiryDetail", id: en.id }); };
+        const go = en => setView({ screen: "enquiryDetail", id: en.id });
+        const RED = { tint: { borderColor: "#FCA5A5", background: "#FEF2F2" }, col: "#B91C1C" };
+        const ORANGE = { tint: { borderColor: "#FDBA74", background: "#FFF7ED" }, col: "#C2410C" };
+        const AMBERC = { tint: { borderColor: "#FDE68A", background: "#FFFBEB" }, col: "#B45309" };
+        const BLUE = { tint: { borderColor: "#BAE6FD", background: "#F0F9FF" }, col: "#0369A1" };
+        const TEALC = { tint: { borderColor: "#CDE7E2", background: "#F4FBF9" }, col: TEAL_D };
+        const sm = { width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 };
+        enquiries.forEach(e => {
+          if (["Lost", "Let Go"].includes(e.status)) return;
+          const route = `${e.fromTown || e.fromPostcode || "—"} → ${e.toTown || e.toPostcode || "—"}`;
+          if (surveyOverdue(e)) items.push({ key: "ms" + e.id, p: 1, sort: e.surveyDate, e, ...RED, label: `⚠️ Missed survey · was due ${fmtDateShort(e.surveyDate)}${e.surveyTime ? ` ${e.surveyTime}` : ""}`, sub: route, acts: [
+            <Btn key="r" size="sm" style={sm} onClick={() => setResched(e)}>Reschedule</Btn>,
+            <Btn key="d" size="sm" variant="grey" style={sm} onClick={() => markDone(e)}>✓ Surveyed</Btn>,
+            <Btn key="l" size="sm" variant="grey" style={{ ...sm, color: "#B91C1C" }} onClick={() => markLostFlow(data, e)}>✕ Lost</Btn>] });
+          const qt = quoteTodo(data, e);
+          if (qt && Number(e.quoteTotal) > 0) items.push({ key: "qs" + e.id, p: 3, sort: e.surveyDate || "", e, ...ORANGE, label: `⚠️ Send quote · ${gbp(e.quoteTotal)} built, not emailed`, sub: route, acts: [<Btn key="q" size="sm" variant="amber" style={sm} onClick={() => openQuote(e)}>📧 Email quote</Btn>] });
+          else if (qt) items.push({ key: "qb" + e.id, p: 4, sort: e.surveyDate || "", e, ...BLUE, label: "Build quote · surveyed, no quote yet", sub: route, acts: [<Btn key="q" size="sm" variant="amber" style={sm} onClick={() => openQuote(e)}>Build quote</Btn>] });
+          const nc = newEnqCall(data, e);
+          if (nc) items.push({ key: "bs" + e.id, p: 6, sort: e.createdAt || "", e, ...TEALC, label: `Book survey · ${e.newCalledAt ? `last called ${fmtDateShort(e.newCalledAt.slice(0, 10))}` : "not called yet"}`, sub: route + (e.preferredDate ? ` · move ${fmtDateShort(e.preferredDate)}` : e.moveMonth ? ` · move ${fmtMonth(e.moveMonth)}` : ""), acts: [
+            nc.phone ? <Btn key="c" size="sm" style={sm} onClick={() => callNewEnquiry(e, nc.phone)}>📞 Call</Btn> : null,
+            <Btn key="b" size="sm" variant="grey" style={sm} onClick={() => openEdit(e)}>📅 Book survey</Btn>] });
+          const qc = quoteChase(data, e);
+          if (qc) items.push({ key: "qc" + e.id, p: 7, sort: e.quoteSentDate || "", e, ...AMBERC, label: `Chase quote · ${quoteChaseText(qc).replace(/^Quote /, "")}`, sub: `${route} · ${gbp(e.quoteTotal)}`, acts: [
+            qc.phone ? <Btn key="c" size="sm" style={sm} onClick={() => callAboutQuote(e, qc.phone)}>📞 Chase quote</Btn> : null] });
+        });
+        pastProvisional.forEach(({ j, last }) => items.push({ key: "pp" + j.id, p: 2, sort: last, cid: j.customerId, ...AMBERC, label: `Provisional move date passed · was ${fmtDateShort(last)}`, sub: `${j.fromTown || "—"} → ${j.toTown || "—"}`, onOpen: () => changeDate(j), acts: [
+          <Btn key="c" size="sm" style={sm} onClick={() => changeDate(j)}>Change date</Btn>,
+          <Btn key="r" size="sm" variant="grey" style={{ ...sm, color: "#B91C1C" }} onClick={() => removeBooking(j)}>Remove booking</Btn>] }));
+        followUps.forEach(fu => {
+          const due = fu.date <= todayISO();
+          const ph = phoneOf(fu.customerId), cust = (data.customers || []).find(x => x.id === fu.customerId) || {};
+          const rec = fu.kind === "enquiry" ? (data.enquiries || []).find(x => x.id === fu.id) : cust;
+          items.push({ key: "fu" + fu.key, p: due ? 5 : 8, sort: fu.date + (fu.time || ""), cid: fu.customerId, ...(due ? AMBERC : { tint: null, col: "#6A7B77" }), label: `Follow-up · ${due ? "due " : ""}${fmtDateShort(fu.date)}${fu.time ? ` ${fu.time}` : ""}`, sub: fu.note || "Follow up",
+            onOpen: () => setView(fu.kind === "enquiry" ? { screen: "enquiryDetail", id: fu.id } : { screen: "customerDetail", id: fu.id }), acts: [
+            ph ? <Btn key="c" size="sm" style={sm} onClick={() => { logComm(fu.customerId, { type: "Call" }); window.location.href = `tel:${ph}`; }}>📞 Call</Btn> : null,
+            cust.email ? <Btn key="m" size="sm" variant="grey" style={sm} onClick={() => { logComm(fu.customerId, { type: "Email" }); window.location.href = `mailto:${cust.email}`; }}>📧 Email</Btn> : null,
+            rec ? <Btn key="e" size="sm" variant="grey" style={sm} onClick={() => setEditFu({ record: rec, table: fu.kind === "enquiry" ? "enquiries" : "customers" })}>Reschedule</Btn> : null] });
+        });
+        items.sort((a, b) => a.p - b.p || (a.sort || "").localeCompare(b.sort || ""));
+        return (
+          <>
+            <SectionTitle>To do ({items.length})</SectionTitle>
+            {items.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0", marginBottom: 14 }}>✓ All caught up — nothing to do.</div>}
+            {items.map(it => {
+              const acts = it.acts.filter(Boolean);
+              const open = it.onOpen || (() => go(it.e));
+              return (
+                <Card key={it.key} onClick={open} style={it.tint || undefined}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: it.col, textTransform: "uppercase", letterSpacing: ".05em" }}>{it.label}</div>
+                      <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, it.e ? it.e.customerId : it.cid)}</div>
+                      <div style={{ fontSize: 13, color: "#6A7B77" }}>{it.sub}</div>
+                    </div>
+                    {it.e && <StatusBadge status={enqBadge(data, it.e)} />}
+                  </div>
+                  {acts.length > 0 && <div onClick={ev => ev.stopPropagation()} style={{ display: "grid", gridTemplateColumns: `repeat(${acts.length}, 1fr)`, gap: 6, marginTop: 10 }}>{acts}</div>}
+                </Card>
+              );
+            })}
+          </>
+        );
+      })()}
 
       <div style={{ display: "flex", gap: 8, marginBottom: dashShow ? 12 : 18 }}>
         <button onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `1.5px solid ${dashShow === "surveys" ? TEAL : "#D3DDDB"}`, fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "surveys" ? TEAL : "#fff", color: dashShow === "surveys" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Surveys</button>
@@ -948,95 +978,6 @@ function Dashboard({ data, setView, setData }) {
         </>
         );
       })()}
-
-      {(() => {
-        const chase = enquiries.map(e => ({ e, q: quoteChase(data, e) })).filter(x => x.q).sort((a, b) => (a.e.quoteSentDate || "").localeCompare(b.e.quoteSentDate || ""));
-        if (!chase.length) return null;
-        return (
-          <>
-            <SectionTitle>Quotes to chase ({chase.length})</SectionTitle>
-            {chase.map(({ e, q }) => (
-              <Card key={"qc" + e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FDE68A", background: "#FFFBEB" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: "#B45309", textTransform: "uppercase", letterSpacing: ".05em" }}>{quoteChaseText(q)}</div>
-                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
-                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"} · {gbp(e.quoteTotal)}</div>
-                  </div>
-                  {q.phone ? <ChaseCallBtn data={data} e={e} /> : <span style={{ flexShrink: 0, fontSize: 12, color: "#B7C3C0" }}>No number</span>}
-                </div>
-              </Card>
-            ))}
-          </>
-        );
-      })()}
-
-      {toCall.length > 0 && (
-        <>
-          <SectionTitle>To call ({toCall.length})</SectionTitle>
-          {toCall.map(e => {
-            const c = custById(e.customerId);
-            const route = [e.fromPostcode || e.fromTown, e.toPostcode || e.toTown].filter(Boolean).join(" → ");
-            const when = e.preferredDate ? fmtDateShort(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
-            return (
-              <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#CDE7E2", background: "#F4FBF9" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
-                    <div style={{ fontSize: 13, color: "#6A7B77", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{route || "New enquiry — survey not booked"}</div>
-                    {when && <div style={{ fontSize: 12, color: "#9CA3AF" }}>Move: {when}{e.dateFlexible ? " (flexible)" : ""}</div>}
-                    <div style={{ fontSize: 11.5, fontWeight: 700, color: e.newCalledAt ? "#6A7B77" : "#2563EB", marginTop: 2 }}>{e.newCalledAt ? `Last called ${fmtDateShort(e.newCalledAt.slice(0, 10))}` : "Not called yet"}</div>
-                  </div>
-                  {newEnqCall(data, e) && newEnqCall(data, e).phone
-                    ? <NewEnqCallBtn data={data} e={e} />
-                    : <span style={{ flexShrink: 0, fontSize: 12, color: "#B7C3C0" }}>No number</span>}
-                </div>
-              </Card>
-            );
-          })}
-        </>
-      )}
-
-      {followUps.length > 0 && (
-        <>
-          <SectionTitle>Follow-ups — to call</SectionTitle>
-          {followUps.map(fu => {
-            const overdue = (fu.date + (fu.time || "")) <= (todayISO() + "23:59") && fu.date <= todayISO();
-            const cust = (data.customers || []).find(x => x.id === fu.customerId);
-            const phone = cust && (cust.phone || cust.homePhone);
-            const email = cust && cust.email;
-            const noteL = (fu.note || "").toLowerCase();
-            const wantsCall = /call|phone|ring/.test(noteL);
-            const wantsText = /text|sms|whats ?app|message/.test(noteL);
-            const wantsEmail = /email|e-mail/.test(noteL);
-            const showText = wantsText && phone;
-            const showEmail = wantsEmail && email;
-            const showCall = phone && (wantsCall || (!showText && !showEmail));
-            const btn = (bg, label, onTap) => <button onClick={ev => { ev.stopPropagation(); onTap(); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: bg, border: "none", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 800, color: "#fff", cursor: "pointer" }}>{label}</button>;
-            return (
-              <Card key={fu.key} onClick={() => setView(fu.kind === "enquiry" ? { screen: "enquiryDetail", id: fu.id } : { screen: "customerDetail", id: fu.id })} style={overdue ? { borderColor: "#FBD9A0", background: "#FFFBF2" } : undefined}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, fu.customerId)}</div>
-                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{fu.note || "Follow up"}{fu.kind === "customer" ? " · customer" : ""}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: overdue ? "#B45309" : "#6A7B77", marginTop: 2 }}>{overdue ? "Due " : ""}{fmtUK(fu.date)}{fu.time ? ` · ${fu.time}` : ""}</div>
-                    <button onClick={ev => { ev.stopPropagation(); const rec = fu.kind === "enquiry" ? (data.enquiries || []).find(x => x.id === fu.id) : (data.customers || []).find(x => x.id === fu.id); if (rec) setEditFu({ record: rec, table: fu.kind === "enquiry" ? "enquiries" : "customers" }); }} style={{ background: "none", border: "none", color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0 0" }}>Edit / reschedule</button>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                    {fu.kind === "enquiry" && <StatusBadge status={enqBadge(data, (data.enquiries || []).find(x => x.id === fu.id) || { status: fu.status })} />}
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                      {showCall && btn("#0E7C73", "📞 Call", () => { logComm(fu.customerId, { type: "Call" }); window.location.href = `tel:${phone}`; })}
-                      {showText && btn("#2563EB", "💬 Text", () => { logComm(fu.customerId, { type: "Text" }); window.location.href = `sms:${phone}`; })}
-                      {showEmail && btn("#6B7280", "📧 Email", () => { logComm(fu.customerId, { type: "Email" }); window.location.href = `mailto:${email}`; })}
-                      {!phone && !email && <span style={{ fontSize: 11.5, color: "#B7C3C0" }}>No contact saved</span>}
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-        </>
-      )}
 
       {resched && <RescheduleSurveyModal data={data} enquiry={resched} onClose={() => setResched(null)} />}
       {editFu && <FollowUpModal data={data} record={editFu.record} table={editFu.table} onClose={() => setEditFu(null)} />}
