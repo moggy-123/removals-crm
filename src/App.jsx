@@ -729,7 +729,9 @@ function autoCompletePastMoves(d) {
 function Dashboard({ data, setView, setData }) {
   const enquiries = data.enquiries || [];
   const jobs = data.jobs || [];
-  const [dashShow, setDashShow] = useState("");
+  const dashShow = ""; // the Surveys / Moves / Servicing buttons were removed
+  const [tmOpen, toggleTm] = useRemembered("removals_home_today_moves");
+  const [tsOpen, toggleTs] = useRemembered("removals_home_today_surveys");
   const [editFu, setEditFu] = useState(null);
   const [resched, setResched] = useState(null);
   const [todoOpen, setTodoOpen] = useState(() => { try { return localStorage.getItem("removals_todo_hidden") !== "1"; } catch { return true; } });
@@ -908,14 +910,60 @@ function Dashboard({ data, setView, setData }) {
         );
       })()}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: dashShow ? 12 : 18 }}>
-        <button onClick={() => setDashShow(dashShow === "surveys" ? "" : "surveys")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `1.5px solid ${dashShow === "surveys" ? TEAL : "#D3DDDB"}`, fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "surveys" ? TEAL : "#fff", color: dashShow === "surveys" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Surveys</button>
-        <button onClick={() => setDashShow(dashShow === "moves" ? "" : "moves")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `1.5px solid ${dashShow === "moves" ? TEAL : "#D3DDDB"}`, fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "moves" ? TEAL : "#fff", color: dashShow === "moves" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Moves</button>
-        <button onClick={() => setDashShow(dashShow === "servicing" ? "" : "servicing")} style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `1.5px solid ${dashShow === "servicing" ? TEAL : "#D3DDDB"}`, fontFamily: "inherit", fontWeight: 700, fontSize: 14, cursor: "pointer", background: dashShow === "servicing" ? TEAL : "#fff", color: dashShow === "servicing" ? "#fff" : "#34433F", boxShadow: "0 1px 3px rgba(0,0,0,.07)" }}>Servicing</button>
-      </div>
+      {/* ── Today: moves and surveys happening today ── */}
+      {(() => {
+        const tMoves = jobs.filter(j => j.status !== "Let Go").flatMap(j => jobStages(j).filter(st => st.date === todayIso).map(st => ({ j, st })))
+          .sort((a, b) => (a.st.time || "99").localeCompare(b.st.time || "99"));
+        const tSurveys = enquiries.filter(e => e.surveyDate === todayIso && !["Lost", "Let Go"].includes(e.status))
+          .sort((a, b) => (a.surveyTime || "99").localeCompare(b.surveyTime || "99"));
+        return (
+          <>
+            <CollapseBar title="Today's moves" count={tMoves.length} open={tmOpen} onToggle={toggleTm} color={TEAL} emptyText="None today" />
+            {tmOpen && tMoves.map(({ j, st }, ix) => {
+              const provisional = !["Confirmed", "Completed"].includes(j.status);
+              const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
+              const resLine = provisional
+                ? `${vehTypesSummary(st.vehTypes) || "Vehicle TBC"} · ${Number(st.staffCount) || "—"} crew (planned)`
+                : `${vehNames || "No vehicle"}${(st.crew || []).length ? " · " + st.crew.join(", ") : ""}`;
+              return (
+                <Card key={"tm" + (j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>Today{st.time ? ` · ${st.time}` : ""} · {st.type || "Move"}</div>
+                      <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
+                      <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}</div>
+                      <div style={{ fontSize: 12.5, color: "#41514E", marginTop: 3, fontWeight: 600 }}>🚚 {resLine}</div>
+                    </div>
+                    <StatusBadge status={j.status} />
+                  </div>
+                </Card>
+              );
+            })}
+            <CollapseBar title="Today's surveys" count={tSurveys.length} open={tsOpen} onToggle={toggleTs} color={AMBER} emptyText="None today" />
+            {tsOpen && tSurveys.map(e => {
+              const done = isSurveyed(e), late = !done && surveyLapsed(e);
+              const tint = done ? { borderColor: "#BBE6C9", background: "#F1F9F4" } : late ? { borderColor: "#FCA5A5", background: "#FEF2F2" } : { borderColor: "#FBE3B3", background: "#FFFBF2" };
+              const col = done ? "#15803D" : late ? "#B91C1C" : "#B45309";
+              return (
+                <Card key={"ts" + e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={tint}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: col, textTransform: "uppercase", letterSpacing: ".05em" }}>{done ? "✓ Done" : late ? "⚠️ Time passed" : "Today"}{e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
+                      <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
+                      <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || e.fromPostcode || "—"} → {e.toTown || e.toPostcode || "—"}</div>
+                    </div>
+                    <StatusBadge status={enqBadge(data, e)} />
+                  </div>
+                </Card>
+              );
+            })}
+          </>
+        );
+      })()}
+
 
       {(dashShow === "" || dashShow === "surveys") && (() => {
-        const list = upcomingSurveys.filter(e => surveyStage(e) !== "booked" || inWindow(e.surveyDate));
+        const list = upcomingSurveys.filter(e => e.surveyDate !== todayIso && (surveyStage(e) !== "booked" || inWindow(e.surveyDate)));
         const openQuote = (ev, e) => { ev.stopPropagation(); try { sessionStorage.setItem("removals_open_quote", e.id); } catch {} setView({ screen: "enquiryDetail", id: e.id }); };
         const STAGE = {
           booked:    { card: { borderColor: "#FBE3B3", background: "#FFFBF2" }, col: "#B45309", note: "" },
@@ -925,7 +973,8 @@ function Dashboard({ data, setView, setData }) {
         };
         return (
         <div style={{ marginBottom: 18 }}>
-          {list.length === 0 ? <Empty icon="calendar" text="No surveys this month or next" /> : list.map(e => { const stage = surveyStage(e); const S = STAGE[stage] || STAGE.booked; const overdue = stage === "overdue"; return (
+          <SectionTitle>Upcoming surveys</SectionTitle>
+          {list.length === 0 ? <div style={{ fontSize: 13, color: "#94A4A0" }}>No more surveys this month or next.</div> : list.map(e => { const stage = surveyStage(e); const S = STAGE[stage] || STAGE.booked; const overdue = stage === "overdue"; return (
             <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={S.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
@@ -1021,6 +1070,25 @@ function Dashboard({ data, setView, setData }) {
         );
       })()}
     </div>
+  );
+}
+// Tap-to-hide section header with a count (open/closed remembered per device)
+function useRemembered(key, def = true) {
+  const [open, setOpen] = useState(() => { try { const v = localStorage.getItem(key); return v == null ? def : v === "1"; } catch { return def; } });
+  const toggle = () => setOpen(o => { try { localStorage.setItem(key, o ? "0" : "1"); } catch {} return !o; });
+  return [open, toggle];
+}
+function CollapseBar({ title, count, open, onToggle, color = TEAL, emptyText }) {
+  return (
+    <button onClick={onToggle} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "14px 0 8px", padding: "10px 14px", background: "#fff", border: "1.5px solid #E3E9E8", borderRadius: 12, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 1px 3px rgba(0,0,0,.06)" }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: "#10211E", textTransform: "uppercase", letterSpacing: ".05em" }}>{title}</span>
+        {count > 0
+          ? <span style={{ minWidth: 24, height: 24, padding: "0 7px", borderRadius: 99, background: color, color: "#fff", fontSize: 13, fontWeight: 800, lineHeight: "24px", textAlign: "center" }}>{count}</span>
+          : <span style={{ fontSize: 12.5, fontWeight: 700, color: "#94A4A0" }}>{emptyText || "None"}</span>}
+      </span>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: "#6A7B77" }}>{open ? "Hide ▾" : "Show ▸"}</span>
+    </button>
   );
 }
 function SectionTitle({ children }) {
