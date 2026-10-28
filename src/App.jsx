@@ -4431,12 +4431,25 @@ function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"a
 
 function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
   const [mode, setMode] = useState(initialMode || "agenda");
-  const show = "all"; // filter tiles removed — calendar always shows everything
+  // What to show — pick any mix of moves / surveys / servicing (remembered on this device)
+  const CAL_TYPES = [["moves", "🚚 Moves"], ["surveys", "📋 Surveys"], ["servicing", "🔧 Servicing & time off"]];
+  const [types, setTypes] = useState(() => {
+    if (initialShow && ["moves", "surveys", "servicing"].includes(initialShow)) return [initialShow];
+    try { const t = JSON.parse(localStorage.getItem("removals_cal_types") || "null"); if (Array.isArray(t) && t.length) return t; } catch {}
+    return ["moves", "surveys", "servicing"];
+  });
+  const toggleType = k => setTypes(prev => {
+    const next = prev.includes(k) ? prev.filter(x => x !== k) : [...prev, k];
+    const final = next.length ? next : prev; // always keep at least one ticked
+    try { localStorage.setItem("removals_cal_types", JSON.stringify(final)); } catch {}
+    return final;
+  });
+  const [typesOpen, setTypesOpen] = useState(false);
   const [availOpen, setAvailOpen] = useState(false);
   const [availPick, setAvailPick] = useState(null); // date chosen inside the availability dropdown
-  const showMoves = show === "all" || show === "moves";
-  const showSurveys = show === "all" || show === "surveys";
-  const showVeh = show === "all" || show === "servicing";
+  const showMoves = types.includes("moves");
+  const showSurveys = types.includes("surveys");
+  const showVeh = types.includes("servicing");
   const [anchor, setAnchor] = useState(() => initialDate ? new Date(initialDate + "T00:00") : new Date());
   const jobs = (data.jobs || []).filter(j => j.moveDate && j.status !== "Let Go");
   const today = new Date();
@@ -4450,7 +4463,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const bookedStaffOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || [])); const iso = isoOf(d); (data.staff || []).forEach(st => { if (staffOffOn(st, iso)) s.add(st.name); }); return s; };
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
-  const showStaffOff = show === "all" || show === "servicing";
+  const showStaffOff = types.includes("servicing");
   const staffOffOnIso = iso => { const out = []; (data.staff || []).forEach(s => ((s.away) || []).forEach(b => { if (b.start) { const total = Math.max(1, Number(b.days) || 1); const end = isoAdd(b.start, { days: total - 1 }); if (iso >= b.start && iso <= end) { const dayNo = Math.round((new Date(iso + "T00:00") - new Date(b.start + "T00:00")) / 86400000) + 1; out.push({ s, b, dayNo, total }); } } })); return out; };
   const staffOffOnCal = d => showStaffOff ? staffOffOnIso(isoOf(d)) : [];
 
@@ -4602,6 +4615,30 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
 
   return (
     <div>
+
+      {/* Show: moves / surveys / servicing — dropdown with tick boxes */}
+      <div style={{ background: "#fff", border: "1px solid #E9EEED", borderRadius: 12, marginBottom: 10, boxShadow: "0 1px 2px rgba(16,33,30,.05)", overflow: "hidden" }}>
+        <button onClick={() => setTypesOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: "#10211E", flexShrink: 0 }}>Show</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: TEAL_D, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{types.length === 3 ? "Everything" : CAL_TYPES.filter(([k]) => types.includes(k)).map(([, l]) => l.replace(/^\S+ /, "")).join(" + ")}</span>
+            <span style={{ color: "#9CA3AF" }}>{typesOpen ? "▾" : "▸"}</span>
+          </span>
+        </button>
+        {typesOpen && (
+          <div style={{ padding: "4px 14px 12px", borderTop: "1px solid #F2F5F4", display: "flex", flexDirection: "column", gap: 6 }}>
+            {CAL_TYPES.map(([k, label]) => {
+              const on = types.includes(k);
+              return (
+                <label key={k} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, cursor: "pointer", background: on ? "#EAF4F2" : "#F7FAF9", border: `1.5px solid ${on ? TEAL : "#E3E9E8"}`, fontSize: 14, fontWeight: 700, color: "#10211E" }}>
+                  <input type="checkbox" checked={on} onChange={() => toggleType(k)} style={{ width: 18, height: 18, accentColor: TEAL }} />
+                  {label}
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* View tiles — same size and style as the filter tiles above */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 18 }}>
