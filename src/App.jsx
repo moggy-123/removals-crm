@@ -647,6 +647,14 @@ function enqBadge(data, e) {
   if (j) return (j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : j.status;
   return enqStatus(e);
 }
+// Quote reminder for a surveyed enquiry with no move yet: "build" or "send", else null.
+function quoteTodo(data, e) {
+  if (!e || ["Lost", "Let Go", "Won"].includes(e.status) || (data.jobs || []).some(j => j.enquiryId === e.id)) return null;
+  if (!(e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted"].includes(e.status))) return null;
+  if (!(Number(e.quoteTotal) > 0)) return { t: "Quote to build", c: "#0369A1" };
+  if (!["Sent", "Accepted"].includes(e.quoteStatus)) return { t: "⚠️ Quote not emailed", c: "#C2410C" };
+  return null;
+}
 // Which Enquiries tile an enquiry belongs to (missed surveys sit under "Survey booked").
 const enqGroup = e => (e.status === "New" && e.surveyDate) ? "Survey booked" : e.status;
 
@@ -1059,6 +1067,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
               <StatusBadge status={enqBadge(data, e)} />
+              {(() => { const q = quoteTodo(data, e); return q ? <span style={{ fontSize: 11.5, fontWeight: 800, color: q.c, whiteSpace: "nowrap" }}>{q.t}</span> : null; })()}
             </div>
           </div>
         </Card>
