@@ -647,6 +647,55 @@ function enqBadge(data, e) {
   if (j) return (j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : j.status;
   return enqStatus(e);
 }
+// Sent quote waiting for an answer → remind to ring the customer.
+function quoteChase(data, e) {
+  if (!e || e.status !== "Quoted" || !(Number(e.quoteTotal) > 0) || e.quoteStatus !== "Sent") return null;
+  if ((data.jobs || []).some(j => j.enquiryId === e.id)) return null;
+  const cust = (data.customers || []).find(c => c.id === e.customerId) || {};
+  const days = e.quoteSentDate ? Math.max(0, Math.round((new Date(todayISO() + "T00:00") - new Date(e.quoteSentDate + "T00:00")) / 86400000)) : null;
+  return { phone: cust.phone || cust.homePhone || "", days, sent: e.quoteSentDate || "", lastCall: e.quoteChasedAt || "" };
+}
+function quoteChaseText(q) {
+  const sent = q.days == null ? "Quote sent" : q.days === 0 ? "Quote sent today" : `Quote sent ${q.days} day${q.days !== 1 ? "s" : ""} ago`;
+  return sent + (q.lastCall ? ` · last called ${fmtDateShort(q.lastCall.slice(0, 10))}` : " · not called yet");
+}
+// Ring the customer about their quote: logs the call and remembers when, without a full reload.
+function callAboutQuote(e, phone) {
+  try {
+    logComm(e.customerId, { type: "Call", note: "Quote follow-up call" });
+    const d = loadData();
+    const en = (d.enquiries || []).find(x => x.id === e.id);
+    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, quoteChasedAt: new Date().toISOString(), updatedAt: Date.now() }); localStorage.setItem(DB_KEY, JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
+  } catch {}
+  if (phone) window.location.href = `tel:${phone}`;
+}
+function ChaseCallBtn({ data, e, small }) {
+  const q = quoteChase(data, e);
+  if (!q || !q.phone) return null;
+  return <Btn size="sm" style={{ whiteSpace: "nowrap", flexShrink: 0, ...(small ? { padding: "5px 10px", fontSize: 12 } : {}) }} onClick={ev => { ev.stopPropagation(); callAboutQuote(e, q.phone); }}>📞 Chase quote</Btn>;
+}
+
+// New enquiry with no survey booked yet → prompt to ring and book the survey.
+function newEnqCall(data, e) {
+  if (!e || e.status !== "New" || e.surveyDate) return null;
+  const cust = (data.customers || []).find(c => c.id === e.customerId) || {};
+  return { phone: cust.phone || cust.homePhone || "", lastCall: e.newCalledAt || "" };
+}
+function callNewEnquiry(e, phone) {
+  try {
+    logComm(e.customerId, { type: "Call", note: "New enquiry call — book survey" });
+    const d = loadData();
+    const en = (d.enquiries || []).find(x => x.id === e.id);
+    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, newCalledAt: new Date().toISOString(), updatedAt: Date.now() }); localStorage.setItem(DB_KEY, JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
+  } catch {}
+  if (phone) window.location.href = `tel:${phone}`;
+}
+function NewEnqCallBtn({ data, e, small }) {
+  const q = newEnqCall(data, e);
+  if (!q || !q.phone) return null;
+  return <Btn size="sm" style={{ whiteSpace: "nowrap", flexShrink: 0, ...(small ? { padding: "5px 10px", fontSize: 12 } : {}) }} onClick={ev => { ev.stopPropagation(); callNewEnquiry(e, q.phone); }}>{small ? "📞 Call" : "📞 Call to book survey"}</Btn>;
+}
+
 // Quote reminder for a surveyed enquiry with no move yet: "build" or "send", else null.
 function quoteTodo(data, e) {
   if (!e || ["Lost", "Let Go", "Won"].includes(e.status) || (data.jobs || []).some(j => j.enquiryId === e.id)) return null;
@@ -900,6 +949,28 @@ function Dashboard({ data, setView, setData }) {
         );
       })()}
 
+      {(() => {
+        const chase = enquiries.map(e => ({ e, q: quoteChase(data, e) })).filter(x => x.q).sort((a, b) => (a.e.quoteSentDate || "").localeCompare(b.e.quoteSentDate || ""));
+        if (!chase.length) return null;
+        return (
+          <>
+            <SectionTitle>Quotes to chase ({chase.length})</SectionTitle>
+            {chase.map(({ e, q }) => (
+              <Card key={"qc" + e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={{ borderColor: "#FDE68A", background: "#FFFBEB" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#B45309", textTransform: "uppercase", letterSpacing: ".05em" }}>{quoteChaseText(q)}</div>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
+                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || "—"} → {e.toTown || "—"} · {gbp(e.quoteTotal)}</div>
+                  </div>
+                  {q.phone ? <ChaseCallBtn data={data} e={e} /> : <span style={{ flexShrink: 0, fontSize: 12, color: "#B7C3C0" }}>No number</span>}
+                </div>
+              </Card>
+            ))}
+          </>
+        );
+      })()}
+
       {toCall.length > 0 && (
         <>
           <SectionTitle>To call ({toCall.length})</SectionTitle>
@@ -914,9 +985,10 @@ function Dashboard({ data, setView, setData }) {
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                     <div style={{ fontSize: 13, color: "#6A7B77", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{route || "New enquiry — survey not booked"}</div>
                     {when && <div style={{ fontSize: 12, color: "#9CA3AF" }}>Move: {when}{e.dateFlexible ? " (flexible)" : ""}</div>}
+                    <div style={{ fontSize: 11.5, fontWeight: 700, color: e.newCalledAt ? "#6A7B77" : "#2563EB", marginTop: 2 }}>{e.newCalledAt ? `Last called ${fmtDateShort(e.newCalledAt.slice(0, 10))}` : "Not called yet"}</div>
                   </div>
-                  {c.phone
-                    ? <a href={`tel:${c.phone}`} onClick={ev => ev.stopPropagation()} style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 99, background: TEAL, color: "#fff", fontWeight: 700, fontSize: 13, textDecoration: "none" }}>Call</a>
+                  {newEnqCall(data, e) && newEnqCall(data, e).phone
+                    ? <NewEnqCallBtn data={data} e={e} />
                     : <span style={{ flexShrink: 0, fontSize: 12, color: "#B7C3C0" }}>No number</span>}
                 </div>
               </Card>
@@ -1068,6 +1140,8 @@ function EnquiriesList({ data, setView, initialFilter }) {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
               <StatusBadge status={enqBadge(data, e)} />
               {(() => { const q = quoteTodo(data, e); return q ? <span style={{ fontSize: 11.5, fontWeight: 800, color: q.c, whiteSpace: "nowrap" }}>{q.t}</span> : null; })()}
+              <ChaseCallBtn data={data} e={e} small />
+              <NewEnqCallBtn data={data} e={e} small />
             </div>
           </div>
         </Card>
@@ -3029,6 +3103,7 @@ function EnquiryDetail({ data, id, setView }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontWeight: 700, color: "#111827" }}>Survey / Inventory</div>
+            {newEnqCall(data, e) && <div style={{ fontSize: 13, color: "#2563EB", fontWeight: 700, marginTop: 2 }}>📞 New enquiry — call to book the survey{e.newCalledAt ? ` · last called ${fmtDateShort(e.newCalledAt.slice(0, 10))}` : ""}</div>}
             {e.surveyDate && <div style={{ fontSize: 13, color: surveyOverdue(e) ? "#B91C1C" : TEAL_D, fontWeight: 600, marginTop: 2 }}>📅 {fmtDate(e.surveyDate)}{e.surveyTime ? ` · ${e.surveyTime}` : ""}{surveyOverdue(e) ? " — date passed, not surveyed" : ""}</div>}
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
               {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³ · ${e.weightKg} kg` : "Not surveyed yet"}
@@ -3038,6 +3113,7 @@ function EnquiryDetail({ data, id, setView }) {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
             {surveyOverdue(e) && <Btn size="sm" variant="danger" onClick={() => setShowResched(true)}>📅 Reschedule</Btn>}
+            <NewEnqCallBtn data={data} e={e} small />
             <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
             {e.surveyDate && (() => { const surveyed = e.surveyDone || ["Surveyed", "Quoted", "Won"].includes(e.status); return <Btn size="sm" variant={surveyed ? "grey" : "primary"} onClick={async () => { const done = !surveyed; await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{surveyed ? "✓ Surveyed" : "Mark surveyed"}</Btn>; })()}
           </div>
@@ -3080,6 +3156,11 @@ function EnquiryDetail({ data, id, setView }) {
           <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {e.quoteTotal ? "Edit" : "Build"}</Btn>
         </div>
         {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
+        {(() => { const q = quoteChase(data, e); return q ? (
+          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400E" }}>{quoteChaseText(q)}</div>
+            {q.phone ? <ChaseCallBtn data={data} e={e} /> : <span style={{ fontSize: 12, color: "#B7C3C0" }}>No number</span>}
+          </div>) : null; })()}
       </Card>}
 
       {/* Manage move — below the quote once a provisional move exists */}
@@ -3205,6 +3286,8 @@ function CustomersList({ data, setView }) {
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                 {badge && <StatusBadge status={badge} />}
+                {latestEnq && <ChaseCallBtn data={data} e={latestEnq} small />}
+                {latestEnq && <NewEnqCallBtn data={data} e={latestEnq} small />}
                 {quoteFlag
                   ? <span style={{ fontSize: 11.5, fontWeight: 800, color: quoteFlag.c, whiteSpace: "nowrap" }}>{quoteFlag.t}</span>
                   : <span style={{ fontSize: 11.5, color: "#9CA3AF" }}>{jobs} move{jobs !== 1 ? "s" : ""}</span>}
@@ -3373,6 +3456,15 @@ function CustomerDetail({ data, id, setView }) {
       );
     });
   })();
+  const chasePanel = enquiries.map(e => ({ e, q: quoteChase(data, e) })).filter(x => x.q).map(({ e, q }) => (
+    <Card key={"ch" + e.id} style={{ borderColor: "#FDE68A", background: "#FFFBEB" }}>
+      <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#B45309", marginBottom: 6 }}>Quote follow-up</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 13.5, color: "#374151", fontWeight: 600 }}>{quoteChaseText(q)}<div style={{ fontSize: 12, color: "#6A7B77", fontWeight: 500, marginTop: 2 }}>{gbp(e.quoteTotal)} · {e.fromTown || "—"} → {e.toTown || "—"}</div></div>
+        <div style={{ flexShrink: 0 }}>{q.phone ? <ChaseCallBtn data={data} e={e} /> : <span style={{ fontSize: 12, color: "#B7C3C0" }}>No number</span>}</div>
+      </div>
+    </Card>
+  ));
   const surveyPanel = (() => {
     if (showMoveStorage) return null;
     let line, btn;
@@ -3380,7 +3472,7 @@ function CustomerDetail({ data, id, setView }) {
     else if (["Lost", "Let Go"].includes(latest.status)) { line = `Enquiry ${latest.status === "Lost" ? "lost" : "let go"}${latest.lostReason ? ` — ${latest.lostReason}` : ""}. Changed their mind?`; btn = <Btn size="sm" onClick={() => reopenAndRebook(latest)}>📅 Rebook survey</Btn>; }
     else if (surveyOverdue(latest)) { line = `Survey missed — was due ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)})${latest.surveyTime ? ` · ${latest.surveyTime}` : ""}.`; btn = <Btn size="sm" onClick={() => setResched(latest)}>📅 Reschedule</Btn>; }
     else if (latest.surveyDate) { line = `Survey booked: ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)})${latest.surveyTime ? ` · ${latest.surveyTime}` : ""}.`; btn = <Btn size="sm" variant="grey" onClick={() => openEnquiryEdit(latest)}>📅 Rebook survey</Btn>; }
-    else { line = "Survey not booked yet."; btn = <Btn size="sm" onClick={() => openEnquiryEdit(latest)}>📅 Book survey</Btn>; }
+    else { line = `Survey not booked yet.${latest.newCalledAt ? ` Last called ${fmtDateShort(latest.newCalledAt.slice(0, 10))}.` : " Not called yet."}`; btn = <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}><NewEnqCallBtn data={data} e={latest} /><Btn size="sm" variant="grey" onClick={() => openEnquiryEdit(latest)}>📅 Book survey</Btn></div>; }
     return (
       <Card>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 6 }}>Survey</div>
@@ -3416,6 +3508,7 @@ function CustomerDetail({ data, id, setView }) {
       </Card>
       {surveyPanel}
       {quotePanel}
+      {chasePanel}
       {showMoveStorage && (
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: getStorageJobs(c).length ? 8 : 0 }}>
