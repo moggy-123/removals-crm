@@ -3141,7 +3141,13 @@ function CustomersList({ data, setView }) {
   const [busy, setBusy] = useState(false);
   const customers = [...(data.customers || [])]
     .filter(c => !q || `${c.name} ${c.company} ${c.phone} ${c.town} ${c.ref || ""}`.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    // Newest first: highest reference number at the top. Brand-new customers still waiting for a
+    // reference (it's given on the next sync) go above everyone, newest first.
+    .sort((a, b) => {
+      const ra = Number(a.ref) || 0, rb = Number(b.ref) || 0;
+      if (!ra || !rb) return (!ra && !rb) ? (b.createdAt || "").localeCompare(a.createdAt || "") : (!ra ? -1 : 1);
+      return rb - ra;
+    });
   const missing = (data.customers || []).filter(c => !c.ref).length;
 
   function saveStart() { setRefStart(startVal); setShowRefPanel(false); }
