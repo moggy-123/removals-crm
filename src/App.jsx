@@ -655,6 +655,30 @@ function quoteChase(data, e) {
   const days = e.quoteSentDate ? Math.max(0, Math.round((new Date(todayISO() + "T00:00") - new Date(e.quoteSentDate + "T00:00")) / 86400000)) : null;
   return { phone: cust.phone || cust.homePhone || "", days, sent: e.quoteSentDate || "", lastCall: e.quoteChasedAt || "" };
 }
+// When a sent quote should come up in To do: on the date you picked, otherwise
+// a week after it was sent (or a week after your last chase call).
+function quoteChaseDue(e) {
+  if (e.quoteChaseDate) return e.quoteChaseDate;
+  const base = e.quoteChasedAt ? e.quoteChasedAt.slice(0, 10) : (e.quoteSentDate || todayISO());
+  return isoAdd(base, { days: 7 });
+}
+function ChaseDateModal({ data, enquiry, onClose }) {
+  const [date, setDate] = useState(quoteChaseDue(enquiry));
+  const save = v => saveAndReload(upsertLocal(data, "enquiries", { ...enquiry, quoteChaseDate: v }));
+  return (
+    <Modal title={`Chase reminder — ${custName(data, enquiry.customerId)}`} onClose={onClose}>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 12 }}>The quote will come up in your To do list on this date. If you don't pick one, it comes up a week after the quote was sent (or a week after your last chase call).</div>
+      <Field label="Remind me on"><Input type="date" value={date} onChange={setDate} /></Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        {[["In 3 days", 3], ["In 1 week", 7], ["In 2 weeks", 14], ["In 1 month", 30]].map(([l, n]) => <Btn key={l} variant="grey" size="sm" style={{ width: "100%" }} onClick={() => setDate(isoAdd(todayISO(), { days: n }))}>{l}</Btn>)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8, marginTop: 6 }}>
+        <Btn variant="grey" style={{ width: "100%" }} onClick={() => save("")}>Use default</Btn>
+        <Btn style={{ width: "100%" }} onClick={() => date && save(date)}>📅 Save date</Btn>
+      </div>
+    </Modal>
+  );
+}
 function quoteChaseText(q) {
   const sent = q.days == null ? "Quote sent" : q.days === 0 ? "Quote sent today" : `Quote sent ${q.days} day${q.days !== 1 ? "s" : ""} ago`;
   return sent + (q.lastCall ? ` · last called ${fmtDateShort(q.lastCall.slice(0, 10))}` : " · not called yet");
@@ -665,7 +689,7 @@ function callAboutQuote(e, phone) {
     logComm(e.customerId, { type: "Call", note: "Quote follow-up call" });
     const d = loadData();
     const en = (d.enquiries || []).find(x => x.id === e.id);
-    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, quoteChasedAt: new Date().toISOString(), updatedAt: Date.now() }); localStorage.setItem(DB_KEY, JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
+    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, quoteChasedAt: new Date().toISOString(), quoteChaseDate: "", updatedAt: Date.now() }); localStorage.setItem(DB_KEY, JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
   } catch {}
   if (phone) window.location.href = `tel:${phone}`;
 }
@@ -734,6 +758,7 @@ function Dashboard({ data, setView, setData }) {
   const [tsOpen, toggleTs] = useRemembered("removals_home_today_surveys");
   const [editFu, setEditFu] = useState(null);
   const [resched, setResched] = useState(null);
+  const [chaseFor, setChaseFor] = useState(null);
   const [todoOpen, setTodoOpen] = useState(() => { try { return localStorage.getItem("removals_todo_hidden") !== "1"; } catch { return true; } });
   const toggleTodo = () => setTodoOpen(o => { try { localStorage.setItem("removals_todo_hidden", o ? "1" : "0"); } catch {} return !o; });
   const open = enquiries.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status));
@@ -861,8 +886,9 @@ function Dashboard({ data, setView, setData }) {
             nc.phone ? <Btn key="c" size="sm" style={sm} onClick={() => callNewEnquiry(e, nc.phone)}>📞 Call</Btn> : null,
             <Btn key="b" size="sm" variant="grey" style={sm} onClick={() => openEdit(e)}>📅 Book survey</Btn>] });
           const qc = quoteChase(data, e);
-          if (qc) items.push({ key: "qc" + e.id, p: 7, sort: e.quoteSentDate || "", e, ...AMBERC, label: `Chase quote · ${quoteChaseText(qc).replace(/^Quote /, "")}`, sub: `${route} · ${gbp(e.quoteTotal)}`, acts: [
-            qc.phone ? <Btn key="c" size="sm" style={sm} onClick={() => callAboutQuote(e, qc.phone)}>📞 Chase quote</Btn> : null] });
+          if (qc && quoteChaseDue(e) <= todayISO()) items.push({ key: "qc" + e.id, p: 7, sort: quoteChaseDue(e), e, ...AMBERC, label: `Chase quote · ${quoteChaseText(qc).replace(/^Quote /, "")}`, sub: `${route} · ${gbp(e.quoteTotal)}`, acts: [
+            qc.phone ? <Btn key="c" size="sm" style={sm} onClick={() => callAboutQuote(e, qc.phone)}>📞 Chase quote</Btn> : null,
+            <Btn key="d" size="sm" variant="grey" style={sm} onClick={() => setChaseFor(e)}>📅 Remind later</Btn>] });
         });
         pastProvisional.forEach(({ j, last }) => items.push({ key: "pp" + j.id, p: 2, sort: last, cid: j.customerId, ...AMBERC, label: `Provisional move date passed · was ${fmtDateShort(last)}`, sub: `${j.fromTown || "—"} → ${j.toTown || "—"}`, onOpen: () => changeDate(j), acts: [
           <Btn key="c" size="sm" style={sm} onClick={() => changeDate(j)}>Change date</Btn>,
@@ -1038,6 +1064,7 @@ function Dashboard({ data, setView, setData }) {
       })()}
 
       {resched && <RescheduleSurveyModal data={data} enquiry={resched} onClose={() => setResched(null)} />}
+      {chaseFor && <ChaseDateModal data={data} enquiry={chaseFor} onClose={() => setChaseFor(null)} />}
       {editFu && <FollowUpModal data={data} record={editFu.record} table={editFu.table} onClose={() => setEditFu(null)} />}
 
       {dashShow !== "surveys" && dashShow !== "servicing" && (() => {
@@ -3003,6 +3030,7 @@ function EnquiryDetail({ data, id, setView }) {
   const [showMove, setShowMove] = useState(false);
   const [rebook, setRebook] = useState(false);
   const [showResched, setShowResched] = useState(false);
+  const [showChaseDate, setShowChaseDate] = useState(false);
   useEffect(() => {
     try { if (sessionStorage.getItem("removals_open_plan") === id) { sessionStorage.removeItem("removals_open_plan"); setShowPlan(true); } } catch {}
     try { if (sessionStorage.getItem("removals_open_edit") === id) { sessionStorage.removeItem("removals_open_edit"); setShowEdit(true); } } catch {}
@@ -3176,7 +3204,9 @@ function EnquiryDetail({ data, id, setView }) {
         {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
         {(() => { const q = quoteChase(data, e); return q ? (
           <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400E" }}>{quoteChaseText(q)}</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400E" }}>{quoteChaseText(q)}
+              <div style={{ fontWeight: 600, color: "#B45309", marginTop: 2 }}>Reminder: {fmtDate(quoteChaseDue(e))} <button onClick={() => setShowChaseDate(true)} style={{ background: "none", border: "none", color: TEAL, fontWeight: 800, cursor: "pointer", padding: 0, fontSize: 12.5 }}>Change</button></div>
+            </div>
             {q.phone ? <ChaseCallBtn data={data} e={e} /> : <span style={{ fontSize: 12, color: "#B7C3C0" }}>No number</span>}
           </div>) : null; })()}
       </Card>}
@@ -3233,6 +3263,7 @@ function EnquiryDetail({ data, id, setView }) {
       {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
       {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
+      {showChaseDate && <ChaseDateModal data={data} enquiry={e} onClose={() => setShowChaseDate(false)} />}
       {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
       {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
       {showMove && linkedJob && <MoveManageModal data={data} job={linkedJob} onClose={() => setShowMove(false)} />}
