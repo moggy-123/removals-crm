@@ -4985,7 +4985,7 @@ function ResponsiveStyles({ device }) {
 }
 
 // ── Merge helper (newest-wins, tombstone-aware) ─────────────────────────────
-function mergeArrays(cloudArr, localArr, deleted) {
+function mergeArrays(cloudArr, localArr, deleted, goneElsewhere) {
   const byId = {};
   (cloudArr || []).forEach(x => { if (!deleted.includes(x.id)) byId[x.id] = x; });
   (localArr || []).forEach(x => {
@@ -4996,18 +4996,39 @@ function mergeArrays(cloudArr, localArr, deleted) {
       // Never lose a reference the database assigned (its updatedAt doesn't change).
       const ref = winner.ref != null ? winner.ref : (x.ref != null ? x.ref : (c.ref != null ? c.ref : null));
       byId[x.id] = (ref != null && ref !== winner.ref) ? { ...winner, ref } : winner;
-    } else byId[x.id] = x; // local-only: keep (genuine deletes use tombstones)
+    } else if (goneElsewhere && goneElsewhere.has(x.id)) {
+      addTombstone(x.id); // was in the cloud before, now isn't → deleted on another device
+    } else byId[x.id] = x; // never uploaded yet: keep (it's waiting to sync)
   });
   return Object.values(byId);
 }
+// Records this device has synced before but which are no longer in the cloud were deleted on
+// another device (e.g. the Home Screen app vs Safari). Drop them here too. Safety net: if a
+// table suddenly looks mostly empty, assume a cloud glitch rather than mass deletion and skip.
+function findGoneElsewhere(cloud, local) {
+  let sigs = {};
+  try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
+  const gone = new Set();
+  TABLES.forEach(t => {
+    const inCloud = new Set((cloud[t] || []).map(r => r.id));
+    const synced = (local[t] || []).filter(r => Object.prototype.hasOwnProperty.call(sigs, r.id));
+    const missing = synced.filter(r => !inCloud.has(r.id));
+    if (!missing.length) return;
+    if (missing.length > 5 && missing.length > synced.length / 2) return; // looks like a glitch — don't wipe
+    missing.forEach(r => gone.add(r.id));
+  });
+  return gone;
+}
 function mergeAll(cloud, local) {
+  const goneElsewhere = findGoneElsewhere(cloud, local);
+  goneElsewhere.forEach(id => addTombstone(id));
   const deleted = getTombstones();
   return {
-    customers: mergeArrays(cloud.customers, local.customers || [], deleted),
-    enquiries: mergeArrays(cloud.enquiries, local.enquiries || [], deleted),
-    jobs: mergeArrays(cloud.jobs, local.jobs || [], deleted),
-    vehicles: mergeArrays(cloud.vehicles, local.vehicles || [], deleted),
-    staff: mergeArrays(cloud.staff, local.staff || [], deleted),
+    customers: mergeArrays(cloud.customers, local.customers || [], deleted, goneElsewhere),
+    enquiries: mergeArrays(cloud.enquiries, local.enquiries || [], deleted, goneElsewhere),
+    jobs: mergeArrays(cloud.jobs, local.jobs || [], deleted, goneElsewhere),
+    vehicles: mergeArrays(cloud.vehicles, local.vehicles || [], deleted, goneElsewhere),
+    staff: mergeArrays(cloud.staff, local.staff || [], deleted, goneElsewhere),
   };
 }
 
