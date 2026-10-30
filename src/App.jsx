@@ -2764,10 +2764,19 @@ const VP_LOCKED = "width=device-width, initial-scale=1.0, minimum-scale=1.0, max
 const IS_IOS_APP = (() => { try { return /iPad|iPhone|iPod/.test(navigator.userAgent) && (window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches); } catch { return false; } })();
 // iOS sometimes comes back from its PDF viewer with the app zoomed in. Nudge the
 // viewport (slightly different scale, then back to 1) so Safari re-lays the page out.
-function resetZoom() {
+function looksZoomed() {
+  try {
+    const vv = window.visualViewport;
+    if (vv && Math.abs(vv.scale - 1) > 0.01) return true;
+    const cw = document.documentElement.clientWidth;
+    return !!(cw && Math.abs(cw - window.innerWidth) > 2);
+  } catch { return false; }
+}
+function resetZoom(force) {
   try {
     const vp = document.querySelector('meta[name="viewport"]');
     if (!vp) return;
+    if (!force && !looksZoomed()) return; // only nudge when the page really is zoomed — otherwise it flickers
     vp.setAttribute("content", "width=device-width, initial-scale=0.99, minimum-scale=0.99, maximum-scale=0.99, user-scalable=yes");
     setTimeout(() => { vp.setAttribute("content", VP_LOCKED); try { window.scrollTo(0, 0); } catch {} }, 60);
   } catch (_e) { /* noop */ }
@@ -6612,7 +6621,6 @@ function MainApp() {
   }, []);
 
   useEffect(() => {
-    try { const vp = document.querySelector('meta[name="viewport"]'); if (vp) vp.setAttribute("content", VP_LOCKED); } catch {}
     const onBack = () => { if (document.visibilityState !== "hidden") resetZoomSoon(); };
     window.addEventListener("focus", onBack);
     window.addEventListener("pageshow", onBack);
