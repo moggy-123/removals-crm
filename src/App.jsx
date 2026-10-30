@@ -750,6 +750,10 @@ function autoCompletePastMoves(d) {
 }
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
+// Home screen: "Upcoming surveys" and "Upcoming moves" are hidden for now while the staff
+// get used to the app. Change false → true to bring them back (they're still on the Calendar).
+const SHOW_UPCOMING_ON_HOME = false;
+
 function Dashboard({ data, setView, setData }) {
   const enquiries = data.enquiries || [];
   const jobs = data.jobs || [];
@@ -988,7 +992,7 @@ function Dashboard({ data, setView, setData }) {
       })()}
 
 
-      {(dashShow === "" || dashShow === "surveys") && (() => {
+      {SHOW_UPCOMING_ON_HOME && (dashShow === "" || dashShow === "surveys") && (() => {
         const list = upcomingSurveys.filter(e => e.surveyDate !== todayIso && (surveyStage(e) !== "booked" || inWindow(e.surveyDate)));
         const openQuote = (ev, e) => { ev.stopPropagation(); try { sessionStorage.setItem("removals_open_quote", e.id); } catch {} setView({ screen: "enquiryDetail", id: e.id }); };
         const STAGE = {
@@ -1067,7 +1071,7 @@ function Dashboard({ data, setView, setData }) {
       {chaseFor && <ChaseDateModal data={data} enquiry={chaseFor} onClose={() => setChaseFor(null)} />}
       {editFu && <FollowUpModal data={data} record={editFu.record} table={editFu.table} onClose={() => setEditFu(null)} />}
 
-      {dashShow !== "surveys" && dashShow !== "servicing" && (() => {
+      {SHOW_UPCOMING_ON_HOME && dashShow !== "surveys" && dashShow !== "servicing" && (() => {
         const list = upcoming.filter(({ st }) => inWindow(st.date));
         return (
         <>
