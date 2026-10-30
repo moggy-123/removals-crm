@@ -116,7 +116,36 @@ const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
 
 const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost", "Let Go"];
 const JOB_STATUSES = ["Provisional", "Confirmed", "Completed", "Let Go"];
-const PROPERTY_TYPES = ["House", "Flat / Apartment", "Bungalow", "Maisonette", "Office", "Storage Unit", "Other"];
+const PROPERTY_TYPES = ["Detached house", "Semi-detached house", "Terraced house", "End of terrace house", "Townhouse", "Cottage", "House",
+  "Detached bungalow", "Semi-detached bungalow", "Bungalow", "Flat / Apartment", "Maisonette", "Farmhouse", "Barn conversion",
+  "Mobile / park home", "Office", "Commercial unit", "Storage Unit", "Other"];
+// Turn whatever the customer typed ("detached", "3 bed semi", "ground floor flat"…) into one of our types.
+function normalizePropertyType(raw) {
+  const t = String(raw || "").toLowerCase().trim();
+  if (!t) return "";
+  const exact = PROPERTY_TYPES.find(p => p.toLowerCase() === t);
+  if (exact) return exact;
+  const bung = /bungalow|dormer/.test(t);
+  if (/mobile|park home|caravan|static/.test(t)) return "Mobile / park home";
+  if (/barn/.test(t)) return "Barn conversion";
+  if (/farm/.test(t)) return "Farmhouse";
+  if (/cottage/.test(t)) return "Cottage";
+  if (/maisonette/.test(t)) return "Maisonette";
+  if (/flat|apartment|studio|penthouse/.test(t)) return "Flat / Apartment";
+  if (/town ?house/.test(t)) return "Townhouse";
+  if (/end[\s-]*(of[\s-]*)?terrace|end[\s-]*terr/.test(t)) return "End of terrace house";
+  if (/terrace|mid[\s-]*terr/.test(t)) return "Terraced house";
+  if (/semi/.test(t)) return bung ? "Semi-detached bungalow" : "Semi-detached house";
+  if (/detached/.test(t)) return bung ? "Detached bungalow" : "Detached house";
+  if (bung) return "Bungalow";
+  if (/house|home/.test(t)) return "House";
+  if (/office/.test(t)) return "Office";
+  if (/storage|unit|garage|lock[\s-]*up/.test(t)) return /office|shop|commercial|industrial/.test(t) ? "Commercial unit" : "Storage Unit";
+  if (/shop|commercial|warehouse|industrial|retail/.test(t)) return "Commercial unit";
+  return raw.trim().replace(/^./, c => c.toUpperCase()); // keep it as typed if we can't tell
+}
+const propertyOptions = v => (v && !PROPERTY_TYPES.includes(v) ? [...PROPERTY_TYPES, v] : PROPERTY_TYPES);
+const REFERRAL_SUGGESTIONS = ["Google", "Facebook", "Website", "Previous customer", "Recommendation", "Checkatrade", "Estate agent", "Van / vehicle", "Leaflet", "Other"];
 const QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Declined"];
 
 const STATUS_META = {
@@ -1311,7 +1340,7 @@ function parseEnquiryEmail(text) {
   let t = (text || "").replace(/\r/g, "");
   if (/<[a-z!\/][^>]*>/i.test(t)) t = stripEmailHtml(t);
   t = repairLabelValueLines(normalizeEmailLabels(t));
-  const out = { name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", fromAccess: "", fromPropertyType: "", fromBedrooms: "", toAddress1: "", toTown: "", toPostcode: "", toAccess: "", toPropertyType: "", preferredDate: "", moveMonth: "", dateFlexible: false, notes: "" };
+  const out = { referredBy: "", name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", fromAccess: "", fromPropertyType: "", fromBedrooms: "", toAddress1: "", toTown: "", toPostcode: "", toAccess: "", toPropertyType: "", preferredDate: "", moveMonth: "", dateFlexible: false, notes: "" };
   const PC = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i;
   const PCG = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/gi;
   const em = t.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); if (em) out.email = em[0];
@@ -1341,14 +1370,14 @@ function parseEnquiryEmail(text) {
     out.fromTown = fieldIn(fromBlock, ["city", "town"]);
     out.fromPostcode = (fieldIn(fromBlock, ["post code", "postcode"]) || "").toUpperCase().replace(/\s+/g, " ");
     out.fromAccess = fieldIn(fromBlock, ["access"]);
-    out.fromPropertyType = fieldIn(fromBlock, ["property", "property type"]);
+    out.fromPropertyType = normalizePropertyType(fieldIn(fromBlock, ["property", "property type"]));
     out.fromBedrooms = fromBeds = fieldIn(fromBlock, ["bedrooms", "beds"]);
     fromFurn = fieldIn(fromBlock, ["furnished"]);
     out.toAddress1 = fieldIn(toBlock, ["address", "address line 1", "street", "house"]);
     out.toTown = fieldIn(toBlock, ["city", "town"]);
     out.toPostcode = (fieldIn(toBlock, ["post code", "postcode"]) || "").toUpperCase().replace(/\s+/g, " ");
     out.toAccess = fieldIn(toBlock, ["access"]);
-    out.toPropertyType = fieldIn(toBlock, ["property", "property type"]);
+    out.toPropertyType = normalizePropertyType(fieldIn(toBlock, ["property", "property type"]));
     toBeds = fieldIn(toBlock, ["bedrooms", "beds"]);
   } else {
     const fromLine = fieldIn(t, ["moving from", "move from", "collection address", "collection", "current address", "from address", "pickup", "from"]);
@@ -1374,7 +1403,7 @@ function parseEnquiryEmail(text) {
   const add = (label, val) => { if (val && val.trim()) extras.push(`${label}: ${val.trim()}`); };
   add("Packing", fieldIn(topBlock, ["packing"]));
   add("Storage", fieldIn(topBlock, ["storage"]));
-  add("Heard via", fieldIn(topBlock, ["how did you here of us", "how did you hear of us", "how did you hear", "source", "referral"]));
+  out.referredBy = fieldIn(topBlock, ["how did you here of us", "how did you hear of us", "how did you hear", "where did you hear about us", "source", "referral", "referred by"]);
   add("Special requirements", fieldIn(topBlock, ["special requirements", "special requirement", "requirements"]));
   const fromProp = [out.fromPropertyType, fromBeds ? `${fromBeds} bed` : "", fromFurn].filter(Boolean).join(", ");
   const toProp = [out.toPropertyType, toBeds ? `${toBeds} bed` : ""].filter(Boolean).join(", ");
@@ -1393,11 +1422,12 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
     preferredDate: e.preferredDate || "", dateFlexible: e.dateFlexible || false, moveMonth: e.moveMonth || "",
     surveyDate: reopen ? "" : (e.surveyDate || ""), surveyTime: reopen ? "" : (e.surveyTime || ""),
     fromAddress1: e.fromAddress1 || "", fromAddress2: e.fromAddress2 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
-    fromPropertyType: e.fromPropertyType || "", fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
+    fromPropertyType: normalizePropertyType(e.fromPropertyType), fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
     toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
     toStore: !!e.toStore, storeMode: e.storeMode || "Weeks", storeQty: e.storeQty ?? "", storeOutDate: e.storeOutDate || "",
-    toPropertyType: e.toPropertyType || "", toFloor: e.toFloor || "", toAccess: e.toAccess || "",
+    toPropertyType: normalizePropertyType(e.toPropertyType), toFloor: e.toFloor || "", toAccess: e.toAccess || "",
     notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
+    referredBy: e.referredBy || "",
     surveyor: e.surveyor || "",
     exchanged: e.exchanged || false,
     extraFrom: Array.isArray(e.extraFrom) ? e.extraFrom : [],
@@ -1416,6 +1446,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
     setCustomerId("");
     setF(prev => ({ ...prev,
       fromAddress1: p.fromAddress1 || prev.fromAddress1, fromTown: p.fromTown || prev.fromTown, fromPostcode: p.fromPostcode || prev.fromPostcode,
+      referredBy: p.referredBy || prev.referredBy,
       fromAccess: p.fromAccess || prev.fromAccess, fromPropertyType: p.fromPropertyType || prev.fromPropertyType, fromBedrooms: p.fromBedrooms || prev.fromBedrooms,
       toAddress1: p.toAddress1 || prev.toAddress1, toTown: p.toTown || prev.toTown, toPostcode: p.toPostcode || prev.toPostcode,
       toAccess: p.toAccess || prev.toAccess, toPropertyType: p.toPropertyType || prev.toPropertyType,
@@ -1539,7 +1570,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.fromPostcode} onChange={v => set("fromPostcode", v)} name="from-postcode" /></Field></div>
       </div>
       </form>
-      <Field label="Property type"><Select value={f.fromPropertyType} onChange={v => set("fromPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
+      <Field label="Property type"><Select value={f.fromPropertyType} onChange={v => set("fromPropertyType", v)} options={propertyOptions(f.fromPropertyType)} placeholder="Select…" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Bedrooms"><Input type="number" value={f.fromBedrooms} onChange={v => set("fromBedrooms", v)} placeholder="e.g. 3" /></Field></div>
         <div style={{ flex: 1 }}><Field label="Floor / level"><Input value={f.fromFloor} onChange={v => set("fromFloor", v)} placeholder="e.g. Ground, 2nd" /></Field></div>
@@ -1586,7 +1617,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
         <div style={{ width: 120 }}><Field label="Postcode"><Input value={f.toPostcode} onChange={v => set("toPostcode", v)} noAutofill /></Field></div>
       </div>
       </form>
-      <Field label="Property type"><Select value={f.toPropertyType} onChange={v => set("toPropertyType", v)} options={PROPERTY_TYPES} placeholder="Select…" /></Field>
+      <Field label="Property type"><Select value={f.toPropertyType} onChange={v => set("toPropertyType", v)} options={propertyOptions(f.toPropertyType)} placeholder="Select…" /></Field>
       <Field label="Floor / level"><Input value={f.toFloor} onChange={v => set("toFloor", v)} placeholder="e.g. Ground, 2nd" /></Field>
       <Field label="Access notes" hint="Stairs, lift, parking, long carry"><Textarea value={f.toAccess} onChange={v => set("toAccess", v)} rows={2} /></Field>
 
@@ -1606,6 +1637,10 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
       ))}
       <button type="button" onClick={() => addStop("extraTo")} style={{ background: "#F0FDFA", border: `1px dashed ${TEAL}`, color: TEAL_D, borderRadius: 9, padding: "9px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "100%", marginTop: 8 }}>+ Add another delivery address</button>
 
+      <Field label="Referred by" hint="How did they hear about us?">
+        <input list="rm-referral-list" style={inputStyle} value={f.referredBy} onChange={ev => set("referredBy", ev.target.value)} placeholder="e.g. Google, previous customer…" />
+        <datalist id="rm-referral-list">{REFERRAL_SUGGESTIONS.map(r => <option key={r} value={r} />)}</datalist>
+      </Field>
       <Field label="General notes"><Textarea value={f.notes} onChange={v => set("notes", v.split("\n").slice(0, 8).join("\n"))} rows={8} /></Field>
 
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
@@ -3145,6 +3180,7 @@ function EnquiryDetail({ data, id, setView }) {
         {(e.extraTo || []).map((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); return a ? <Row key={"et" + i} label={`+ Delivery ${i + 2}`} value={a + (s.note ? ` (${s.note})` : "")} /> : null; })}
         <Row label="To property" value={[e.toPropertyType, e.toFloor].filter(Boolean).join(" · ")} />
         {e.toAccess && <Row label="To access" value={e.toAccess} />}
+        {e.referredBy && <Row label="Referred by" value={e.referredBy} />}
         {e.notes && <Row label="Notes" value={e.notes} />}
       </Card>
 
