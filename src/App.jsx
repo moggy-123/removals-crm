@@ -165,6 +165,13 @@ const STATUS_META = {
   Completed:   { color: "#059669", bg: "#ECFDF5" },
 };
 
+// ── Who's signed in ─────────────────────────────────────────────────────────
+// Roles: admin (everything) · office / surveyor (everything except settings & deleting) · crew (today's jobs only)
+let CURRENT_USER = { role: "admin", email: "", staffName: "" };
+const ROLE_LABEL = { admin: "Admin", office: "Office", surveyor: "Surveyor", crew: "Crew" };
+const isAdmin = () => CURRENT_USER.role === "admin";
+const canDelete = () => isAdmin();
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function todayISO() { return new Date().toISOString().split("T")[0]; }
@@ -407,10 +414,11 @@ async function doPullSync(setData, setSyncStatus, opts) {
   LAST_SYNC_AT = now;
   try {
     const cloud = await pullFromCloud();
-    purgeTombstoned(cloud).catch(() => {});
+    const readOnly = (opts && opts.readOnly) || CURRENT_USER.role === "crew";
+    if (!readOnly) purgeTombstoned(cloud).catch(() => {});
     const merged = mergeAll(cloud, loadData());
     localStorage.setItem(DB_KEY, JSON.stringify(merged));
-    pushChangedOnly(merged).catch(() => {});
+    if (!readOnly) pushChangedOnly(merged).catch(() => {});
     setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
     if (setSyncStatus) setSyncStatus("synced");
   } catch { if (setSyncStatus) setSyncStatus(navigator.onLine === false ? "offline" : "synced"); }
@@ -925,7 +933,7 @@ function Dashboard({ data, setView, setData }) {
         });
         pastProvisional.forEach(({ j, last }) => items.push({ key: "pp" + j.id, p: 2, sort: last, cid: j.customerId, ...AMBERC, label: `Provisional move date passed · was ${fmtDateShort(last)}`, sub: `${j.fromTown || "—"} → ${j.toTown || "—"}`, onOpen: () => changeDate(j), acts: [
           <Btn key="c" size="sm" style={sm} onClick={() => changeDate(j)}>Change date</Btn>,
-          <Btn key="r" size="sm" variant="grey" style={{ ...sm, color: "#B91C1C" }} onClick={() => removeBooking(j)}>Remove booking</Btn>] }));
+          canDelete() ? <Btn key="r" size="sm" variant="grey" style={{ ...sm, color: "#B91C1C" }} onClick={() => removeBooking(j)}>Remove booking</Btn> : null] }));
         followUps.forEach(fu => {
           const due = fu.date <= todayISO();
           const ph = phoneOf(fu.customerId), cust = (data.customers || []).find(x => x.id === fu.customerId) || {};
@@ -2481,7 +2489,7 @@ function MessageModal({ customer, ctx, onClose }) {
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 4 }}>
         <button onClick={addTpl} style={linkBtn}>+ New template</button>
         <button onClick={editTpl} style={linkBtn}>Edit</button>
-        <button onClick={delTpl} style={{ ...linkBtn, color: "#DC2626" }}>Delete</button>
+        {canDelete() && <button onClick={delTpl} style={{ ...linkBtn, color: "#DC2626" }}>Delete</button>}
         <button onClick={setBiz} style={linkBtn}>Business name</button>
       </div>
     </Modal>
@@ -3292,9 +3300,9 @@ function EnquiryDetail({ data, id, setView }) {
               {showLost && <Btn variant="grey" style={{ ...eq, color: "#B91C1C" }} onClick={markLost}>✕ Mark Lost</Btn>}
             </div>
           )}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: canDelete() ? "1fr 1fr" : "1fr", gap: 8, marginTop: 8 }}>
             <Btn style={eq} onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
-            <Btn variant="danger" style={eq} onClick={del}><Icon name="trash" size={15} /> Delete</Btn>
+            {canDelete() && <Btn variant="danger" style={eq} onClick={del}><Icon name="trash" size={15} /> Delete</Btn>}
           </div>
         </>;
       })()}
@@ -3466,7 +3474,7 @@ function CommLogForm({ data, customer, entry, preset, onClose }) {
       </div>
       <Textarea value={note} onChange={setNote} placeholder={type === "Call" ? "What was discussed on the call" : "What was said / sent"} />
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-        {entry && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
+        {entry && canDelete() && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
         <Btn style={{ flex: 2 }} onClick={save}>{entry ? "Save" : "Save to log"}</Btn>
       </div>
@@ -3652,10 +3660,10 @@ function CustomerDetail({ data, id, setView }) {
         const showFu = !(data.jobs || []).some(j => j.customerId === c.id && j.status === "Provisional");
         const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
         return (
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${showFu ? 3 : 2}, 1fr)`, gap: 8, marginBottom: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${1 + (showFu ? 1 : 0) + (canDelete() ? 1 : 0)}, 1fr)`, gap: 8, marginBottom: 6 }}>
             <Btn style={eq} onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
             {showFu && <Btn variant="grey" style={eq} onClick={() => setFollowUpOpen(true)}>⏰ {c.followUpDate ? fmtUK(c.followUpDate).slice(0, 5) : "Follow-up"}</Btn>}
-            <Btn variant="danger" style={eq} onClick={del}><Icon name="trash" size={15} /> Delete</Btn>
+            {canDelete() && <Btn variant="danger" style={eq} onClick={del}><Icon name="trash" size={15} /> Delete</Btn>}
           </div>
         );
       })()}
@@ -4088,12 +4096,15 @@ function CompanyView({ data, setView, setData }) {
       <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build {BUILD_LABEL}</span></div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
+        {LOGINS_ENABLED && <AccountCard />}
+        {LOGINS_ENABLED && isAdmin() && <UsersAdmin data={data} />}
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 2px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Sync</h4>
           <SyncControl data={data} setData={setData} />
-          <OrphanCleanup data={data} setData={setData} />
-          <DuplicateCleanup data={data} setData={setData} />
+          {isAdmin() && <OrphanCleanup data={data} setData={setData} />}
+          {isAdmin() && <DuplicateCleanup data={data} setData={setData} />}
         </Card>
+{isAdmin() && (
         <Card style={{ marginBottom: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ minWidth: 0 }}>
@@ -4103,6 +4114,7 @@ function CompanyView({ data, setView, setData }) {
             <Btn size="sm" onClick={() => setView({ screen: "catalogue" })}>Edit</Btn>
           </div>
         </Card>
+        )}
 
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Tablet layout</h4>
@@ -4112,11 +4124,13 @@ function CompanyView({ data, setView, setData }) {
           })()}
         </Card>
 
+{isAdmin() && (
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Customer reference numbers</h4>
           <div style={{ fontSize: 13, color: "#6A7B77", lineHeight: 1.5 }}>Reference numbers are now assigned automatically by the cloud when a new customer syncs — so they can't clash, even if two devices add customers offline at the same time. A new customer added offline shows no number until it reconnects.</div>
           <RefStartControl data={data} />
         </Card>
+        )}
 
         <Card style={{ marginBottom: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -4159,6 +4173,7 @@ function CompanyView({ data, setView, setData }) {
         </Card>
       </div>
 
+{isAdmin() && (
       <Card style={{ marginBottom: 0, marginTop: 14 }}>
         <h4 style={{ margin: "0 0 6px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Backup &amp; Restore</h4>
         <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 12, lineHeight: 1.5 }}>
@@ -4180,7 +4195,9 @@ function CompanyView({ data, setView, setData }) {
           Tip: do this every week or so. On Supabase's paid plan your cloud data is also backed up automatically every day — this manual backup keeps working alongside it.
         </div>
       </Card>
+      )}
 
+{isAdmin() && (
       <Card style={{ marginBottom: 0, marginTop: 14, border: "1px solid #FECACA", background: "#FEF2F2" }}>
         <h4 style={{ margin: "0 0 6px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#DC2626", fontWeight: 800 }}>Danger zone</h4>
         <div style={{ fontSize: 13, color: "#7F1D1D", marginBottom: 12, lineHeight: 1.5 }}>
@@ -4188,6 +4205,7 @@ function CompanyView({ data, setView, setData }) {
         </div>
         <Btn variant="ghost" onClick={onWipe} disabled={wiping} style={{ color: "#DC2626", borderColor: "#FCA5A5", width: "100%" }}>{wiping ? "Deleting…" : "Delete all customers, enquiries & jobs"}</Btn>
       </Card>
+      )}
 
       {vForm && <VehicleForm data={data} editVehicle={vForm.id ? vForm : null} onClose={() => setVForm(null)} />}
       {sForm && <StaffForm data={data} editStaff={sForm.id ? sForm : null} onClose={() => setSForm(null)} />}
@@ -4274,7 +4292,7 @@ function VehicleForm({ data, onClose, editVehicle }) {
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-        {v.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
+        {v.id && canDelete() && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
         <Btn style={{ flex: 2 }} onClick={save}>{v.id ? "Save" : "Add vehicle"}</Btn>
       </div>
@@ -4339,7 +4357,7 @@ function StaffForm({ data, onClose, editStaff }) {
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-        {s.id && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
+        {s.id && canDelete() && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
         <Btn style={{ flex: 2 }} onClick={save}>{s.id ? "Save" : "Add staff"}</Btn>
       </div>
@@ -4589,7 +4607,7 @@ function JobDetail({ data, id, setView }) {
       <Field label="Move notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
 
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-        <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>
+        {canDelete() && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn style={{ flex: 1 }} onClick={save}><Icon name="check" size={16} /> Save move</Btn>
       </div>
       {f.status === "Provisional" && (
@@ -4961,11 +4979,11 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
                 const evs = jobsOn(d); const isToday = sameDay(d,today);
                 return (
                   <div key={i} style={{ background:"#fff", border:`1px solid ${isToday?"#FBD9A0":"#E9EEED"}`, borderRadius:12, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-                    <div style={{ background: isToday?"#FFF7E8":"#F4F7F6", borderBottom:"1px solid #E9EEED", padding:"7px 6px", textAlign:"center" }}>
-                      <div style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textTransform:"uppercase" }}>{CAL_DOW[i]}</div>
+                    <div onClick={()=>{ setAnchor(d); setMode("day"); }} title="Open this day" style={{ background: isToday?"#FFF7E8":"#F4F7F6", borderBottom:"1px solid #E9EEED", padding:"7px 6px", textAlign:"center", cursor:"pointer" }}>
+                      <div style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textTransform:"uppercase" }}>{CAL_DOW[i]} ›</div>
                       <div style={{ fontSize:16, fontWeight:800, color: isToday?AMBER:"#2c3c38" }}>{d.getDate()}</div>
                     </div>
-                    <div style={{ padding:7, display:"flex", flexDirection:"column", gap:6, minHeight:90 }}>
+                    <div onClick={e=>{ if (e.target === e.currentTarget) { setAnchor(d); setMode("day"); } }} style={{ padding:7, display:"flex", flexDirection:"column", gap:6, minHeight:90, flex:1, cursor:"pointer" }}>
                       {surveysOn(d).map(en => <SurveyCard key={en.id} en={en} />)}
                       {maintOn(d).map((mm,ix) => <MaintCard key={"m"+ix} v={mm.v} b={mm.b} />)}
                       {staffOffOnCal(d).map((so,ix) => <StaffOffCard key={"so"+ix} s={so.s} b={so.b} dayNo={so.dayNo} total={so.total} />)}
@@ -5973,7 +5991,7 @@ function StorageJobForm({ data, customer, job, onClose }) {
       </div>
       <div style={{ fontSize: 12, color: "#9CA3AF", margin: "0 0 10px" }}>Container count and loose items are worked out automatically from this job's inventory sheets.</div>
       <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-        {!isNew && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
+        {!isNew && canDelete() && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
         <Btn style={{ flex: 2 }} onClick={save}>{isNew ? "Add job" : "Save"}</Btn>
       </div>
@@ -6147,7 +6165,349 @@ function StorageView({ data, setView }) {
 // Page names shown in the green top bar on phones
 const PAGE_TITLES = { enquiries: "Enquiries", calendar: "Calendar", customers: "Customers", storage: "Storage", company: "Company" };
 
-export default function App() {
+// ══ Logins & roles ═══════════════════════════════════════════════════════════
+// Remember the invite / password-reset link details before Supabase tidies the URL.
+const AUTH_HASH = typeof window !== "undefined" ? (window.location.hash || "") : "";
+const NEEDS_PASSWORD = /type=(invite|recovery)/.test(AUTH_HASH);
+
+// Wipe this device's copy of the business data (used on sign out / when someone else signs in).
+function clearAppData() {
+  try {
+    Object.keys(localStorage).forEach(k => { if (k.startsWith("removals_") || k.startsWith("rm_")) localStorage.removeItem(k); });
+    sessionStorage.clear();
+  } catch {}
+}
+async function signOutFlow() {
+  let pending = false;
+  if (CURRENT_USER.role !== "crew") try {
+    await Promise.race([pushChangedOnly(loadData()), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000))]);
+  } catch { pending = true; }
+  if (pending && !confirm("Some changes on this device haven't uploaded yet (no signal?). If you sign out now they'll be lost.\n\nSign out anyway?")) return;
+  clearAppData();
+  try { await supabase.auth.signOut(); } catch {}
+  window.location.reload();
+}
+async function usersApi(method, body) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch("/api/users", {
+    method,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session ? session.access_token : ""}` },
+    body: body ? JSON.stringify({ ...body, redirectTo: window.location.origin }) : undefined,
+  });
+  let out = {};
+  try { out = await res.json(); } catch {}
+  if (!res.ok) throw new Error(out.error || `Request failed (${res.status})`);
+  return out;
+}
+
+function AuthShell({ title, children }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "#EEF3F2", display: "flex", flexDirection: "column" }}>
+      <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", gap: 11 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 11, background: "rgba(255,255,255,.16)", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="truck" size={23} color="#fff" /></div>
+        <div>
+          <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", lineHeight: 1.15 }}>{title || "Removals CRM"}</div>
+          <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>R&amp;J Removals &amp; Storage</div>
+        </div>
+      </header>
+      <div style={{ flex: 1, padding: 18, display: "flex", justifyContent: "center" }}><div style={{ width: "100%", maxWidth: 420 }}>{children}</div></div>
+    </div>
+  );
+}
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  async function signIn(ev) {
+    ev && ev.preventDefault();
+    if (!email.trim() || !password) { setMsg("Enter your email and password."); return; }
+    setBusy(true); setMsg("");
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setBusy(false);
+    if (error) setMsg(/invalid/i.test(error.message) ? "That email and password don't match. Try again or tap 'Forgot password'." : error.message);
+  }
+  async function forgot() {
+    if (!email.trim()) { setMsg("Type your email above first, then tap 'Forgot password'."); return; }
+    setBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+    setBusy(false);
+    setMsg(error ? error.message : "Check your email — we've sent a link to set a new password.");
+  }
+  return (
+    <AuthShell title="Sign in">
+      <Card>
+        <form onSubmit={signIn}>
+          <Field label="Email"><Input type="email" value={email} onChange={setEmail} autoComplete="username" name="email" /></Field>
+          <Field label="Password"><Input type="password" value={password} onChange={setPassword} autoComplete="current-password" name="password" /></Field>
+          {msg && <div style={{ fontSize: 13, fontWeight: 600, color: /Check your email/.test(msg) ? "#15803D" : "#B91C1C", marginBottom: 10 }}>{msg}</div>}
+          <Btn type="submit" style={{ width: "100%" }} disabled={busy}>{busy ? "Please wait…" : "Sign in"}</Btn>
+        </form>
+        <button onClick={forgot} style={{ marginTop: 12, background: "none", border: "none", color: TEAL, fontWeight: 700, fontSize: 13.5, cursor: "pointer", padding: 0 }}>Forgot password?</button>
+      </Card>
+    </AuthShell>
+  );
+}
+function SetPasswordScreen({ onDone }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  async function save() {
+    if (pw.length < 8) { setMsg("Use at least 8 characters."); return; }
+    if (pw !== pw2) { setMsg("The two passwords don't match."); return; }
+    setBusy(true);
+    const { error } = await supabase.auth.updateUser({ password: pw });
+    setBusy(false);
+    if (error) setMsg(error.message); else onDone();
+  }
+  return (
+    <AuthShell title="Set your password">
+      <Card>
+        <div style={{ fontSize: 13.5, color: "#374151", marginBottom: 12 }}>Choose a password for your account. You'll use it with your email to sign in.</div>
+        <Field label="New password"><Input type="password" value={pw} onChange={setPw} autoComplete="new-password" /></Field>
+        <Field label="Type it again"><Input type="password" value={pw2} onChange={setPw2} autoComplete="new-password" /></Field>
+        {msg && <div style={{ fontSize: 13, fontWeight: 600, color: "#B91C1C", marginBottom: 10 }}>{msg}</div>}
+        <Btn style={{ width: "100%" }} disabled={busy} onClick={save}>{busy ? "Saving…" : "Save password"}</Btn>
+      </Card>
+    </AuthShell>
+  );
+}
+function NoAccessScreen({ email }) {
+  return (
+    <AuthShell>
+      <Card>
+        <div style={{ fontWeight: 800, color: "#10211E", marginBottom: 6 }}>No access yet</div>
+        <div style={{ fontSize: 13.5, color: "#374151", marginBottom: 14 }}>You're signed in as <b>{email}</b>, but your account hasn't been given a role yet. Ask Dave to set you up in Company → Users &amp; access.</div>
+        <Btn variant="grey" style={{ width: "100%" }} onClick={signOutFlow}>Sign out</Btn>
+      </Card>
+    </AuthShell>
+  );
+}
+function AccountCard() {
+  return (
+    <Card style={{ marginBottom: 0 }}>
+      <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Your account</h4>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, color: "#10211E", overflow: "hidden", textOverflow: "ellipsis" }}>{CURRENT_USER.email}</div>
+          <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{ROLE_LABEL[CURRENT_USER.role]}{CURRENT_USER.staffName ? ` · ${CURRENT_USER.staffName}` : ""}</div>
+        </div>
+        <Btn size="sm" variant="grey" onClick={signOutFlow}>Sign out</Btn>
+      </div>
+    </Card>
+  );
+}
+function UsersAdmin({ data }) {
+  const [users, setUsers] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState(null); // { id?, email, role, staffName }
+  const staffNames = (data.staff || []).filter(s => s.active !== false).map(s => s.name).filter(Boolean);
+  const load = async () => { setErr(""); try { const r = await usersApi("GET"); setUsers(r.users || []); } catch (e) { setErr(e.message); setUsers([]); } };
+  useEffect(() => { load(); }, []);
+  async function save() {
+    if (!form.email.trim() && !form.id) { alert("Enter their email address."); return; }
+    if (form.role === "crew" && !form.staffName) { alert("Pick which staff member this is — crew only see jobs they're booked on."); return; }
+    setBusy(true);
+    try {
+      if (form.id) await usersApi("PATCH", { id: form.id, role: form.role, staffName: form.staffName });
+      else await usersApi("POST", { email: form.email.trim(), role: form.role, staffName: form.staffName });
+      setForm(null); await load();
+      if (!form.id) alert(`Invite sent to ${form.email.trim()}. They'll get an email with a link to set their password.`);
+    } catch (e) { alert("Couldn't save: " + e.message); }
+    setBusy(false);
+  }
+  async function remove(u) {
+    if (!confirm(`Remove access for ${u.email}? They won't be able to sign in any more.`)) return;
+    setBusy(true);
+    try { await usersApi("DELETE", { id: u.id }); await load(); } catch (e) { alert("Couldn't remove: " + e.message); }
+    setBusy(false);
+  }
+  async function resend(u) {
+    setBusy(true);
+    try { await usersApi("POST", { action: "resend", email: u.email }); alert(`Email sent to ${u.email}.`); } catch (e) { alert("Couldn't send: " + e.message); }
+    setBusy(false);
+  }
+  const roleHelp = { admin: "Everything, including settings and deleting", office: "Everything except settings and deleting", surveyor: "Everything except settings and deleting", crew: "Only their own jobs for today, from 7:30am" };
+  return (
+    <Card style={{ marginBottom: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <h4 style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Users &amp; access</h4>
+        {!form && <Btn size="sm" onClick={() => setForm({ email: "", role: "crew", staffName: "" })}>+ Add user</Btn>}
+      </div>
+      {err && <div style={{ fontSize: 12.5, color: "#B91C1C", fontWeight: 600, marginBottom: 8 }}>{err}</div>}
+      {form && (
+        <div style={{ border: "1px solid #E3E9E8", borderRadius: 12, padding: 12, marginBottom: 10, background: "#F7FAF9" }}>
+          {!form.id && <Field label="Email"><Input type="email" value={form.email} onChange={v => setForm({ ...form, email: v })} placeholder="name@example.com" /></Field>}
+          {form.id && <div style={{ fontWeight: 700, marginBottom: 10 }}>{form.email}</div>}
+          <Field label="Role" hint={roleHelp[form.role]}><Select value={form.role} onChange={v => setForm({ ...form, role: v })} options={["admin", "office", "surveyor", "crew"]} /></Field>
+          <Field label="Staff member" hint="Links the login to your Staff list (crew must be linked)">
+            <Select value={form.staffName} onChange={v => setForm({ ...form, staffName: v })} options={staffNames} placeholder="Not linked" />
+          </Field>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8 }}>
+            <Btn variant="grey" style={{ width: "100%" }} onClick={() => setForm(null)}>Cancel</Btn>
+            <Btn style={{ width: "100%" }} disabled={busy} onClick={save}>{busy ? "Saving…" : form.id ? "Save" : "Send invite"}</Btn>
+          </div>
+        </div>
+      )}
+      {users === null && <div style={{ fontSize: 13, color: "#94A4A0" }}>Loading…</div>}
+      {users && users.length === 0 && !err && <div style={{ fontSize: 13, color: "#94A4A0" }}>No users yet.</div>}
+      {(users || []).map(u => (
+        <div key={u.id} style={{ padding: "9px 0", borderTop: "1px solid #EEF3F2", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14, overflow: "hidden", textOverflow: "ellipsis" }}>{u.email}</div>
+            <div style={{ fontSize: 12, color: "#6A7B77" }}>{ROLE_LABEL[u.role] || "No role"}{u.staffName ? ` · ${u.staffName}` : ""} · {u.lastSignIn ? `last in ${fmtDateShort(u.lastSignIn.slice(0, 10))}` : "invited, not signed in yet"}</div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            <Btn size="sm" variant="grey" style={{ padding: "6px 10px" }} onClick={() => setForm({ id: u.id, email: u.email, role: u.role || "crew", staffName: u.staffName || "" })}>Edit</Btn>
+            {!u.lastSignIn && <Btn size="sm" variant="grey" style={{ padding: "6px 10px" }} onClick={() => resend(u)}>Resend</Btn>}
+            {u.email !== CURRENT_USER.email && <Btn size="sm" variant="danger" style={{ padding: "6px 10px" }} onClick={() => remove(u)}>Remove</Btn>}
+          </div>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+// ── Crew: just their jobs for today, shown from 7:30am ──
+const CREW_OPENS_AT = "07:30";
+function crewAddress(parts) { return parts.filter(Boolean).join(", "); }
+function CrewJobCard({ data, j, st }) {
+  const en = (data.enquiries || []).find(e => e.id === j.enquiryId) || {};
+  const cust = (data.customers || []).find(c => c.id === j.customerId) || {};
+  const phone = cust.phone || cust.homePhone || "";
+  const vans = (st.vehicleIds || []).map(id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? v.name : ""; }).filter(Boolean);
+  const from = crewAddress([j.fromAddress1 || en.fromAddress1, j.fromAddress2 || en.fromAddress2, j.fromTown || en.fromTown, j.fromPostcode || en.fromPostcode]);
+  const to = crewAddress([j.toAddress1 || en.toAddress1, j.toAddress2 || en.toAddress2, j.toTown || en.toTown, j.toPostcode || en.toPostcode]);
+  const fromAccess = j.fromAccess || en.fromAccess, toAccess = j.toAccess || en.toAccess;
+  const mapLink = a => `https://maps.apple.com/?q=${encodeURIComponent(a)}`;
+  const inv = sortInventoryByRoom(Array.isArray(en.inventory) ? en.inventory : []);
+  const rooms = []; const idx = {};
+  inv.forEach(it => { const r = it.room || "Other"; if (!(r in idx)) { idx[r] = rooms.length; rooms.push([r, []]); } rooms[idx[r]][1].push(it); });
+  const H = ({ children }) => <div style={{ fontSize: 11, fontWeight: 800, color: "#94A4A0", textTransform: "uppercase", letterSpacing: ".06em", margin: "12px 0 4px" }}>{children}</div>;
+  const Addr = ({ label, addr, access }) => addr ? (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: TEAL_D }}>{label}</div>
+      <a href={mapLink(addr)} style={{ fontSize: 15, fontWeight: 700, color: "#10211E", textDecoration: "none" }}>📍 {addr}</a>
+      {access && <div style={{ fontSize: 13, color: "#92400E", background: "#FFFBEB", borderRadius: 8, padding: "6px 9px", marginTop: 4 }}>⚠️ {access}</div>}
+    </div>
+  ) : null;
+  return (
+    <Card>
+      <div style={{ fontSize: 11, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.time ? `${st.time} · ` : ""}{st.type || "Move"}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, margin: "2px 0 8px" }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"}</div>
+        {phone && <a href={`tel:${phone}`} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, background: TEAL, color: "#fff", fontWeight: 800, fontSize: 14, textDecoration: "none" }}>📞 Call</a>}
+      </div>
+      <Addr label="FROM" addr={from} access={fromAccess} />
+      {(en.extraFrom || []).map((x, i) => <Addr key={"ef" + i} label={`EXTRA PICKUP ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
+      <Addr label={en.toStore ? "TO (STORE)" : "TO"} addr={to} access={toAccess} />
+      {(en.extraTo || []).map((x, i) => <Addr key={"et" + i} label={`EXTRA DELIVERY ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
+      <H>Van &amp; crew</H>
+      <div style={{ fontSize: 14, color: "#10211E", fontWeight: 600 }}>🚚 {vans.join(", ") || "Van TBC"}</div>
+      <div style={{ fontSize: 14, color: "#10211E", fontWeight: 600 }}>👷 {(st.crew || []).join(", ") || "—"}</div>
+      {st.notes && <><H>Notes</H><div style={{ fontSize: 14, color: "#374151", whiteSpace: "pre-wrap" }}>{st.notes}</div></>}
+      <H>Inventory</H>
+      {rooms.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0" }}>No inventory recorded.</div>}
+      {rooms.map(([room, items]) => {
+        const moving = items.filter(it => it.qty > 0 && !it.dismantleNote), staying = items.filter(it => it.qty < 0), dis = items.filter(it => it.dismantleNote);
+        return (
+          <div key={room} style={{ marginBottom: 8 }}>
+            <div style={{ fontWeight: 800, color: "#10211E", fontSize: 14 }}>{room}</div>
+            {moving.map((it, i) => it.freehand && !it.wardrobe
+              ? <div key={i} style={{ fontSize: 13.5, color: "#374151", whiteSpace: "pre-wrap", paddingLeft: 8 }}>{it.raw || it.name}</div>
+              : <div key={i} style={{ fontSize: 13.5, color: "#374151", paddingLeft: 8 }}>{it.qty} × {it.name}{it.dismantle ? <span style={{ color: TEAL_D, fontWeight: 700 }}> · dismantle ({it.dismantle})</span> : ""}</div>)}
+            {dis.map((it, i) => <div key={"d" + i} style={{ fontSize: 13.5, color: TEAL_D, fontWeight: 700, paddingLeft: 8, whiteSpace: "pre-wrap" }}>🔧 {it.raw || it.name}</div>)}
+            {staying.length > 0 && <div style={{ fontSize: 13, fontWeight: 800, color: "#DC2626", paddingLeft: 8, marginTop: 2 }}>NOT MOVING:</div>}
+            {staying.map((it, i) => <div key={"s" + i} style={{ fontSize: 13.5, fontWeight: 800, color: "#DC2626", paddingLeft: 16 }}>{Math.abs(it.qty)} × {it.name}</div>)}
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+function CrewApp() {
+  const [data, setData] = useState(loadData);
+  const [, setSyncStatus] = useState("");
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    doPullSync(setData, setSyncStatus, { force: true });
+    const i = setInterval(() => { setTick(t => t + 1); doPullSync(setData, setSyncStatus); }, 60000);
+    const f = () => { setTick(t => t + 1); doPullSync(setData, setSyncStatus, { force: true }); };
+    window.addEventListener("focus", f);
+    document.addEventListener("visibilitychange", f);
+    return () => { clearInterval(i); window.removeEventListener("focus", f); document.removeEventListener("visibilitychange", f); };
+  }, []);
+  const now = new Date();
+  const hm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+  const today = todayISO();
+  const me = (CURRENT_USER.staffName || "").trim().toLowerCase();
+  const mine = !me ? [] : (data.jobs || [])
+    .filter(j => ["Confirmed", "Completed", "Booked", "In Progress"].includes(j.status))
+    .flatMap(j => jobStages(j).filter(st => st.date === today && (st.crew || []).some(c => String(c).trim().toLowerCase() === me)).map(st => ({ j, st })))
+    .sort((a, b) => (a.st.time || "99").localeCompare(b.st.time || "99"));
+  return (
+    <div style={{ minHeight: "100vh", background: "#EEF3F2" }}>
+      <ResponsiveStyles device="phone" />
+      <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 11 }}>
+        <div>
+          <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", lineHeight: 1.15 }}>Today's jobs</div>
+          <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>{fmtDate(today)} ({dow(today)}){CURRENT_USER.staffName ? ` · ${CURRENT_USER.staffName}` : ""}</div>
+        </div>
+        <button onClick={signOutFlow} style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 10, padding: "8px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Sign out</button>
+      </header>
+      <div style={{ padding: 16, maxWidth: 640, margin: "0 auto" }}>
+        {!me ? <Card><div style={{ fontWeight: 700 }}>Your login isn't linked to a staff member yet.</div><div style={{ fontSize: 13, color: "#6A7B77", marginTop: 4 }}>Ask Dave to link you in Company → Users &amp; access.</div></Card>
+          : hm < CREW_OPENS_AT ? <Card style={{ textAlign: "center", padding: "30px 18px" }}><div style={{ fontSize: 34 }}>🕢</div><div style={{ fontWeight: 800, fontSize: 16, marginTop: 6 }}>Your jobs for today will appear at 7:30am</div><div style={{ fontSize: 13, color: "#6A7B77", marginTop: 4 }}>Check back then.</div></Card>
+          : mine.length === 0 ? <Card style={{ textAlign: "center", padding: "30px 18px" }}><div style={{ fontWeight: 800, fontSize: 16 }}>No jobs for you today</div><div style={{ fontSize: 13, color: "#6A7B77", marginTop: 4 }}>If you think that's wrong, ring the office.</div></Card>
+          : mine.map(({ j, st }, i) => <CrewJobCard key={(j.id || "") + (st.id || i)} data={data} j={j} st={st} />)}
+      </div>
+    </div>
+  );
+}
+
+// ── The gate: login → set password (invites) → the right app for your role ──
+// Logins are built but switched OFF until Dave is ready to set them up.
+const LOGINS_ENABLED = false;
+function AuthGate() {
+  if (!LOGINS_ENABLED) return <MainApp />;
+  return <AuthGateInner />;
+}
+function AuthGateInner() {
+  const [session, setSession] = useState(undefined); // undefined = still checking
+  const [needPw, setNeedPw] = useState(NEEDS_PASSWORD);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      const sess = (data && data.session) || null;
+      setSession(sess);
+      // Pick up any role change made by an admin since this device last signed in.
+      if (sess && navigator.onLine !== false) supabase.auth.refreshSession().then(r => { if (r && r.data && r.data.session) setSession(r.data.session); }).catch(() => {});
+    }).catch(() => setSession(null));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
+      if (event === "PASSWORD_RECOVERY") setNeedPw(true);
+      setSession(sess || null);
+    });
+    return () => { try { sub.subscription.unsubscribe(); } catch {} };
+  }, []);
+  if (session === undefined) return <AuthShell><div style={{ textAlign: "center", color: "#6A7B77", marginTop: 40 }}>Loading…</div></AuthShell>;
+  if (!session) return <LoginScreen />;
+  if (needPw) return <SetPasswordScreen onDone={() => { setNeedPw(false); try { window.history.replaceState(null, "", window.location.pathname); } catch {} }} />;
+  const user = session.user || {};
+  const md = user.app_metadata || {};
+  if (!ROLE_LABEL[md.role]) return <NoAccessScreen email={user.email} />;
+  // Someone different on this device? Start them with a clean copy of the data.
+  try {
+    const owner = localStorage.getItem("removals_owner");
+    if (owner && owner !== user.id) clearAppData();
+    localStorage.setItem("removals_owner", user.id);
+  } catch {}
+  CURRENT_USER = { role: md.role, email: user.email || "", staffName: md.staff_name || "" };
+  return md.role === "crew" ? <CrewApp /> : <MainApp />;
+}
+export default AuthGate;
+
+function MainApp() {
   const [data, setData] = useState(loadData);
   const [view, setViewState] = useState(() => {
     try { const v = JSON.parse(sessionStorage.getItem("removals_view")); if (v && v.screen) { if (v.screen === "jobs" || v.screen === "jobDetail") return { screen: "enquiries", filter: "Won" }; return v; } } catch {}
