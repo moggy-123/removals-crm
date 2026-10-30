@@ -404,6 +404,35 @@ function recSig(rec) { const { updatedAt, createdAt, ...rest } = rec; return JSO
 // One shared, throttled sync path for all the automatic triggers (focus, visibility, interval,
 // realtime). Caps automatic full-database pulls to about once every 30s to keep data use low.
 let LAST_SYNC_AT = 0;
+// ── "Delete everything" reaching other devices ─────────────────────────────
+// A wipe leaves a marker in the cloud (app_config key 'wipe'). Any device that
+// hasn't seen that marker yet drops its old customers/enquiries/jobs, rather
+// than keeping (and later re-uploading) its own copies.
+const WIPE_SEEN_KEY = "removals_wipe_seen";
+async function applyRemoteWipe() {
+  try {
+    const { data: row, error } = await supabase.from("app_config").select("value").eq("key", "wipe").maybeSingle();
+    if (error) return;
+    const at = row && row.value && row.value.at;
+    if (!at) return;
+    let seen = ""; try { seen = localStorage.getItem(WIPE_SEEN_KEY) || ""; } catch {}
+    if (seen && seen >= at) return;
+    let sigs = {}; try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
+    const d = loadData();
+    const wiped = [];
+    const keep = (t) => (d[t] || []).filter(r => { if (Object.prototype.hasOwnProperty.call(sigs, r.id)) { wiped.push(r.id); return false; } return true; });
+    const next = { ...d, customers: keep("customers"), enquiries: keep("enquiries"), jobs: keep("jobs") };
+    wiped.forEach(id => { delete sigs[id]; });
+    localStorage.setItem(DB_KEY, JSON.stringify(next));
+    localStorage.setItem(SIG_KEY, JSON.stringify(sigs));
+    localStorage.setItem(WIPE_SEEN_KEY, at);
+  } catch { /* offline or table missing — try again next sync */ }
+}
+async function pullCloud() {
+  await applyRemoteWipe();
+  return pullFromCloud();
+}
+
 async function doPullSync(setData, setSyncStatus, opts) {
   const force = opts && opts.force;
   if (SAVING_IN_PROGRESS) return;
@@ -413,7 +442,7 @@ async function doPullSync(setData, setSyncStatus, opts) {
   if (!force && now - LAST_SYNC_AT < 30000) return; // throttle
   LAST_SYNC_AT = now;
   try {
-    const cloud = await pullFromCloud();
+    const cloud = await pullCloud();
     const readOnly = (opts && opts.readOnly) || CURRENT_USER.role === "crew";
     if (!readOnly) purgeTombstoned(cloud).catch(() => {});
     const merged = mergeAll(cloud, loadData());
@@ -2683,12 +2712,7 @@ function QuotePdfView({ data, id, setView }) {
     const { bytes, ref } = await buildQuotePdf(e, c);
     return { file: new File([bytes], `Quote-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref };
   };
-  const downloadFile = file => {
-    const url = URL.createObjectURL(file);
-    const a = document.createElement("a"); a.href = url; a.download = file.name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  };
+  const downloadFile = file => showPdf(file, file.name);
   const share = async () => {
     setErr(""); setBusy(true);
     try {
@@ -2704,7 +2728,7 @@ function QuotePdfView({ data, id, setView }) {
     setErr(""); setBusy(true);
     try { const { file } = await makeFile(); downloadFile(file); }
     catch (ex) { setErr(ex.message || "Could not build the PDF."); }
-    setBusy(false); setTimeout(resetZoom, 200);
+    setBusy(false); resetZoomSoon();
   };
   const emailCustomer = () => {
     const ref = c?.ref ? String(c.ref) : "";
@@ -2736,13 +2760,39 @@ function QuotePdfView({ data, id, setView }) {
     </div>
   );
 }
+const VP_LOCKED = "width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no";
+const IS_IOS_APP = (() => { try { return /iPad|iPhone|iPod/.test(navigator.userAgent) && (window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches); } catch { return false; } })();
+// iOS sometimes comes back from its PDF viewer with the app zoomed in. Nudge the
+// viewport (slightly different scale, then back to 1) so Safari re-lays the page out.
 function resetZoom() {
   try {
     const vp = document.querySelector('meta[name="viewport"]');
     if (!vp) return;
-    vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes");
-    setTimeout(() => vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"), 80);
+    vp.setAttribute("content", "width=device-width, initial-scale=0.99, minimum-scale=0.99, maximum-scale=0.99, user-scalable=yes");
+    setTimeout(() => { vp.setAttribute("content", VP_LOCKED); try { window.scrollTo(0, 0); } catch {} }, 60);
   } catch (_e) { /* noop */ }
+}
+function resetZoomSoon() { [150, 500, 1200].forEach(ms => setTimeout(resetZoom, ms)); }
+// Show a PDF. In the Home Screen app on iPhone/iPad, use the share sheet (Save to Files,
+// Mail, Print…) instead of iOS's built-in PDF viewer, which is what messes up the zoom.
+async function showPdf(src, name = "document.pdf") {
+  try {
+    if (IS_IOS_APP && navigator.canShare) {
+      const blob = src instanceof Blob ? src : await (await fetch(src)).blob();
+      const file = src instanceof File ? src : new File([blob], name, { type: "application/pdf" });
+      if (navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file] }); } catch (_e) {}
+        resetZoomSoon();
+        return;
+      }
+    }
+  } catch (_e) { /* fall back to opening it */ }
+  const url = src instanceof Blob ? URL.createObjectURL(src) : src;
+  const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener";
+  if (src instanceof File) a.download = src.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  if (src instanceof Blob) setTimeout(() => URL.revokeObjectURL(url), 8000);
+  resetZoomSoon();
 }
 
 async function buildSurveyPdf(e, c, data, audience = "customer") {
@@ -2870,7 +2920,7 @@ function SurveyPdfView({ data, id, setView }) {
   const copy = (which, val) => { if (!val || !navigator.clipboard) return; navigator.clipboard.writeText(val).then(() => { setCopied(which); setTimeout(() => setCopied(""), 1500); }).catch(() => {}); };
   const firstName = (() => { const n = (c?.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim(); return (n.split(/\s+/)[0] || "there"); })();
   const makeFile = async () => { const { bytes, ref } = await buildSurveyPdf(e, c, data, mode); return { file: new File([bytes], `${mode === "staff" ? "MovePlan-STAFF" : mode === "office" ? "Survey-OFFICE" : "Survey"}-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref }; };
-  const downloadFile = file => { const url = URL.createObjectURL(file); const a = document.createElement("a"); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); };
+  const downloadFile = file => showPdf(file, file.name);
   const share = async () => {
     setErr(""); setBusy(true);
     try {
@@ -2883,7 +2933,7 @@ function SurveyPdfView({ data, id, setView }) {
     } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
     setBusy(false);
   };
-  const download = async () => { setErr(""); setBusy(true); try { const { file } = await makeFile(); downloadFile(file); } catch (ex) { setErr(ex.message || "Could not build the PDF."); } setBusy(false); setTimeout(resetZoom, 200); };
+  const download = async () => { setErr(""); setBusy(true); try { const { file } = await makeFile(); downloadFile(file); } catch (ex) { setErr(ex.message || "Could not build the PDF."); } setBusy(false); resetZoomSoon(); };
   const emailCustomer = () => {
     const subject = "Your survey & move plan";
     const body = `Hi ${firstName},\n\nPlease find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
@@ -3501,7 +3551,7 @@ function CustomerDetail({ data, id, setView }) {
   async function openSheet(rec) {
     if (sheetBusy) return;
     // Prefer the stored PDF — just open it to view (no re-save).
-    const openUrl = url => { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); };
+    const openUrl = url => showPdf(url, "Storage-sheet.pdf");
     if (rec.pdfUrl) { openUrl(rec.pdfUrl); return; }
     if (rec.pdf) { try { const b = atob(rec.pdf.split(",")[1]); const arr = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i); const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" })); openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000); return; } catch {} }
     // Fallback (older sheets saved before PDFs were stored): rebuild once.
@@ -3514,7 +3564,7 @@ function CustomerDetail({ data, id, setView }) {
     setSheetBusy(false);
   }
   const openCollection = col => {
-    const openUrl = url => { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); };
+    const openUrl = url => showPdf(url, "Storage-sheet.pdf");
     if (col.pdfUrl) { openUrl(col.pdfUrl); return; }
     if (col.pdf) { try { const b = atob(col.pdf.split(",")[1]); const arr = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i); const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" })); openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000); } catch {} }
   };
@@ -3848,6 +3898,11 @@ async function wipeBusinessData(data) {
     all.forEach(([, id]) => { delete sigs[id]; });
     localStorage.setItem(SIG_KEY, JSON.stringify(sigs));
   } catch {}
+  try {
+    const at = new Date().toISOString();
+    await supabase.from("app_config").upsert({ key: "wipe", value: { at }, updated_at: Date.now() }, { onConflict: "key" });
+    localStorage.setItem(WIPE_SEEN_KEY, at);
+  } catch {}
   try { sessionStorage.setItem("restoreMsg", "All customers, enquiries and jobs have been deleted."); } catch {}
   SAVING_IN_PROGRESS = false;
   window.location.reload();
@@ -3904,7 +3959,7 @@ function SyncControl({ data, setData, compact }) {
     }
     let merged;
     try {
-      merged = mergeAll(await pullFromCloud(), loadData());
+      merged = mergeAll(await pullCloud(), loadData());
       try { localStorage.setItem(DB_KEY, JSON.stringify(merged)); } catch {}
       if (setData) setData(merged);
     } catch (e) {
@@ -4077,7 +4132,12 @@ function CompanyView({ data, setView, setData }) {
   }
   async function onWipe() {
     const nc = (data.customers || []).length, ne = (data.enquiries || []).length, nj = (data.jobs || []).length;
-    if (nc + ne + nj === 0) { alert("There are no customers, enquiries or jobs to delete."); return; }
+    if (nc + ne + nj === 0) {
+      if (!confirm("There's nothing on this device to delete.\n\nClear any old customers, enquiries and jobs still showing on your other phones and iPads?")) return;
+      setWiping(true);
+      try { await wipeBusinessData(data); } catch (err) { setWiping(false); alert("Failed: " + ((err && err.message) || err)); }
+      return;
+    }
     if (!confirm(`Delete ALL ${nc} customers, ${ne} enquiries and ${nj} jobs?\n\nStaff and vehicles are kept. This cannot be undone except by restoring a backup.`)) return;
     if (!confirm("Last check — permanently clear your live data on every device?")) return;
     setWiping(true);
@@ -6009,7 +6069,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
   const isFirst = jobs[0] && job && jobs[0].id === job.id;
   const sheets = (c.storageInv || []).filter(s => (job && s.jobId === job.id) || (!s.jobId && isFirst));
   const money = n => `£${Number(n || 0).toLocaleString("en-GB")}`;
-  const openUrl = url => { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); };
+  const openUrl = url => showPdf(url, "Storage-sheet.pdf");
   async function openSheet(rec) {
     if (sheetBusy) return;
     if (rec.pdfUrl) { openUrl(rec.pdfUrl); return; }
@@ -6552,7 +6612,8 @@ function MainApp() {
   }, []);
 
   useEffect(() => {
-    const onBack = () => resetZoom();
+    try { const vp = document.querySelector('meta[name="viewport"]'); if (vp) vp.setAttribute("content", VP_LOCKED); } catch {}
+    const onBack = () => { if (document.visibilityState !== "hidden") resetZoomSoon(); };
     window.addEventListener("focus", onBack);
     window.addEventListener("pageshow", onBack);
     document.addEventListener("visibilitychange", onBack);
@@ -6563,7 +6624,7 @@ function MainApp() {
     let cancelled = false;
     (async () => {
       try {
-        const cloud = await pullFromCloud();
+        const cloud = await pullCloud();
         if (cancelled) return;
         const merged = autoCompletePastMoves(mergeAll(cloud, loadData()));
         localStorage.setItem(DB_KEY, JSON.stringify(merged));
