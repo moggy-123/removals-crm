@@ -32,6 +32,10 @@ const customerFromDb = r => ({
   updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 
+// Enquiry fields that have no column of their own. They ride along inside quote_extra._meta so
+// they sync to the cloud and other devices (previously they stayed on one device only).
+const ENQ_META = ["referredBy", "surveyDone", "exchanged", "toStore", "storeMode", "storeQty", "storeOutDate", "quoteChasedAt", "quoteChaseDate", "newCalledAt"];
+const enqMetaOut = e => { const m = {}; ENQ_META.forEach(k => { if (e[k] !== undefined && e[k] !== "" && e[k] !== null && e[k] !== false) m[k] = e[k]; }); return m; };
 const enquiryToDb = e => ({
   id: e.id, customer_id: e.customerId, status: e.status || "New",
   enquiry_date: e.enquiryDate, preferred_date: e.preferredDate || null,
@@ -48,14 +52,15 @@ const enquiryToDb = e => ({
   extras: e.extras || [],
   quote_lines: e.quoteLines || [], stages: e.stages || [],
   quote_vat: !!e.quoteVat, quote_total: e.quoteTotal || 0,
-  quote_extra: e.quoteExtra || {},
+  quote_extra: { ...((e.quoteExtra && typeof e.quoteExtra === "object") ? e.quoteExtra : {}), _meta: enqMetaOut(e) },
   quote_status: e.quoteStatus || "Draft", quote_sent_date: e.quoteSentDate || null,
   follow_up_date: e.followUpDate || null, follow_up_note: e.followUpNote || "", follow_up_time: e.followUpTime || null,
   lost_reason: e.lostReason || "", notes: e.notes || "",
   updated_at: e.updatedAt || Date.now(),
   created_at: e.createdAt || new Date().toISOString(),
 });
-const enquiryFromDb = r => ({
+const enquiryFromDb = r => { const qx = r.quote_extra || {}; const { _meta, ...quoteExtra } = qx; return {
+  ...(_meta || {}),
   id: r.id, customerId: r.customer_id, status: r.status || "New",
   enquiryDate: r.enquiry_date, preferredDate: r.preferred_date || "",
   surveyDate: r.survey_date || "", surveyTime: r.survey_time || "", surveyor: r.surveyor || "",
@@ -71,12 +76,12 @@ const enquiryFromDb = r => ({
   extras: r.extras || [],
   quoteLines: r.quote_lines || [], stages: r.stages || [],
   quoteVat: r.quote_vat, quoteTotal: r.quote_total || 0,
-  quoteExtra: r.quote_extra || {},
+  quoteExtra,
   quoteStatus: r.quote_status || "Draft", quoteSentDate: r.quote_sent_date || "",
   followUpDate: r.follow_up_date || "", followUpNote: r.follow_up_note || "", followUpTime: r.follow_up_time || "",
   lostReason: r.lost_reason || "", notes: r.notes || "",
   updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
-});
+}; };
 
 const jobToDb = j => ({
   id: j.id, customer_id: j.customerId, enquiry_id: j.enquiryId || null,
