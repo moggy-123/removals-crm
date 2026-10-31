@@ -2826,7 +2826,7 @@ function QuotePdfView({ data, id, setView }) {
       const { file, ref } = await makeFile();
       const text = `Hi ${firstName}, please find your removals quotation attached${ref ? ` (ref ${ref})` : ""}. Any questions just let us know.\n\nR&J Removals & Storage`;
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: `Quotation${ref ? " " + ref : ""}`, text });
+        await navigator.share({ files: [file], title: `Quotation${ref ? " " + ref : ""}`, text }); resetZoomSoon();
       } else { downloadFile(file); }
     } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
     setBusy(false);
@@ -2874,9 +2874,7 @@ const IS_IOS_APP = (() => { try { return /iPad|iPhone|iPod/.test(navigator.userA
 function looksZoomed() {
   try {
     const vv = window.visualViewport;
-    if (vv && Math.abs(vv.scale - 1) > 0.01) return true;
-    const cw = document.documentElement.clientWidth;
-    return !!(cw && Math.abs(cw - window.innerWidth) > 2);
+    return !!(vv && Math.abs(vv.scale - 1) > 0.01);
   } catch { return false; }
 }
 function resetZoom(force) {
@@ -2888,7 +2886,12 @@ function resetZoom(force) {
     setTimeout(() => { vp.setAttribute("content", VP_LOCKED); try { window.scrollTo(0, 0); } catch {} }, 60);
   } catch (_e) { /* noop */ }
 }
-function resetZoomSoon() { [150, 500, 1200].forEach(ms => setTimeout(resetZoom, ms)); }
+function resetZoomSoon() {
+  [150, 500, 1200].forEach(ms => setTimeout(resetZoom, ms));
+  // Also check once when the app next comes back to the front (after the PDF viewer / share sheet).
+  const once = () => { if (document.visibilityState === "hidden") return; window.removeEventListener("focus", once); document.removeEventListener("visibilitychange", once); [150, 500].forEach(ms => setTimeout(resetZoom, ms)); };
+  window.addEventListener("focus", once); document.addEventListener("visibilitychange", once);
+}
 // Show a PDF. In the Home Screen app on iPhone/iPad, use the share sheet (Save to Files,
 // Mail, Print…) instead of iOS's built-in PDF viewer, which is what messes up the zoom.
 async function showPdf(src, name = "document.pdf") {
@@ -3044,7 +3047,7 @@ function SurveyPdfView({ data, id, setView }) {
       const text = staff
         ? `Move plan (staff copy) attached — crew and vehicles included.\n\nR&J Removals & Storage`
         : `Hi ${firstName}, please find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
-      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: staff ? "Move Plan — Staff copy" : mode === "office" ? "Survey — Office copy" : "Survey & Move Plan", text });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: staff ? "Move Plan — Staff copy" : mode === "office" ? "Survey — Office copy" : "Survey & Move Plan", text }); resetZoomSoon(); }
       else downloadFile(file);
     } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
     setBusy(false);
@@ -6786,13 +6789,8 @@ function MainApp() {
     if (m) setTimeout(() => alert(m), 400);
   }, []);
 
-  useEffect(() => {
-    const onBack = () => { if (document.visibilityState !== "hidden") resetZoomSoon(); };
-    window.addEventListener("focus", onBack);
-    window.addEventListener("pageshow", onBack);
-    document.addEventListener("visibilitychange", onBack);
-    return () => { window.removeEventListener("focus", onBack); window.removeEventListener("pageshow", onBack); document.removeEventListener("visibilitychange", onBack); };
-  }, []);
+  // (No zoom checks when the app opens or comes back to the front — that caused a shimmer.
+  //  Zoom is only checked straight after a PDF or share sheet has been used.)
 
   useEffect(() => {
     let cancelled = false;
