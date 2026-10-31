@@ -22,12 +22,15 @@ const customerToDb = c => {
   // Only send ref once the DB has assigned one. Sending it back stops the column
   // default (nextval) from firing on every upsert and burning reference numbers.
   if (c.ref != null && c.ref !== "") o.ref = c.ref;
+  // Extra contacts (husband, partner…). Only sent once a customer has some, so
+  // nothing changes for everyone else.
+  if (Array.isArray(c.contacts) && (c.contacts.length || c.contactsCleared)) o.contacts = c.contacts;
   return o;
 };
 const customerFromDb = r => ({
   id: r.id, name: r.name, company: r.company, phone: r.phone, homePhone: r.home_phone || "", email: r.email,
   address1: r.address1, address2: r.address2, town: r.town, county: r.county,
-  postcode: r.postcode, custType: r.cust_type || "Private", ref: r.ref || null, notes: r.notes,
+  postcode: r.postcode, custType: r.cust_type || "Private", ref: r.ref || null, notes: r.notes, contacts: Array.isArray(r.contacts) && r.contacts.length ? r.contacts : undefined, contactsCleared: Array.isArray(r.contacts) && !r.contacts.length ? true : undefined,
   storage: r.storage || null, storageJobs: r.storage_jobs || null, move: r.move || null, storageInv: r.storage_inv || null, comms: r.comms || null, followUpDate: r.follow_up_date || "", followUpNote: r.follow_up_note || "", followUpTime: r.follow_up_time || "",
   updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
@@ -187,10 +190,19 @@ export async function pushToCloud(data) {
 
 // Push ONE record (fast single saves)
 export async function pushOne(table, record) {
-  const req = supabase.from(table).upsert(MAP_TO_DB[table](record));
-  const to = new Promise((_, rej) => setTimeout(() => rej(new Error("request timed out")), 12000));
-  const { error } = await Promise.race([req, to]);
-  if (error) throw new Error(error.message || error.details || error.hint || JSON.stringify(error));
+  const row = MAP_TO_DB[table](record);
+  const send = r => Promise.race([supabase.from(table).upsert(r), new Promise((_, rej) => setTimeout(() => rej(new Error("request timed out")), 12000))]);
+  const { error } = await send(row);
+  if (!error) return;
+  const msg = error.message || error.details || error.hint || JSON.stringify(error);
+  // Database not updated yet for extra contacts: save everything else, then report it.
+  if (table === "customers" && "contacts" in row && /contacts/i.test(msg)) {
+    const { contacts, ...rest } = row;
+    const r2 = await send(rest);
+    if (r2.error) throw new Error(r2.error.message || JSON.stringify(r2.error));
+    throw new Error("Extra contacts can't sync until the 'contacts' column is added in Supabase (see setup note).");
+  }
+  throw new Error(msg);
 }
 
 export async function deleteRecord(table, id) {
