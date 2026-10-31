@@ -1273,7 +1273,7 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
   const selected = customers.find(c => c.id === customerId);
   const listRef = useRef(null);
   const norm = s => (s || "").toLowerCase();
-  const filtered = q.trim() ? customers.filter(c => `${c.name || ""} ${c.company || ""} ${c.phone || ""} ${c.homePhone || ""} ${c.town || ""} ${c.postcode || ""} ${c.ref ? "#" + c.ref + " " + c.ref : ""}`.toLowerCase().includes(norm(q.trim()))).slice(0, 50) : [];
+  const filtered = q.trim() ? customers.filter(c => `${c.name || ""} ${c.company || ""} ${c.phone || ""} ${c.homePhone || ""} ${(c.contacts || []).map(x => `${x.name || ""} ${x.phone || ""}`).join(" ")} ${c.town || ""} ${c.postcode || ""} ${c.ref ? "#" + c.ref + " " + c.ref : ""}`.toLowerCase().includes(norm(q.trim()))).slice(0, 50) : [];
   const groups = {};
   customers.forEach(c => { const ch = (c.name || "#").trim().charAt(0).toUpperCase(); const key = /[A-Z]/.test(ch) ? ch : "#"; (groups[key] = groups[key] || []).push(c); });
   const letters = Object.keys(groups).sort();
@@ -1334,6 +1334,8 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
           <Input value={newCust.phone} onChange={v => setNewCust({ ...newCust, phone: v })} placeholder="Mobile phone" />
           <div style={{ height: 8 }} />
           <Input value={newCust.email} onChange={v => setNewCust({ ...newCust, email: v })} placeholder="Email" type="email" />
+          <div style={{ height: 10 }} />
+          <ContactsEditor contacts={newCust.contacts || []} onChange={v => setNewCust({ ...newCust, contacts: v })} />
         </div>
       )}
     </div>
@@ -1462,6 +1464,8 @@ function readMessage(t, out, opts) {
     const nm = (near.match(/(?:(?:his|her|their) name is|called|ask for|speak to|contact)\s+([A-Z][a-z]+)/) || near.match(/\b(?:husband|wife|partner|son|daughter)(?:'s)?\s+([A-Z][a-z]+)\b/) || [])[1] || "";
     const pref = /call (?:him|her|them)|(?:best|easier) to (?:call|contact)|(?:difficult|hard) to get to the phone|work (?:full|long)/i.test(msg) ? " — prefers calls to this number" : "";
     lines.push(`Other contact: ${[nm, rel ? `(${rel.toLowerCase()})` : ""].filter(Boolean).join(" ") || "number"} ${p}${pref}`);
+    if (!out.contacts) out.contacts = [];
+    if (!out.contacts.some(x => x.phone === p)) out.contacts.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: nm, relation: rel ? rel[0].toUpperCase() + rel.slice(1).toLowerCase() : "", phone: p, email: "", preferred: !!pref });
   }
   return { lines, message: msgM ? msgM[2].trim() : "" };
 }
@@ -1582,7 +1586,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
   const [pickerKey, setPickerKey] = useState(0);
   const autofill = () => {
     const p = parseEnquiryEmail(pasteText);
-    setNewCust({ name: p.name || "", phone: p.phone || "", email: p.email || "" });
+    setNewCust({ name: p.name || "", phone: p.phone || "", email: p.email || "", contacts: p.contacts || [] });
     setCustomerId("");
     setF(prev => ({ ...prev,
       fromAddress1: p.fromAddress1 || prev.fromAddress1, fromTown: p.fromTown || prev.fromTown, fromPostcode: p.fromPostcode || prev.fromPostcode,
@@ -1620,7 +1624,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
       cid = uid();
-      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, address1: f.fromAddress1 || "", address2: f.fromAddress2 || "", town: f.fromTown || "", postcode: f.fromPostcode || "", custType: "Private", ref: null, createdAt: new Date().toISOString() };
+      const customer = { id: cid, name: newCust.name.trim(), company: "", phone: newCust.phone, email: newCust.email, contacts: (newCust.contacts || []).filter(contactFilled), address1: f.fromAddress1 || "", address2: f.fromAddress2 || "", town: f.fromTown || "", postcode: f.fromPostcode || "", custType: "Private", ref: null, createdAt: new Date().toISOString() };
       data2 = upsertLocal(data2, "customers", customer);
     }
     const rec = {
@@ -3338,6 +3342,7 @@ function EnquiryDetail({ data, id, setView }) {
           {customer.email && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
         </div>
       )}
+      {customer && <OtherContacts customer={customer} onLog={en => logComm(customer.id, en)} />}
 
       <Card>
         <Row label="Move date" value={e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : (e.moveMonth ? fmtMonth(e.moveMonth) + " (month)" : "TBC")} />
@@ -3489,7 +3494,7 @@ function CustomersList({ data, setView }) {
   const [startVal, setStartVal] = useState(String(getRefStart()));
   const [busy, setBusy] = useState(false);
   const customers = [...(data.customers || [])]
-    .filter(c => !q || `${c.name} ${c.company} ${c.phone} ${c.town} ${c.ref || ""}`.toLowerCase().includes(q.toLowerCase()))
+    .filter(c => !q || (`${c.name} ${c.company} ${c.phone} ${c.town} ${c.ref || ""} ${(c.contacts || []).map(x => `${x.name || ""} ${x.phone || ""}`).join(" ")}`.toLowerCase().includes(q.toLowerCase()) || (q.replace(/\D/g, "").length >= 5 && `${c.phone || ""} ${c.homePhone || ""} ${(c.contacts || []).map(x => x.phone || "").join(" ")}`.replace(/\D/g, "").includes(q.replace(/\D/g, "")))))
     // Newest first: highest reference number at the top. Brand-new customers still waiting for a
     // reference (it's given on the next sync) go above everyone, newest first.
     .sort((a, b) => {
@@ -3562,6 +3567,59 @@ function CustomersList({ data, setView }) {
   );
 }
 
+// ── Extra contacts on a customer (husband, partner, solicitor…) ────────────
+const CONTACT_RELATIONS = ["Husband", "Wife", "Partner", "Son", "Daughter", "Mum", "Dad", "Brother", "Sister", "Friend", "Colleague", "Solicitor", "Estate agent", "Other"];
+const contactFilled = c => !!(c && ((c.name || "").trim() || (c.phone || "").trim() || (c.email || "").trim()));
+function ContactsEditor({ contacts, onChange }) {
+  const list = contacts || [];
+  const upd = (i, k, v) => onChange(list.map((c, j) => j === i ? { ...c, [k]: v } : c));
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Other contacts</div>
+      {list.map((c, i) => (
+        <div key={c.id || i} style={{ border: "1px solid #E3E9E8", borderRadius: 12, padding: 10, marginBottom: 8, background: "#FAFCFB" }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}><Input value={c.name} onChange={v => upd(i, "name", v)} placeholder="Name" /></div>
+            <div style={{ width: 132 }}><Select value={c.relation || ""} onChange={v => upd(i, "relation", v)} options={CONTACT_RELATIONS} placeholder="Who are they?" /></div>
+          </div>
+          <div style={{ height: 8 }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}><Input value={c.phone} onChange={v => upd(i, "phone", v)} placeholder="Phone" type="tel" /></div>
+            <div style={{ flex: 1, minWidth: 0 }}><Input value={c.email} onChange={v => upd(i, "email", v)} placeholder="Email (optional)" type="email" /></div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 8 }}>
+            <label style={{ fontSize: 13, color: "#374151", display: "flex", gap: 7, alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={!!c.preferred} onChange={e => upd(i, "preferred", e.target.checked)} style={{ width: 18, height: 18 }} /> Call this person first
+            </label>
+            <button type="button" onClick={() => onChange(list.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#B91C1C", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Remove</button>
+          </div>
+        </div>
+      ))}
+      <Btn size="sm" variant="grey" onClick={() => onChange([...list, { id: uid(), name: "", relation: "", phone: "", email: "", preferred: false }])}>+ Add contact</Btn>
+    </div>
+  );
+}
+function OtherContacts({ customer, onLog }) {
+  const list = ((customer && customer.contacts) || []).filter(contactFilled);
+  if (!list.length) return null;
+  const tel = p => String(p || "").replace(/[^\d+]/g, "");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+      {list.map(c => (
+        <div key={c.id || c.phone} style={{ background: c.preferred ? "#FFF9EE" : "#fff", border: `1px solid ${c.preferred ? "#FBD9A0" : "#E3E9E8"}`, borderRadius: 12, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#1F2D2A" }}>{c.name || "Other contact"}{c.relation ? <span style={{ fontWeight: 600, color: "#6A7B77" }}> · {c.relation}</span> : null}</div>
+            <div style={{ fontSize: 12.5, color: "#6A7B77", overflow: "hidden", textOverflow: "ellipsis" }}>{[c.phone, c.email].filter(Boolean).join(" · ")}{c.preferred ? <b style={{ color: AMBER }}> · Call first</b> : null}</div>
+          </div>
+          {c.phone && <Btn size="sm" variant="grey" onClick={() => { if (onLog) onLog({ type: "Call", note: `Called ${c.name || "other contact"}${c.relation ? ` (${c.relation.toLowerCase()})` : ""}` }); window.location.href = `tel:${tel(c.phone)}`; }}>📞 Call</Btn>}
+          {c.phone && <Btn size="sm" variant="grey" onClick={() => { window.location.href = `sms:${tel(c.phone)}`; }}>💬 Text</Btn>}
+          {!c.phone && c.email && <Btn size="sm" variant="grey" onClick={() => { window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CustomerForm({ data, onClose, editCustomer }) {
   const c = editCustomer || {};
   const [f, setF] = useState({
@@ -3569,10 +3627,12 @@ function CustomerForm({ data, onClose, editCustomer }) {
     address1: c.address1 || "", address2: c.address2 || "", town: c.town || "", county: c.county || "", postcode: c.postcode || "",
     custType: c.custType || "Private", notes: c.notes || "",
   });
+  const [contacts, setContacts] = useState(c.contacts || []);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   async function save() {
     if (!f.name.trim()) { alert("Name is required."); return; }
-    const rec = { ...c, ...f, id: c.id || uid(), ref: c.ref || null, createdAt: c.createdAt || new Date().toISOString() };
+    const keep = contacts.filter(contactFilled);
+    const rec = { ...c, ...f, contacts: keep, contactsCleared: !keep.length && ((c.contacts || []).length > 0 || !!c.contactsCleared) ? true : undefined, id: c.id || uid(), ref: c.ref || null, createdAt: c.createdAt || new Date().toISOString() };
     if (!c.id) { try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "newEnquiry", customerId: rec.id })); } catch {} }
     await saveAndReload(upsertLocal(data, "customers", rec));
   }
@@ -3586,6 +3646,7 @@ function CustomerForm({ data, onClose, editCustomer }) {
         <div style={{ flex: 1 }}><Field label="Home phone"><Input value={f.homePhone} onChange={v => set("homePhone", v)} /></Field></div>
       </div>
       <Field label="Email"><Input type="email" value={f.email} onChange={v => set("email", v)} /></Field>
+      <ContactsEditor contacts={contacts} onChange={setContacts} />
       <Field label="Address"><Input value={f.address1} onChange={v => set("address1", v)} /></Field>
       <Field label="Address line 2"><Input value={f.address2} onChange={v => set("address2", v)} placeholder="(optional)" /></Field>
       <div style={{ display: "flex", gap: 10 }}>
@@ -3818,6 +3879,7 @@ function CustomerDetail({ data, id, setView }) {
         <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" style={contactBtn} />
         {c.email && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
       </div>
+      <OtherContacts customer={c} onLog={en => logComm(c.id, en)} />
       {(() => {
         const showFu = !(data.jobs || []).some(j => j.customerId === c.id && j.status === "Provisional");
         const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
@@ -4713,6 +4775,7 @@ function JobDetail({ data, id, setView }) {
           {customer.email && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
         </div>
       )}
+      {customer && <OtherContacts customer={customer} onLog={en => logComm(customer.id, en)} />}
       {customer && j.enquiryId && (
         <div style={{ marginBottom: 12 }}>
           <Btn size="sm" variant="grey" onClick={() => setView({ screen: "enquiryDetail", id: j.enquiryId })}>View enquiry</Btn>
