@@ -163,6 +163,8 @@ function readMessage(t, out, opts) {
     const nm = (near.match(/(?:(?:his|her|their) name is|called|ask for|speak to|contact)\s+([A-Z][a-z]+)/) || near.match(/\b(?:husband|wife|partner|son|daughter)(?:'s)?\s+([A-Z][a-z]+)\b/) || [])[1] || "";
     const pref = /call (?:him|her|them)|(?:best|easier) to (?:call|contact)|(?:difficult|hard) to get to the phone|work (?:full|long)/i.test(msg) ? " — prefers calls to this number" : "";
     lines.push(`Other contact: ${[nm, rel ? `(${rel.toLowerCase()})` : ""].filter(Boolean).join(" ") || "number"} ${p}${pref}`);
+    if (!out.contacts) out.contacts = [];
+    if (!out.contacts.some(x => x.phone === p)) out.contacts.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: nm, relation: rel ? rel[0].toUpperCase() + rel.slice(1).toLowerCase() : "", phone: p, email: "", preferred: !!pref });
   }
   return { lines, message: msgM ? msgM[2].trim() : "" };
 }
@@ -295,6 +297,7 @@ export default async function handler(req, res) {
       address1: p.fromAddress1 || "", address2: "", town: p.fromTown || "", county: "", postcode: p.fromPostcode || "",
       cust_type: "Private", notes: "", updated_at: Date.now(), created_at: now,
     };
+    if (p.contacts && p.contacts.length) customer.contacts = p.contacts;
     const enquiry = {
       id: uid(), customer_id: custId, status: "New",
       enquiry_date: now.slice(0, 10), preferred_date: p.preferredDate || null,
@@ -310,7 +313,13 @@ export default async function handler(req, res) {
       lost_reason: "", notes: p.notes || "", updated_at: Date.now(), created_at: now,
     };
 
-    const cr = await sb("customers", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(customer) });
+    let cr = await sb("customers", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(customer) });
+    if (!cr.ok && customer.contacts) {
+      // 'contacts' column not added yet: save without it (the details are still in the notes)
+      const t1 = await cr.text();
+      if (/contacts/i.test(t1)) { const { contacts, ...rest } = customer; cr = await sb("customers", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(rest) }); }
+      else return send(500, { error: "customer insert failed: " + t1 });
+    }
     if (!cr.ok) return send(500, { error: "customer insert failed: " + (await cr.text()) });
     const er = await sb("enquiries", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(enquiry) });
     if (!er.ok) return send(500, { error: "enquiry insert failed: " + (await er.text()) });
