@@ -3832,6 +3832,12 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
+      <div style={{ ...contactRowStyle(1 + !!c.phone + !!c.email), marginBottom: 8, marginTop: 4 }}>
+        {c.phone && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; }}>📞 Call</Btn>}
+        <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" style={contactBtn} />
+        {c.email && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
+      </div>
+      <OtherContacts customer={c} onLog={en => logComm(c.id, en)} />
       {surveyPanel}
       {quotePanel}
       {chasePanel}
@@ -3879,12 +3885,6 @@ function CustomerDetail({ data, id, setView }) {
         ) : null)}
       </Card>
       )}
-      <div style={{ ...contactRowStyle(1 + !!c.phone + !!c.email), marginBottom: 8 }}>
-        {c.phone && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; }}>📞 Call</Btn>}
-        <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" style={contactBtn} />
-        {c.email && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
-      </div>
-      <OtherContacts customer={c} onLog={en => logComm(c.id, en)} />
       {(() => {
         const showFu = !(data.jobs || []).some(j => j.customerId === c.id && j.status === "Provisional");
         const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
