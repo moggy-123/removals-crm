@@ -2871,27 +2871,17 @@ const VP_LOCKED = "width=device-width, initial-scale=1.0, minimum-scale=1.0, max
 const IS_IOS_APP = (() => { try { return /iPad|iPhone|iPod/.test(navigator.userAgent) && (window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches); } catch { return false; } })();
 // iOS sometimes comes back from its PDF viewer with the app zoomed in. Nudge the
 // viewport (slightly different scale, then back to 1) so Safari re-lays the page out.
-function looksZoomed() {
-  try {
-    const vv = window.visualViewport;
-    return !!(vv && Math.abs(vv.scale - 1) > 0.01);
-  } catch { return false; }
-}
-function resetZoom(force) {
+// Back to the original, gentle zoom reset (same as before 30 Oct): it never changes the
+// page scale, so it can't make the screen shimmer.
+function resetZoom() {
   try {
     const vp = document.querySelector('meta[name="viewport"]');
     if (!vp) return;
-    if (!force && !looksZoomed()) return; // only nudge when the page really is zoomed — otherwise it flickers
-    vp.setAttribute("content", "width=device-width, initial-scale=0.99, minimum-scale=0.99, maximum-scale=0.99, user-scalable=yes");
-    setTimeout(() => { vp.setAttribute("content", VP_LOCKED); try { window.scrollTo(0, 0); } catch {} }, 60);
+    vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes");
+    setTimeout(() => vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"), 80);
   } catch (_e) { /* noop */ }
 }
-function resetZoomSoon() {
-  [150, 500, 1200].forEach(ms => setTimeout(resetZoom, ms));
-  // Also check once when the app next comes back to the front (after the PDF viewer / share sheet).
-  const once = () => { if (document.visibilityState === "hidden") return; window.removeEventListener("focus", once); document.removeEventListener("visibilitychange", once); [150, 500].forEach(ms => setTimeout(resetZoom, ms)); };
-  window.addEventListener("focus", once); document.addEventListener("visibilitychange", once);
-}
+function resetZoomSoon() { setTimeout(resetZoom, 200); }
 // Show a PDF. In the Home Screen app on iPhone/iPad, use the share sheet (Save to Files,
 // Mail, Print…) instead of iOS's built-in PDF viewer, which is what messes up the zoom.
 async function showPdf(src, name = "document.pdf") {
@@ -6870,8 +6860,13 @@ function MainApp() {
     if (m) setTimeout(() => alert(m), 400);
   }, []);
 
-  // (No zoom checks when the app opens or comes back to the front — that caused a shimmer.
-  //  Zoom is only checked straight after a PDF or share sheet has been used.)
+  useEffect(() => {
+    const onBack = () => resetZoom();
+    window.addEventListener("focus", onBack);
+    window.addEventListener("pageshow", onBack);
+    document.addEventListener("visibilitychange", onBack);
+    return () => { window.removeEventListener("focus", onBack); window.removeEventListener("pageshow", onBack); document.removeEventListener("visibilitychange", onBack); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
