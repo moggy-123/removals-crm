@@ -5720,21 +5720,27 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   const clearDraft = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch {} };
   const leave = () => { clearDraft(); setView({ screen: "storage" }); };
   // Pull the "Into store" day (date + crew) from the customer's move plan, if there is one.
-  const findStoreDay = cid => {
-    for (const j of (data.jobs || []).filter(x => x.customerId === cid)) { const st = jobStages(j).find(s => /store/i.test(s.type || "")); if (st) return st; }
-    for (const en of (data.enquiries || []).filter(x => x.customerId === cid)) { const st = (en.stages || []).find(s => /store/i.test(s.type || "")); if (st) return st; }
-    return null;
+  const findStoreDay = (cid, sjId) => {
+    const cc = (data.customers || []).find(x => x.id === cid);
+    const sj = cc && sjId ? getStorageJobs(cc).find(x => x.id === sjId) : null;
+    const linked = sj && sj.moveJobId ? (data.jobs || []).find(x => x.id === sj.moveJobId) : null;
+    if (linked) { const d = storeDayOf(linked); if (d) return d; }
+    for (const j of bookedMovesFor(data, cid)) { const st = jobStages(j).find(s => /store/i.test(s.type || "") && s.date); if (st) return st; }
+    const first = bookedMovesFor(data, cid)[0];
+    return first ? storeDayOf(first) : null;
   };
   const [prefillMsg, setPrefillMsg] = useState("");
-  const applyStoreDay = cid => {
-    const sd = cid ? findStoreDay(cid) : null;
+  const applyStoreDay = (cid, sjId) => {
+    const sd = cid ? findStoreDay(cid, sjId) : null;
     if (!sd) { setPrefillMsg(""); return; }
     if (sd.date) setDate(sd.date);
     if (Array.isArray(sd.crew) && sd.crew.length) setCrew(sd.crew);
-    setPrefillMsg(`Pre-filled from the move plan: ${sd.date ? fmtUK(sd.date) : "date"}${sd.crew && sd.crew.length ? " · " + sd.crew.join(", ") : ""}. Adjust if needed.`);
+    setPrefillMsg(`Staff copied from the booked move: ${sd.date ? fmtUK(sd.date) : "date"}${sd.crew && sd.crew.length ? " · " + sd.crew.join(", ") : ""}. Adjust if needed.`);
   };
-  const pickCustomer = cid => { setCustomerId(cid); applyStoreDay(cid); };
-  useEffect(() => { if (presetCustomerId && !saved) applyStoreDay(presetCustomerId); /* eslint-disable-next-line */ }, []);
+  const onlyJob = cid => { const cc = (data.customers || []).find(x => x.id === cid); const js = cc ? getStorageJobs(cc).filter(j => !j.dateOut) : []; return js.length === 1 ? js[0].id : ""; };
+  const pickCustomer = cid => { setCustomerId(cid); const sj = onlyJob(cid); setJobId(sj); applyStoreDay(cid, sj); };
+  const pickJob = sj => { setJobId(sj); if (!editRec) applyStoreDay(customerId, sj); };
+  useEffect(() => { if (presetCustomerId && !saved && !editRec) { const sj = presetJobId || onlyJob(presetCustomerId); if (sj && !jobId) setJobId(sj); applyStoreDay(presetCustomerId, sj); } /* eslint-disable-next-line */ }, []);
   const [conds, setConds] = useState(getConditions);
   const [newCond, setNewCond] = useState("");
   const [poss, setPoss] = useState(getPositions);
@@ -5813,8 +5819,8 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
         {customerId && (() => {
           const cc = (data.customers || []).find(x => x.id === customerId);
           const cjobs = cc ? getStorageJobs(cc) : [];
-          if (!cjobs.length) return <div style={{ fontSize: 12, color: "#B45309", background: "#FFFBF2", border: "1px solid #FBE3B3", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>No storage job yet — add one on the customer's page (Edit → Storage jobs). You can still save this inventory and link it later.</div>;
-          return <Field label="Storage job"><select value={jobId} onChange={e => setJobId(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
+          if (!cjobs.length) return <div style={{ fontSize: 12, color: "#B45309", background: "#FFFBF2", border: "1px solid #FBE3B3", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>No storage job yet. Once the move is Confirmed and booked in the calendar, add a storage job on the customer's page. You can still save this inventory and link it later.</div>;
+          return <Field label="Storage job"><select value={jobId} onChange={e => pickJob(e.target.value)} style={{ ...inp, appearance: "none", cursor: "pointer" }}>
             <option value="">Select storage job…</option>
             {cjobs.map(j => <option key={j.id} value={j.id}>{(j.location || "Job")}{j.value ? ` · £${Number(j.value).toLocaleString("en-GB")}` : ""}{j.dateOut ? " (out)" : ""}</option>)}
           </select></Field>;
@@ -6193,18 +6199,35 @@ function PartCollectionForm({ data, setView, recId }) {
   );
 }
 
+// Storage jobs can only be added against a CONFIRMED move that's booked in the calendar.
+const BOOKED_MOVE_STATUSES = ["Confirmed", "In Progress", "Completed"];
+function bookedMovesFor(data, customerId) {
+  // ...and the move must be a storage job: "Moving into store" ticked on the enquiry, or an "Into store" day in the move plan.
+  const isStorage = j => jobStages(j).some(st => /store/i.test(st.type || "")) || (data.enquiries || []).some(e => e.id === j.enquiryId && e.toStore);
+  return (data.jobs || []).filter(j => j.customerId === customerId && BOOKED_MOVE_STATUSES.includes(j.status) && jobStages(j).some(st => st.date) && isStorage(j));
+}
+// The day goods go into store: an "Into store" day if there is one, otherwise the first booked day.
+function storeDayOf(j) {
+  const st = jobStages(j).filter(x => x.date);
+  return st.find(x => /store/i.test(x.type || "")) || st.sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+}
 function StorageJobForm({ data, customer, job, onClose }) {
   const isNew = !job;
+  const moves = bookedMovesFor(data, customer.id);
+  const [moveJobId, setMoveJobId] = useState(() => (job ? job.moveJobId || "" : (moves[0] && moves[0].id) || ""));
+  const linkedMove = moves.find(m => m.id === moveJobId) || (data.jobs || []).find(m => m.id === moveJobId) || null;
+  const storeDay = linkedMove ? storeDayOf(linkedMove) : null;
   const [f, setF] = useState(() => job
     ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "" }
-    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: todayISO(), dateOut: "" });
+    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: (moves[0] && storeDayOf(moves[0]) && storeDayOf(moves[0]).date) || todayISO(), dateOut: "" });
   const [locs, setLocs] = useState(getStorageLocs);
   const [newLoc, setNewLoc] = useState("");
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const addLoc = () => { const v = newLoc.trim(); if (!v || locs.includes(v)) { setNewLoc(""); return; } const nx = [...locs, v]; setLocs(nx); saveStorageLocs(nx); set("location", v); setNewLoc(""); };
 
   async function save() {
-    const jrec = { id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", inStore: !f.dateOut };
+    if (isNew && !moveJobId) { alert("Pick the confirmed move this storage is for."); return; }
+    const jrec = { ...(job || {}), id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", inStore: !f.dateOut, moveJobId: moveJobId || "", crew: (storeDay && storeDay.crew) || (job && job.crew) || [] };
     const existing = getStorageJobs(customer).map(j => ({ ...j, id: j.id === "legacy" ? uid() : j.id }));
     const jobs = existing.some(j => j.id === jrec.id) ? existing.map(j => j.id === jrec.id ? jrec : j) : [...existing, jrec];
     await saveAndReload(upsertLocal(data, "customers", { ...customer, storageJobs: jobs, storage: null }));
@@ -6217,6 +6240,24 @@ function StorageJobForm({ data, customer, job, onClose }) {
 
   return (
     <Modal title={isNew ? "Add storage job" : "Edit storage job"} onClose={onClose}>
+      {isNew && !moves.length ? (
+        <div>
+          <div style={{ fontSize: 14, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 10, padding: "12px 14px", lineHeight: 1.5 }}>
+            <b>No confirmed storage move booked yet.</b><br />A storage job can only be added once {customer.name || "the customer"}'s job is:
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+              <li>booked as storage: <b>Moving into store</b> ticked on the enquiry, or an <b>Into store</b> day in the move plan</li>
+              <li><b>Confirmed</b> and booked in the calendar with a date</li>
+            </ul>
+          </div>
+          <Btn style={{ width: "100%", marginTop: 12 }} onClick={onClose}>OK</Btn>
+        </div>
+      ) : (<>
+      <Field label="Confirmed move" hint={storeDay ? `Into store ${fmtUK(storeDay.date)}${storeDay.crew && storeDay.crew.length ? " · " + storeDay.crew.join(", ") : ""}` : undefined}>
+        <select value={moveJobId} onChange={e => { const id = e.target.value; setMoveJobId(id); const m = moves.find(x => x.id === id); const d = m && storeDayOf(m); if (d && d.date) set("dateIn", d.date); }} style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}>
+          {!isNew && <option value="">Not linked to a move</option>}
+          {moves.map(m => { const d = storeDayOf(m); return <option key={m.id} value={m.id}>{moveRef(data, m)}{d ? ` · ${fmtUK(d.date)} · ${d.type || "Move"}` : ""}</option>; })}
+        </select>
+      </Field>
       <Field label="Location of storage"><Select value={f.location} onChange={v => set("location", v)} options={locs} /></Field>
       <div style={{ display: "flex", gap: 8, margin: "0 0 10px", alignItems: "flex-end" }}>
         <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
@@ -6233,6 +6274,7 @@ function StorageJobForm({ data, customer, job, onClose }) {
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
         <Btn style={{ flex: 2 }} onClick={save}>{isNew ? "Add job" : "Save"}</Btn>
       </div>
+      </>)}
     </Modal>
   );
 }
