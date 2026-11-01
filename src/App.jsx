@@ -3726,6 +3726,7 @@ function CustomerDetail({ data, id, setView }) {
   const [sheetBusy, setSheetBusy] = useState(false);
   async function openSheet(rec) {
     if (sheetBusy) return;
+    if (rec.amendedAt) { setSheetBusy(true); await openInventoryPdf(rec, c, data, "current"); setSheetBusy(false); return; }
     // Prefer the stored PDF — just open it to view (no re-save).
     const openUrl = url => showPdf(url, "Storage-sheet.pdf");
     if (rec.pdfUrl) { openUrl(rec.pdfUrl); return; }
@@ -3863,7 +3864,8 @@ function CustomerDetail({ data, id, setView }) {
               <div key={rec.id} style={{ marginBottom: 6 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <div style={{ fontSize: 12.5, color: "#374151" }}>Inventory {rec.date ? fmtUK(rec.date) : ""} · {(rec.containers || []).length} cont.</div>
-                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>{sheetBusy ? "…" : "PDF"}</span>
+                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>{sheetBusy ? "…" : rec.amendedAt ? "Current" : "PDF"}</span>
+                  {rec.amendedAt && <span onClick={async () => { if (sheetBusy) return; setSheetBusy(true); await openInventoryPdf(rec, c, data, "original"); setSheetBusy(false); }} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Original</span>}
                 </div>
                 {(rec.collections || []).slice().reverse().map(col => (
                   <div key={col.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, paddingLeft: 10 }}>
@@ -5580,6 +5582,7 @@ async function buildStorageIntakePdf(rec, c, data) {
   kv("Date", rec.date ? fmtUK(rec.date) : "-");
   kv("Location", rec.location || "-");
   kv("Crew", (rec.crew || []).join(", ") || "-");
+  if (rec.amendedAt) { ensure(30); y -= 2; at(`AMENDED COPY - last changed ${fmtUK(String(rec.amendedAt).slice(0, 10))}. The original signed inventory (with condition notes) is kept on file.`, M, y, 8.5, bold, rgb(0.71, 0.33, 0.04)); y -= 14; }
 
   (rec.containers || []).forEach(ct => {
     heading(`Container ${ct.number || "-"}`);
@@ -5794,6 +5797,25 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
     if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
     setBusy("save");
     const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, looseList: cleanLoose, looseItems: cleanLoose.length > 0, pdfUrl: (editRec && editRec.pdfUrl) || "", pdf: (editRec && editRec.pdf) || "", createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
+    // Keep the ORIGINAL inventory exactly as first signed (damage/condition notes included).
+    // Edits never overwrite it: they become the "current" sheet, and the original stays on file.
+    const snap = r => ({ date: r.date, location: r.location, crew: r.crew || [], containers: r.containers || [], looseList: r.looseList || [], looseItems: !!r.looseItems, custSig: r.custSig || "", empSig: r.empSig || "", empName: r.empName || "", savedAt: r.createdAt || new Date().toISOString() });
+    if (editRec) {
+      rec.original = editRec.original || snap(editRec);
+      rec.originalPdfUrl = editRec.originalPdfUrl || editRec.pdfUrl || "";
+      rec.amendedAt = new Date().toISOString();
+      rec.collections = editRec.collections || [];
+    } else {
+      rec.original = snap(rec);
+    }
+    // Also store a PDF copy of the original in the cloud (best effort — the saved copy above is the safety net).
+    if (!rec.originalPdfUrl) {
+      const to = ms => new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms));
+      try {
+        const { bytes } = await Promise.race([buildStorageIntakePdf({ ...rec.original, id: rec.id }, cust, data), to(12000)]);
+        rec.originalPdfUrl = await Promise.race([uploadStorageSheet(`${cust.id}/inventory-${rec.id}-original.pdf`, bytes), to(15000)]);
+      } catch (_e) { /* offline — the original can still be rebuilt from the saved copy */ }
+    }
     const list = editRec ? (cust.storageInv || []).map(r => r.id === rec.id ? rec : r) : [...(cust.storageInv || []), rec];
     const updated = { ...cust, storageInv: list };
     clearDraft();
@@ -5807,6 +5829,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       <button onClick={leave} style={{ display: "inline-flex", alignItems: "center", background: "#fff", border: "1.5px solid #D3DDDB", borderRadius: 11, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Back</button>
       <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{editRec ? "Edit storage inventory" : "New storage inventory"}</h2>
+      {editRec && <div style={{ fontSize: 12.5, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 8, padding: "8px 11px", marginBottom: 12 }}>The original signed inventory{editRec.original && editRec.original.savedAt ? ` from ${fmtUK(String(editRec.original.savedAt).slice(0, 10))}` : ""}, with its damage and condition notes, is kept on file. Your changes save as an amended copy.</div>}
 
       <Card>
         <Field label="Customer">
@@ -6066,6 +6089,19 @@ async function buildCollectionPdf(collection, rec, c, data, allColl) {
   return await pdf.save();
 }
 
+// Open the ORIGINAL inventory as first signed, or the CURRENT one if it's been edited since.
+async function openInventoryPdf(rec, c, data, which) {
+  try {
+    if (which === "original") {
+      if (rec.originalPdfUrl) return showPdf(rec.originalPdfUrl, "Storage-inventory-original.pdf");
+      const { bytes } = await buildStorageIntakePdf({ ...(rec.original || rec), id: rec.id, amendedAt: undefined }, c, data);
+      return showPdf(new Blob([bytes], { type: "application/pdf" }), "Storage-inventory-original.pdf");
+    }
+    const { bytes } = await buildStorageIntakePdf(rec, c, data);
+    return showPdf(new Blob([bytes], { type: "application/pdf" }), "Storage-inventory.pdf");
+  } catch (ex) { alert("Could not open the inventory: " + ((ex && ex.message) || ex)); }
+}
+
 function PartCollectionForm({ data, setView, recId }) {
   const cust = (data.customers || []).find(c => (c.storageInv || []).some(r => r.id === recId));
   const rec = cust ? (cust.storageInv || []).find(r => r.id === recId) : null;
@@ -6292,6 +6328,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
   const openUrl = url => showPdf(url, "Storage-sheet.pdf");
   async function openSheet(rec) {
     if (sheetBusy) return;
+    if (rec.amendedAt) { setSheetBusy(true); await openInventoryPdf(rec, c, data, "current"); setSheetBusy(false); return; }
     if (rec.pdfUrl) { openUrl(rec.pdfUrl); return; }
     if (rec.pdf) { try { const b = atob(rec.pdf.split(",")[1]); const arr = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i); const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" })); openUrl(url); setTimeout(() => URL.revokeObjectURL(url), 8000); return; } catch {} }
     setSheetBusy(true);
@@ -6341,11 +6378,13 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
                 <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer", flex: 1 }}>
                   <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
                   <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
+                  {rec.amendedAt && <div style={{ fontSize: 12, color: "#B45309", fontWeight: 700 }}>Amended {fmtUK(String(rec.amendedAt).slice(0, 10))} · original kept</div>}
                 </div>
                 <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
                   <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>
                   <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
-                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : "PDF"}</span>
+                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : rec.amendedAt ? "Current" : "PDF"}</span>
+                  {rec.amendedAt && <span onClick={async () => { if (sheetBusy) return; setSheetBusy(true); await openInventoryPdf(rec, c, data, "original"); setSheetBusy(false); }} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Original</span>}
                 </div>
               </div>
               {(rec.collections || []).length > 0 && (
