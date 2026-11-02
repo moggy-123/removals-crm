@@ -325,7 +325,7 @@ async function saveAndReload(data) {
   showSavingOverlay();
   SAVING_IN_PROGRESS = true;
   const stamped = stampData(data);
-  localStorage.setItem(DB_KEY, JSON.stringify(stamped));
+  setDB(JSON.stringify(stamped));
   try {
     await Promise.race([
       pushChangedOnly(stamped),
@@ -364,7 +364,19 @@ function addTombstone(id) {
   try {
     const t = JSON.parse(localStorage.getItem(TOMB_KEY) || "[]");
     if (!t.includes(id)) { t.push(id); localStorage.setItem(TOMB_KEY, JSON.stringify(t)); }
-  } catch {}
+  } catch (e) { storageFullWarning(e); }
+}
+// Write the app's data to this device. If the device's storage is full the write fails
+// silently in Safari — then deletes/edits "come back". Tell the user instead.
+let STORAGE_WARNED = false;
+function storageFullWarning(e) {
+  if (STORAGE_WARNED) return; STORAGE_WARNED = true;
+  let kb = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); kb += ((localStorage.getItem(k) || "").length + k.length) / 512; } } catch {}
+  setTimeout(() => alert(`This device couldn't save its copy of the app's data (${(e && e.name) || "storage error"}, about ${Math.round(kb)} KB used).\n\nChanges made here may not stick. Please tell Dave / the developer.`), 50);
+}
+function setDB(str) {
+  try { localStorage.setItem(DB_KEY, str); }
+  catch (e) { storageFullWarning(e); throw e; }
 }
 function getTombstones() {
   try { return JSON.parse(localStorage.getItem(TOMB_KEY) || "[]"); } catch { return []; }
@@ -377,6 +389,45 @@ async function deleteRecord(table, id) {
   const { data: left, error } = await supabase.from(table).select("id").eq("id", id);
   if (error) throw error;
   if (left && left.length) throw new Error(`The cloud did not allow deleting this ${table} record`);
+  if (!SKIP_DELLOG) await logCloudDeletes([id]);
+}
+// ── Shared "deleted" list in the cloud ──────────────────────────────────────
+// Each device used to remember its own deletions only. If another device (or the
+// iPad's Safari vs Home Screen copy) still had the record, it could put it back.
+// Now every delete is also written to app_config key 'deleted', and every device
+// reads that list when it syncs, so a deleted record stays deleted everywhere.
+let SKIP_DELLOG = false;
+const DELLOG_DAYS = 180;
+async function readCloudDeletes() {
+  const { data: row, error } = await supabase.from("app_config").select("value").eq("key", "deleted").maybeSingle();
+  if (error) throw error;
+  return (row && row.value && row.value.ids) || {};
+}
+async function logCloudDeletes(ids) {
+  try {
+    const cur = await readCloudDeletes().catch(() => ({}));
+    const now = Date.now(), cutoff = now - DELLOG_DAYS * 864e5;
+    const next = {};
+    Object.entries(cur).forEach(([k, t]) => { if (Number(t) > cutoff) next[k] = t; });
+    ids.forEach(id => { if (id) next[id] = now; });
+    await supabase.from("app_config").upsert({ key: "deleted", value: { ids: next }, updated_at: now }, { onConflict: "key" });
+  } catch { /* best effort — the local tombstone still applies on this device */ }
+}
+async function applyCloudDeletes() {
+  try {
+    const ids = Object.keys(await readCloudDeletes());
+    if (!ids.length) return;
+    const have = new Set(getTombstones());
+    const fresh = ids.filter(id => !have.has(id));
+    if (!fresh.length) return;
+    try { const t = getTombstones(); localStorage.setItem(TOMB_KEY, JSON.stringify([...t, ...fresh])); } catch {}
+    const dead = new Set(fresh);
+    const d = loadData();
+    let changed = false;
+    const next = { ...d };
+    ["customers", "enquiries", "jobs", "vehicles", "staff"].forEach(t => { const before = (d[t] || []).length; next[t] = (d[t] || []).filter(r => !dead.has(r.id)); if (next[t].length !== before) changed = true; });
+    if (changed) setDB(JSON.stringify(next));
+  } catch { /* offline or not set up yet */ }
 }
 // Deleted on this device but still in the cloud? Try again (runs on every successful sync).
 async function purgeTombstoned(cloud) {
@@ -423,13 +474,14 @@ async function applyRemoteWipe() {
     const keep = (t) => (d[t] || []).filter(r => { if (Object.prototype.hasOwnProperty.call(sigs, r.id)) { wiped.push(r.id); return false; } return true; });
     const next = { ...d, customers: keep("customers"), enquiries: keep("enquiries"), jobs: keep("jobs") };
     wiped.forEach(id => { delete sigs[id]; });
-    localStorage.setItem(DB_KEY, JSON.stringify(next));
+    setDB(JSON.stringify(next));
     localStorage.setItem(SIG_KEY, JSON.stringify(sigs));
     localStorage.setItem(WIPE_SEEN_KEY, at);
   } catch { /* offline or table missing — try again next sync */ }
 }
 async function pullCloud() {
   await applyRemoteWipe();
+  await applyCloudDeletes();
   return pullFromCloud();
 }
 
@@ -446,7 +498,7 @@ async function doPullSync(setData, setSyncStatus, opts) {
     const readOnly = (opts && opts.readOnly) || CURRENT_USER.role === "crew";
     if (!readOnly) purgeTombstoned(cloud).catch(() => {});
     const merged = mergeAll(cloud, loadData());
-    localStorage.setItem(DB_KEY, JSON.stringify(merged));
+    setDB(JSON.stringify(merged));
     if (!readOnly) pushChangedOnly(merged).catch(() => {});
     setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
     if (setSyncStatus) setSyncStatus("synced");
@@ -459,7 +511,9 @@ async function pushChangedOnly(data) {
   const newSigs = {};
   const changed = [];
   for (const name of TABLES) {
+    const deadIds = new Set(getTombstones());
     for (const rec of data[name] || []) {
+      if (deadIds.has(rec.id)) continue; // deleted — never upload it again
       const sig = dbSig(name, rec);
       if (sigs[rec.id] !== sig) changed.push({ name, rec, sig });
       else newSigs[rec.id] = sig;
@@ -489,7 +543,7 @@ function logComm(customerId, entry) {
     if (!cust) return;
     const comms = [...(cust.comms || []), { id: uid(), at: new Date().toISOString(), direction: "out", note: "", ...entry }];
     const d2 = upsertLocal(d, "customers", { ...cust, comms, updatedAt: Date.now() });
-    try { localStorage.setItem(DB_KEY, JSON.stringify(d2)); } catch {}
+    try { setDB(JSON.stringify(d2)); } catch {}
     pushChangedOnly(d2).catch(() => {});
   } catch {}
 }
@@ -755,7 +809,7 @@ function callAboutQuote(e, phone) {
     logComm(e.customerId, { type: "Call", note: "Quote follow-up call" });
     const d = loadData();
     const en = (d.enquiries || []).find(x => x.id === e.id);
-    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, quoteChasedAt: new Date().toISOString(), quoteChaseDate: "", updatedAt: Date.now() }); localStorage.setItem(DB_KEY, JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
+    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, quoteChasedAt: new Date().toISOString(), quoteChaseDate: "", updatedAt: Date.now() }); setDB(JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
   } catch {}
   if (phone) window.location.href = `tel:${phone}`;
 }
@@ -776,7 +830,7 @@ function callNewEnquiry(e, phone) {
     logComm(e.customerId, { type: "Call", note: "New enquiry call — book survey" });
     const d = loadData();
     const en = (d.enquiries || []).find(x => x.id === e.id);
-    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, newCalledAt: new Date().toISOString(), updatedAt: Date.now() }); localStorage.setItem(DB_KEY, JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
+    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, newCalledAt: new Date().toISOString(), updatedAt: Date.now() }); setDB(JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
   } catch {}
   if (phone) window.location.href = `tel:${phone}`;
 }
@@ -2010,7 +2064,7 @@ function InventoryModal({ data, enquiry, onClose }) {
         const rec2 = buildSurveyRec(false);
         const d = loadData();
         const d2 = upsertLocal(d, "enquiries", { ...rec2, updatedAt: Date.now() });
-        try { localStorage.setItem(DB_KEY, JSON.stringify(d2)); } catch {}
+        try { setDB(JSON.stringify(d2)); } catch {}
         pushChangedOnly(d2).catch(() => {});
         dirtyRef.current = false;
         setCloudAt(new Date());
@@ -2331,7 +2385,7 @@ function QuoteModal({ data, enquiry, onClose }) {
     const rec = buildRecord("Sent", todayISO());
     // local-first save, then open email
     const stamped = stampData(withMovePrice(upsertLocal(data, "enquiries", rec), rec));
-    localStorage.setItem(DB_KEY, JSON.stringify(stamped));
+    setDB(JSON.stringify(stamped));
     pushChangedOnly(stamped).catch(() => {});
     const body = encodeURIComponent(
       `Hi ${customer?.name || ""},\n\nThank you for your enquiry. Please find your removal quote below:\n\n` +
@@ -3139,7 +3193,7 @@ function MoveManageModal({ data, job, onClose }) {
     const enq = (d2.enquiries || []).find(x => x.id === job.enquiryId);
     if (enq) d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Quoted", quoteStatus: "Sent" });
     const stamped = stampData(d2);
-    localStorage.setItem(DB_KEY, JSON.stringify(stamped));
+    setDB(JSON.stringify(stamped));
     try { await pushChangedOnly(stamped); } catch {}
     SAVING_IN_PROGRESS = false;
     window.location.reload();
@@ -3259,7 +3313,7 @@ function EnquiryDetail({ data, id, setView }) {
       d0 = upsertLocal(d0, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
       showSavingOverlay(); SAVING_IN_PROGRESS = true;
       const s0 = stampData(d0);
-      localStorage.setItem(DB_KEY, JSON.stringify(s0));
+      setDB(JSON.stringify(s0));
       try { await pushChangedOnly(s0); } catch {}
       SAVING_IN_PROGRESS = false;
       try { sessionStorage.setItem("removals_open_plan", e.id); } catch {}
@@ -3288,7 +3342,7 @@ function EnquiryDetail({ data, id, setView }) {
     d2 = upsertLocal(d2, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
     showSavingOverlay(); SAVING_IN_PROGRESS = true;
     const stamped = stampData(d2);
-    localStorage.setItem(DB_KEY, JSON.stringify(stamped));
+    setDB(JSON.stringify(stamped));
     try { await pushChangedOnly(stamped); } catch {}
     SAVING_IN_PROGRESS = false;
     try { sessionStorage.setItem("removals_open_plan", e.id); } catch {}
@@ -3304,7 +3358,7 @@ function EnquiryDetail({ data, id, setView }) {
     showSavingOverlay(); SAVING_IN_PROGRESS = true;
     try { await deleteRecord("enquiries", e.id); } catch {}
     const d2 = { ...data, enquiries: (data.enquiries || []).filter(x => x.id !== e.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2));
+    setDB(JSON.stringify(d2));
     SAVING_IN_PROGRESS = false;
     setView({ screen: "enquiries" });
     window.location.reload();
@@ -3804,7 +3858,7 @@ function CustomerDetail({ data, id, setView }) {
     if (!confirm(`Delete ${c.name}?${customerDeleteSummary(data, c.id)} This can't be undone.`)) return;
     SAVING_IN_PROGRESS = true; showSavingOverlay();
     const d2 = await deleteCustomerFully(data, c.id);
-    localStorage.setItem(DB_KEY, JSON.stringify(d2));
+    setDB(JSON.stringify(d2));
     SAVING_IN_PROGRESS = false; setView({ screen: "customers" }); window.location.reload();
   }
   return (
@@ -4059,9 +4113,12 @@ async function wipeBusinessData(data) {
   const all = [];
   tables.forEach(t => (data[t] || []).forEach(r => { if (r && r.id) all.push([t, r.id]); }));
   all.forEach(([, id]) => addTombstone(id));
+  SKIP_DELLOG = true;
   for (const [t, id] of all) { try { await deleteRecord(t, id); } catch {} }
+  SKIP_DELLOG = false;
+  await logCloudDeletes(all.map(([, id]) => id));
   const cleared = { ...data, customers: [], enquiries: [], jobs: [] };
-  localStorage.setItem(DB_KEY, JSON.stringify(cleared));
+  setDB(JSON.stringify(cleared));
   try {
     const sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}");
     all.forEach(([, id]) => { delete sigs[id]; });
@@ -4129,7 +4186,7 @@ function SyncControl({ data, setData, compact }) {
     let merged;
     try {
       merged = mergeAll(await pullCloud(), loadData());
-      try { localStorage.setItem(DB_KEY, JSON.stringify(merged)); } catch {}
+      try { setDB(JSON.stringify(merged)); } catch {}
       if (setData) setData(merged);
     } catch (e) {
       setStatus("error"); setMsg("Couldn't reach the cloud: " + ((e && e.message) || e));
@@ -4181,7 +4238,7 @@ function OrphanCleanup({ data, setData }) {
     let d = loadData();
     for (const j of orphanJobs) { addTombstone(j.id); try { await deleteRecord("jobs", j.id); } catch {} d = { ...d, jobs: (d.jobs || []).filter(x => x.id !== j.id) }; }
     for (const e of orphanEnq) { addTombstone(e.id); try { await deleteRecord("enquiries", e.id); } catch {} d = { ...d, enquiries: (d.enquiries || []).filter(x => x.id !== e.id) }; }
-    try { localStorage.setItem(DB_KEY, JSON.stringify(d)); } catch {}
+    try { setDB(JSON.stringify(d)); } catch {}
     if (setData) setData(d);
     setBusy(false); setMsg(`Removed ${n} orphaned record${n !== 1 ? "s" : ""}.`);
   }
@@ -4468,7 +4525,7 @@ function VehicleForm({ data, onClose, editVehicle }) {
     addTombstone(v.id); SAVING_IN_PROGRESS = true; showSavingOverlay();
     try { await deleteRecord("vehicles", v.id); } catch (err) { alert("Removed from this device, but the cloud copy couldn't be deleted yet — the app will retry when it next syncs.\n\n" + ((err && err.message) || "")); }
     const d2 = { ...data, vehicles: (data.vehicles || []).filter(x => x.id !== v.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
+    setDB(JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
   }
 
   const DueRow = ({ label, last, onLast, due, days, onBook, extra }) => (
@@ -4550,7 +4607,7 @@ function StaffForm({ data, onClose, editStaff }) {
     addTombstone(s.id); SAVING_IN_PROGRESS = true; showSavingOverlay();
     try { await deleteRecord("staff", s.id); } catch (err) { alert("Removed from this device, but the cloud copy couldn't be deleted yet — the app will retry when it next syncs.\n\n" + ((err && err.message) || "")); }
     const d2 = { ...data, staff: (data.staff || []).filter(x => x.id !== s.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
+    setDB(JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
   }
   return (
     <Modal title={s.id ? "Edit Staff" : "Add Staff"} onClose={onClose}>
@@ -4746,7 +4803,7 @@ function JobDetail({ data, id, setView }) {
     SAVING_IN_PROGRESS = true; showSavingOverlay();
     try { await deleteRecord("jobs", j.id); } catch {}
     const d2 = { ...data, jobs: (data.jobs || []).filter(x => x.id !== j.id) };
-    localStorage.setItem(DB_KEY, JSON.stringify(d2));
+    setDB(JSON.stringify(d2));
     SAVING_IN_PROGRESS = false; setView({ screen: "enquiries", filter: "Won" }); window.location.reload();
   }
   const balance = (Number(f.price) || 0) - (Number(f.deposit) || 0);
@@ -6875,7 +6932,7 @@ function MainApp() {
         const cloud = await pullCloud();
         if (cancelled) return;
         const merged = autoCompletePastMoves(mergeAll(cloud, loadData()));
-        localStorage.setItem(DB_KEY, JSON.stringify(merged));
+        setDB(JSON.stringify(merged));
         setData(merged);
         pushChangedOnly(merged).catch(() => {});
         setSyncStatus("synced");
