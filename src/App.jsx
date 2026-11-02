@@ -2922,7 +2922,7 @@ function QuotePdfView({ data, id, setView }) {
   );
 }
 const VP_LOCKED = "width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no";
-const IS_IOS_APP = (() => { try { return /iPad|iPhone|iPod/.test(navigator.userAgent) && (window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches); } catch { return false; } })();
+const IS_IOS_APP = (() => { try { if (localStorage.getItem("removals_test_ios") === "1") return true; return /iPad|iPhone|iPod/.test(navigator.userAgent) && (window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches); } catch { return false; } })();
 // iOS sometimes comes back from its PDF viewer with the app zoomed in. Nudge the
 // viewport (slightly different scale, then back to 1) so Safari re-lays the page out.
 // Back to the original, gentle zoom reset (same as before 30 Oct): it never changes the
@@ -2936,20 +2936,86 @@ function resetZoom() {
   } catch (_e) { /* noop */ }
 }
 function resetZoomSoon() { setTimeout(resetZoom, 200); }
-// Show a PDF. In the Home Screen app on iPhone/iPad, use the share sheet (Save to Files,
-// Mail, Print…) instead of iOS's built-in PDF viewer, which is what messes up the zoom.
+// ── In-app PDF viewer (iPhone Home Screen app) ──────────────────────────────
+// iOS's own PDF viewer leaves the app zoomed in when you come back, so on the iPhone app
+// we show the PDF inside the app instead: scroll through the pages, zoom with the
+// buttons, and Share (save / print / mail) from there.
+async function loadPdfJs() {
+  if (window.pdfjsLib) return window.pdfjsLib;
+  const base = ["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/", "https://unpkg.com/pdfjs-dist@3.11.174/build/"];
+  for (const b of base) {
+    try {
+      await loadScript(b + "pdf.min.js");
+      if (window.pdfjsLib) { window.pdfjsLib.GlobalWorkerOptions.workerSrc = b + "pdf.worker.min.js"; return window.pdfjsLib; }
+    } catch (_e) { /* try next */ }
+  }
+  throw new Error("Could not load the PDF viewer");
+}
+async function openPdfViewer(blob, name) {
+  const pdfjs = await loadPdfJs();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+  const prevOverflow = document.body.style.overflow;
+  const wrap = document.createElement("div");
+  wrap.id = "rm-pdf-viewer";
+  wrap.style.cssText = "position:fixed;inset:0;z-index:10000;background:#525659;display:flex;flex-direction:column;font-family:Inter,system-ui,sans-serif;";
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;background:#0F2E2A;color:#fff;";
+  const btn = (label, primary) => { const b = document.createElement("button"); b.textContent = label; b.style.cssText = `border:none;border-radius:10px;padding:9px 13px;font-weight:700;font-size:14px;cursor:pointer;${primary ? "background:#14B8A6;color:#fff;" : "background:rgba(255,255,255,.14);color:#fff;"}`; return b; };
+  const close = btn("✕ Close"), minus = btn("−"), plus = btn("+"), share = btn("Share", true);
+  const title = document.createElement("div");
+  title.textContent = name.replace(/\.pdf$/i, "");
+  title.style.cssText = "flex:1;min-width:0;font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85;";
+  bar.append(close, title, minus, plus, share);
+  const scroller = document.createElement("div");
+  scroller.style.cssText = "flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:12px 0 calc(env(safe-area-inset-bottom, 0px) + 20px);";
+  const pages = document.createElement("div");
+  pages.style.cssText = "margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 10px;";
+  scroller.appendChild(pages);
+  wrap.append(bar, scroller);
+  document.body.appendChild(wrap);
+  document.body.style.overflow = "hidden";
+  let zoom = 1;
+  const applyZoom = () => { pages.style.width = `${zoom * 100}%`; pages.querySelectorAll("canvas").forEach(c => { c.style.width = "100%"; }); minus.disabled = zoom <= 1; minus.style.opacity = zoom <= 1 ? .4 : 1; plus.style.opacity = zoom >= 3 ? .4 : 1; };
+  minus.onclick = () => { zoom = Math.max(1, zoom - .5); applyZoom(); };
+  plus.onclick = () => { zoom = Math.min(3, zoom + .5); applyZoom(); };
+  close.onclick = () => { wrap.remove(); document.body.style.overflow = prevOverflow; };
+  share.onclick = async () => {
+    const file = new File([blob], name, { type: "application/pdf" });
+    try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; } } catch (_e) { return; }
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 8000);
+  };
+  applyZoom();
+  const cssW = Math.min(window.innerWidth - 20, 900);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2) * 1.5; // extra detail so zooming in stays sharp
+  for (let n = 1; n <= doc.numPages; n++) {
+    if (!document.body.contains(wrap)) break; // closed while still drawing
+    const page = await doc.getPage(n);
+    const vp1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: (cssW / vp1.width) * dpr });
+    const c = document.createElement("canvas");
+    c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+    c.style.cssText = "width:100%;height:auto;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.35);display:block;";
+    pages.appendChild(c);
+    await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+  }
+}
+// Show a PDF: inside the app on the iPhone Home Screen app, otherwise the device's usual way.
 async function showPdf(src, name = "document.pdf") {
-  try {
-    if (IS_IOS_APP && navigator.canShare) {
+  if (IS_IOS_APP) {
+    try {
       const blob = src instanceof Blob ? src : await (await fetch(src)).blob();
-      const file = src instanceof File ? src : new File([blob], name, { type: "application/pdf" });
-      if (navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ files: [file] }); } catch (_e) {}
-        resetZoomSoon();
-        return;
-      }
+      await openPdfViewer(blob, (src instanceof File && src.name) || name);
+      return;
+    } catch (_e) {
+      document.getElementById("rm-pdf-viewer")?.remove(); document.body.style.overflow = "";
+      /* viewer couldn't load (no signal?) — fall back to the share menu */
+      try {
+        const blob = src instanceof Blob ? src : await (await fetch(src)).blob();
+        const file = src instanceof File ? src : new File([blob], name, { type: "application/pdf" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch (_e2) {} return; }
+      } catch (_e3) { /* open it the normal way */ }
     }
-  } catch (_e) { /* fall back to opening it */ }
+  }
   const url = src instanceof Blob ? URL.createObjectURL(src) : src;
   const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener";
   if (src instanceof File) a.download = src.name;
