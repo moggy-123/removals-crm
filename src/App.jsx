@@ -249,6 +249,8 @@ function bookingDates(b) {
   while (out.length < n && guard++ < 60) { if (isWeekday(d)) out.push(d); d = isoAdd(d, { days: 1 }); }
   return out;
 }
+// "Tue 15/12", or "Fri 29/10/27" when it's not this year
+const shortDay = iso => { const y = String(new Date().getFullYear()); return `${dow(iso)} ${iso.slice(0, 4) === y ? fmtUK(iso).slice(0, 5) : fmtUK(iso).slice(0, 6) + iso.slice(2, 4)}`; };
 const bookingEnd = b => { const ds = bookingDates(b); return ds[ds.length - 1] || (b && b.start) || ""; };
 const inBooking = (b, iso) => bookingDates(b).includes(iso);
 // MOT: you enter the test day; the garage has the vehicle the working days before it.
@@ -274,15 +276,17 @@ function autoMaint(m0, today) {
   if (!m0) return m0;
   let m = { ...m0, bookings: Array.isArray(m0.bookings) ? [...m0.bookings] : [] };
   let changed = false;
-  // 1. passed bookings → done
+  // 1. passed bookings → done (each booking only once, so a Last done you type in yourself sticks)
   for (const [type, key] of MAINT_TYPES) {
-    for (const b of m.bookings) {
-      if (b.type !== type) continue;
+    m.bookings = m.bookings.map(b => {
+      if (b.type !== type || b.done) return b;
       const end = bookingEnd(b);
-      if (!end || end >= today) continue;
+      if (!end || end >= today) return b;
       const done = type === "MOT" ? (b.motDate || end) : b.start;
-      if (!m[key] || m[key] < done) { m[key] = done; changed = true; }
-    }
+      if (!m[key] || m[key] < done) m[key] = done;
+      changed = true;
+      return { ...b, done: true };
+    });
   }
   // tidy: forget bookings that finished more than 90 days ago
   const old = isoAdd(today, { days: -90 });
@@ -4712,7 +4716,7 @@ function VehicleForm({ data, onClose, editVehicle }) {
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 8 }}>
         <div style={{ fontSize: 12.5, color: !due ? "#9CA3AF" : (!next && due < today) ? "#B91C1C" : "#0F766E" }}>
-          {!due ? "Set last done and it books itself" : next ? <>Booked: <b>{bookingDates(next).map(d => `${dow(d)} ${fmtUK(d).slice(0, 5)}`).join(", ")}</b>{next.auto ? " (auto)" : ""}</> : due < today ? <>Overdue since <b>{fmtUK(due)}</b></> : <>Next due: <b>{fmtUK(due)} ({dow(due)})</b></>}
+          {!due ? "Set last done and it books itself" : next ? <>Booked: <b>{bookingDates(next).map(shortDay).join(", ")}</b>{next.auto ? " (auto)" : ""}</> : due < today ? <>Overdue since <b>{fmtUK(due)}</b></> : <>Next due: <b>{fmtUK(due)} ({dow(due)})</b></>}
         </div>
         {due && !next && <Btn size="sm" variant="grey" onClick={() => onBook(due, days)}>Book {days} day{days !== 1 ? "s" : ""} out</Btn>}
       </div>
@@ -4742,7 +4746,7 @@ function VehicleForm({ data, onClose, editVehicle }) {
             {m.bookings.filter(b => bookingEnd(b) >= todayISO()).sort((a, b) => (a.start || "").localeCompare(b.start || "")).map(b => (
               <div key={b.id} style={{ padding: "8px 0", borderBottom: "1px solid #F0F4F3" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#10211E" }}>{b.type} <span style={{ color: "#6A7B77", fontWeight: 600 }}>· {bookingDates(b).map(d => `${dow(d)} ${fmtUK(d).slice(0, 5)}`).join(", ")}{b.type === "MOT" ? ` (test ${dow(b.motDate || bookingEnd(b))})` : ""}</span></div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#10211E" }}>{b.type} <span style={{ color: "#6A7B77", fontWeight: 600 }}>· {bookingDates(b).map(shortDay).join(", ")}{b.type === "MOT" ? ` (test ${dow(b.motDate || bookingEnd(b))})` : ""}</span></div>
                   <button onClick={() => unbook(b.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
