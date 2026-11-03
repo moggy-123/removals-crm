@@ -257,6 +257,59 @@ function motBooking(motDate, days, id) {
   const n = Math.max(1, Number(days) || 1);
   return { id: id || uid(), type: "MOT", motDate: test, start: workdayAdd(test, -(n - 1)), days: n };
 }
+// ── Automatic servicing / MOT / tacho bookings ─────────────────────────────
+// 1. When a booked date has passed, it counts as done (Last done moves on).
+// 2. The next one is booked automatically from Last done + interval:
+//    Service → nearest Tuesday · MOT → test day + prep days before · Tacho → weekday.
+// Bookings you change by hand are left alone; removing an automatic one skips that cycle.
+const MAINT_TYPES = [["Service", "serviceLast"], ["MOT", "motLast"], ["Tacho", "tachoLast"]];
+function maintDue(m, type) { return type === "Service" ? nextService(m) : type === "MOT" ? nextMOT(m) : nextTacho(m); }
+function maintPlanned(m, type, base) {
+  if (!base) return null;
+  if (type === "MOT") { const b = motBooking(base, m.motDays || 1, "x"); return { start: b.start, days: b.days, motDate: b.motDate, key: b.motDate }; }
+  const start = type === "Service" ? nearestDow(base, 2) : nextWeekday(base);
+  return { start, days: 1, key: start };
+}
+function autoMaint(m0, today) {
+  if (!m0) return m0;
+  let m = { ...m0, bookings: Array.isArray(m0.bookings) ? [...m0.bookings] : [] };
+  let changed = false;
+  // 1. passed bookings → done
+  for (const [type, key] of MAINT_TYPES) {
+    for (const b of m.bookings) {
+      if (b.type !== type) continue;
+      const end = bookingEnd(b);
+      if (!end || end >= today) continue;
+      const done = type === "MOT" ? (b.motDate || end) : b.start;
+      if (!m[key] || m[key] < done) { m[key] = done; changed = true; }
+    }
+  }
+  // tidy: forget bookings that finished more than 90 days ago
+  const old = isoAdd(today, { days: -90 });
+  const kept = m.bookings.filter(b => bookingEnd(b) >= old);
+  if (kept.length !== m.bookings.length) { m.bookings = kept; changed = true; }
+  // 2. make sure the next one is booked
+  const skipped = Array.isArray(m.skipped) ? m.skipped : [];
+  for (const [type] of MAINT_TYPES) {
+    const due = maintDue(m, type);
+    const want = maintPlanned(m, type, due);
+    const upcoming = m.bookings.filter(b => b.type === type && bookingEnd(b) >= today);
+    const stale = upcoming.filter(b => b.auto && (!want || (type === "MOT" ? b.motDate : b.start) !== want.key || Number(b.days) !== Number(want.days)));
+    if (stale.length) { const ids = new Set(stale.map(b => b.id)); m.bookings = m.bookings.filter(b => !ids.has(b.id)); changed = true; }
+    if (!want) continue;
+    const still = m.bookings.some(b => b.type === type && bookingEnd(b) >= today);
+    if (still || skipped.includes(type + "|" + due)) continue;
+    const nb = { id: `auto-${type}-${want.key}`, type, start: want.start, days: want.days, auto: true };
+    if (want.motDate) nb.motDate = want.motDate;
+    if (bookingEnd(nb) < today) continue; // overdue — shown as overdue instead of booking in the past
+    m.bookings = [...m.bookings, nb]; changed = true;
+  }
+  return changed ? m : m0;
+}
+function applyAutoMaint(vehicles) {
+  const today = todayISO();
+  return (vehicles || []).map(v => { if (!v || !v.maint) return v; const nm = autoMaint(v.maint, today); return nm === v.maint ? v : { ...v, maint: nm, updatedAt: Date.now() }; });
+}
 // Is a vehicle booked out for maintenance on a given date?
 function vehOutOn(v, dateISO) {
   const b = (v && v.maint && v.maint.bookings) || [];
@@ -325,7 +378,7 @@ function quoteTotal(lines, vat) {
 function loadData() {
   try {
     const raw = localStorage.getItem(DB_KEY);
-    if (raw) return { ...EMPTY, ...JSON.parse(raw) };
+    if (raw) { const d = { ...EMPTY, ...JSON.parse(raw) }; d.vehicles = applyAutoMaint(d.vehicles); return d; }
   } catch {}
   return { ...EMPTY };
 }
@@ -4602,11 +4655,14 @@ function VehicleForm({ data, onClose, editVehicle }) {
   const [f, setF] = useState({ reg: v.reg || "", vtype: v.vtype || "", capacityCuFt: v.capacityCuFt || "" });
   const defWeeks = vt => /18/.test(vt) ? "6" : /3\.?5/.test(vt) ? "26" : "";
   const m0 = v.maint || {};
-  const [m, setM] = useState({ serviceWeeks: m0.serviceWeeks ?? defWeeks(v.vtype || ""), serviceLast: m0.serviceLast || "", motLast: m0.motLast || "", motDays: m0.motDays ?? (/18/.test(v.vtype || "") ? 3 : 1), tachoLast: m0.tachoLast || "", bookings: Array.isArray(m0.bookings) ? m0.bookings : [] });
+  const [m, setM] = useState({ serviceWeeks: m0.serviceWeeks ?? defWeeks(v.vtype || ""), serviceLast: m0.serviceLast || "", motLast: m0.motLast || "", motDays: m0.motDays ?? (/18/.test(v.vtype || "") ? 3 : 1), tachoLast: m0.tachoLast || "", bookings: Array.isArray(m0.bookings) ? m0.bookings : [], skipped: Array.isArray(m0.skipped) ? m0.skipped : [] });
+  // Keep the automatic bookings in step as Last done / intervals change.
+  useEffect(() => { setM(p => autoMaint(p, todayISO())); }, [m.serviceLast, m.serviceWeeks, m.motLast, m.motDays, m.tachoLast]);
   const set = (k, val) => setF(p => ({ ...p, [k]: val }));
   const setMv = (k, val) => setM(p => ({ ...p, [k]: val }));
-  const book = (type, start, days) => {
-    if (!start) { alert("Set the last-done date first so a due date can be worked out."); return; }
+  const book = (type, start0, days) => {
+    if (!start0) { alert("Set the last-done date first so a due date can be worked out."); return; }
+    const start = start0 < todayISO() ? (type === "MOT" ? workdayAdd(nextWeekday(todayISO()), Math.max(1, Number(days) || 1) - 1) : todayISO()) : start0; // overdue: book from today
     if (type === "MOT") { const nb = motBooking(start, days); setM(p => ({ ...p, bookings: [...p.bookings.filter(b => !(b.type === "MOT" && (b.motDate || bookingEnd(b)) === nb.motDate)), nb] })); return; }
     const snapped = type === "Service" ? nearestDow(start, 2) : nextWeekday(start);
     setM(p => ({ ...p, bookings: [...p.bookings.filter(b => !(b.type === type && b.start === snapped)), { id: uid(), type, start: snapped, days: Math.max(1, Number(days) || 1) }] }));
@@ -4615,19 +4671,24 @@ function VehicleForm({ data, onClose, editVehicle }) {
     if (b.id !== id) return b;
     if (b.type === "MOT" && (k === "motDate" || k === "days")) {
       const test = k === "motDate" ? val : (b.motDate || bookingEnd(b));
-      if (!test) return { ...b, [k]: val };
-      return motBooking(test, k === "days" ? val : b.days, b.id);
+      if (!test) return { ...b, [k]: val, auto: false };
+      return { ...motBooking(test, k === "days" ? val : b.days, b.id), auto: false };
     }
-    return { ...b, [k]: k === "days" ? Math.max(1, Number(val) || 1) : val };
+    return { ...b, [k]: k === "days" ? Math.max(1, Number(val) || 1) : val, auto: false };
   }) }));
-  const unbook = id => setM(p => ({ ...p, bookings: p.bookings.filter(b => b.id !== id) }));
+  const unbook = id => setM(p => {
+    const b = p.bookings.find(x => x.id === id);
+    const due = b ? maintDue(p, b.type) : "";
+    const skipped = b && b.auto && due ? [...(p.skipped || []).filter(k => !k.startsWith(b.type + "|")), b.type + "|" + due] : (p.skipped || []);
+    return { ...p, bookings: p.bookings.filter(x => x.id !== id), skipped };
+  });
   const nS = nextService(m), nM = nextMOT(m), nT = nextTacho(m);
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
 
   async function save() {
     if (!f.reg.trim() && !f.vtype) { alert("Add a registration or a type so you can tell vehicles apart."); return; }
     const label = [f.vtype, f.reg.trim()].filter(Boolean).join(" · ") || "Vehicle";
-    const maint = { serviceWeeks: Number(m.serviceWeeks) || 0, serviceLast: m.serviceLast || "", motLast: m.motLast || "", motDays: Number(m.motDays) || 1, tachoLast: m.tachoLast || "", bookings: m.bookings || [] };
+    const maint = autoMaint({ serviceWeeks: Number(m.serviceWeeks) || 0, serviceLast: m.serviceLast || "", motLast: m.motLast || "", motDays: Number(m.motDays) || 1, tachoLast: m.tachoLast || "", bookings: m.bookings || [], skipped: m.skipped || [] }, todayISO());
     const rec = { id: v.id || uid(), name: label, reg: f.reg.trim(), vtype: f.vtype, capacityCuFt: Number(f.capacityCuFt) || 0, maint, createdAt: v.createdAt || new Date().toISOString() };
     await saveAndReload(upsertLocal(data, "vehicles", rec));
   }
@@ -4639,7 +4700,10 @@ function VehicleForm({ data, onClose, editVehicle }) {
     setDB(JSON.stringify(d2)); SAVING_IN_PROGRESS = false; window.location.reload();
   }
 
-  const DueRow = ({ label, last, onLast, due, days, onBook, extra }) => (
+  const DueRow = ({ label, type, last, onLast, due, days, onBook, extra }) => {
+    const today = todayISO();
+    const next = (m.bookings || []).filter(b => b.type === type && bookingEnd(b) >= today).sort((a, b) => a.start.localeCompare(b.start))[0];
+    return (
     <div style={{ borderTop: "1px solid #EEF3F2", paddingTop: 10, marginTop: 10 }}>
       <div style={{ fontWeight: 700, fontSize: 13.5, color: "#10211E", marginBottom: 6 }}>{label}</div>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -4647,11 +4711,14 @@ function VehicleForm({ data, onClose, editVehicle }) {
         {extra}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 8 }}>
-        <div style={{ fontSize: 12.5, color: due ? "#0F766E" : "#9CA3AF" }}>{due ? <>Next due: <b>{fmtUK(due)} ({dow(due)})</b></> : "Set last done to see due date"}</div>
-        {due && <Btn size="sm" variant="grey" onClick={() => onBook(due, days)}>Book {days} day{days !== 1 ? "s" : ""} out</Btn>}
+        <div style={{ fontSize: 12.5, color: !due ? "#9CA3AF" : (!next && due < today) ? "#B91C1C" : "#0F766E" }}>
+          {!due ? "Set last done and it books itself" : next ? <>Booked: <b>{bookingDates(next).map(d => `${dow(d)} ${fmtUK(d).slice(0, 5)}`).join(", ")}</b>{next.auto ? " (auto)" : ""}</> : due < today ? <>Overdue since <b>{fmtUK(due)}</b></> : <>Next due: <b>{fmtUK(due)} ({dow(due)})</b></>}
+        </div>
+        {due && !next && <Btn size="sm" variant="grey" onClick={() => onBook(due, days)}>Book {days} day{days !== 1 ? "s" : ""} out</Btn>}
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <Modal title={v.id ? "Edit Vehicle" : "Add Vehicle"} onClose={onClose}>
@@ -4661,18 +4728,18 @@ function VehicleForm({ data, onClose, editVehicle }) {
 
       <div style={{ marginTop: 10, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", marginBottom: 4 }}>Servicing & maintenance</div>
-        <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 6 }}>Booking a date marks the vehicle unavailable for those days.</div>
+        <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 6 }}>Set the Last done dates and the next service, MOT and tacho book themselves. Once a booked date has passed it counts as done and the next one is booked. Change a date if the garage gives you a different one.</div>
 
         <Field label="Service interval (weeks)" hint="e.g. 18t = 6, 3.5t = 26"><Input type="number" value={m.serviceWeeks} onChange={x => setMv("serviceWeeks", x)} placeholder="weeks" /></Field>
-        {DueRow({ label: "Service — Tuesdays", last: m.serviceLast, onLast: x => setMv("serviceLast", x), due: nS, days: 1, onBook: (due, days) => book("Service", due, days) })}
-        {DueRow({ label: `MOT — garage has it ${Math.max(0, (Number(m.motDays) || 1) - 1)} working day${(Number(m.motDays) || 1) - 1 === 1 ? "" : "s"} before the test (weekdays only)`, last: m.motLast, onLast: x => setMv("motLast", x), due: nM, days: Number(m.motDays) || 1, onBook: (due, days) => book("MOT", due, days),
+        {DueRow({ type: "Service", label: "Service — Tuesdays", last: m.serviceLast, onLast: x => setMv("serviceLast", x), due: nS, days: 1, onBook: (due, days) => book("Service", due, days) })}
+        {DueRow({ type: "MOT", label: `MOT — garage has it ${Math.max(0, (Number(m.motDays) || 1) - 1)} working day${(Number(m.motDays) || 1) - 1 === 1 ? "" : "s"} before the test (weekdays only)`, last: m.motLast, onLast: x => setMv("motLast", x), due: nM, days: Number(m.motDays) || 1, onBook: (due, days) => book("MOT", due, days),
           extra: <div style={{ width: 92 }}><div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 3 }}>Days out</div><input type="number" value={m.motDays} onChange={e => setMv("motDays", e.target.value)} style={inp} /></div> })}
-        {DueRow({ label: "Tacho — weekdays (every 2 years)", last: m.tachoLast, onLast: x => setMv("tachoLast", x), due: nT, days: 1, onBook: (due, days) => book("Tacho", due, days) })}
+        {DueRow({ type: "Tacho", label: "Tacho — weekdays (every 2 years)", last: m.tachoLast, onLast: x => setMv("tachoLast", x), due: nT, days: 1, onBook: (due, days) => book("Tacho", due, days) })}
 
-        {m.bookings.length > 0 && (
+        {m.bookings.some(b => bookingEnd(b) >= todayISO()) && (
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 6 }}>Booked out</div>
-            {m.bookings.slice().sort((a, b) => (a.start || "").localeCompare(b.start || "")).map(b => (
+            {m.bookings.filter(b => bookingEnd(b) >= todayISO()).sort((a, b) => (a.start || "").localeCompare(b.start || "")).map(b => (
               <div key={b.id} style={{ padding: "8px 0", borderBottom: "1px solid #F0F4F3" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#10211E" }}>{b.type} <span style={{ color: "#6A7B77", fontWeight: 600 }}>· {bookingDates(b).map(d => `${dow(d)} ${fmtUK(d).slice(0, 5)}`).join(", ")}{b.type === "MOT" ? ` (test ${dow(b.motDate || bookingEnd(b))})` : ""}</span></div>
@@ -5516,7 +5583,7 @@ function mergeAll(cloud, local) {
     customers: mergeArrays(cloud.customers, local.customers || [], deleted, goneElsewhere),
     enquiries: mergeArrays(cloud.enquiries, local.enquiries || [], deleted, goneElsewhere),
     jobs: mergeArrays(cloud.jobs, local.jobs || [], deleted, goneElsewhere),
-    vehicles: mergeArrays(cloud.vehicles, local.vehicles || [], deleted, goneElsewhere),
+    vehicles: applyAutoMaint(mergeArrays(cloud.vehicles, local.vehicles || [], deleted, goneElsewhere)),
     staff: mergeArrays(cloud.staff, local.staff || [], deleted, goneElsewhere),
   };
 }
