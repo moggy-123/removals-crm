@@ -225,10 +225,42 @@ function nextWeekday(iso) {
   if (g === 6) return isoAdd(iso, { days: 2 });
   return iso;
 }
+// Previous weekday (Sat/Sun → Friday).
+function prevWeekday(iso) {
+  const d = new Date(iso + "T00:00"); if (isNaN(d)) return iso;
+  const g = d.getDay();
+  if (g === 0) return isoAdd(iso, { days: -2 });
+  if (g === 6) return isoAdd(iso, { days: -1 });
+  return iso;
+}
+const isWeekday = iso => { const g = new Date(iso + "T00:00").getDay(); return g !== 0 && g !== 6; };
+// Move n working days (Mon–Fri) forward, or back if n is negative.
+function workdayAdd(iso, n) {
+  let d = iso, left = Math.abs(n); const step = n < 0 ? -1 : 1;
+  while (left > 0) { d = isoAdd(d, { days: step }); if (isWeekday(d)) left--; }
+  return d;
+}
+// Vehicle bookings (service / MOT / tacho) only cover WORKING days: a 3-day MOT that
+// starts on Thursday is Thu, Fri and the following Mon.
+function bookingDates(b) {
+  if (!b || !b.start) return [];
+  const n = Math.max(1, Number(b.days) || 1);
+  const out = []; let d = b.start, guard = 0;
+  while (out.length < n && guard++ < 60) { if (isWeekday(d)) out.push(d); d = isoAdd(d, { days: 1 }); }
+  return out;
+}
+const bookingEnd = b => { const ds = bookingDates(b); return ds[ds.length - 1] || (b && b.start) || ""; };
+const inBooking = (b, iso) => bookingDates(b).includes(iso);
+// MOT: you enter the test day; the garage has the vehicle the working days before it.
+function motBooking(motDate, days, id) {
+  const test = prevWeekday(motDate);
+  const n = Math.max(1, Number(days) || 1);
+  return { id: id || uid(), type: "MOT", motDate: test, start: workdayAdd(test, -(n - 1)), days: n };
+}
 // Is a vehicle booked out for maintenance on a given date?
 function vehOutOn(v, dateISO) {
   const b = (v && v.maint && v.maint.bookings) || [];
-  return b.some(x => { if (!x.start) return false; const end = isoAdd(x.start, { days: Math.max(1, Number(x.days) || 1) - 1 }); return dateISO >= x.start && dateISO <= end; });
+  return b.some(x => inBooking(x, dateISO));
 }
 function staffOffOn(s, dateISO) {
   const b = (s && s.away) || [];
@@ -917,7 +949,7 @@ function Dashboard({ data, setView, setData }) {
   const bookedVehToday = new Set(todayStages.flatMap(st => st.vehicleIds || []));
   const todaysMovesList = todaysMoves.map(j => ({ j, st: jobStages(j).find(s => s.date === todayIso) || {} }));
   const jobLatestDate = j => { const ds = jobStages(j).map(s => s.date).filter(Boolean); return ds.length ? ds.slice().sort().slice(-1)[0] : (j.moveDate || ""); };
-  const upcomingServicing = (data.vehicles || []).flatMap(v => ((v.maint && v.maint.bookings) || []).map(b => ({ v, b }))).filter(({ b }) => b.start && isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }) >= todayIso).sort((a, c) => (a.b.start || "").localeCompare(c.b.start || ""));
+  const upcomingServicing = (data.vehicles || []).flatMap(v => ((v.maint && v.maint.bookings) || []).map(b => ({ v, b }))).filter(({ b }) => b.start && bookingEnd(b) >= todayIso).sort((a, c) => (a.b.start || "").localeCompare(c.b.start || ""));
   const _dNow = new Date();
   const _thisYM = `${_dNow.getFullYear()}-${String(_dNow.getMonth() + 1).padStart(2, "0")}`;
   const _nd = new Date(_dNow.getFullYear(), _dNow.getMonth() + 1, 1);
@@ -1177,7 +1209,7 @@ function Dashboard({ data, setView, setData }) {
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>{b.type}{b.days > 1 ? ` · ${b.days} days` : ""}</div>
                     <div style={{ fontWeight: 700, color: "#10211E" }}>{v.name}</div>
-                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(b.start)} ({dow(b.start)})</div>
+                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(b.start)} ({dow(b.start)}){b.days > 1 ? ` – ${fmtDate(bookingEnd(b))} (${dow(bookingEnd(b))})` : ""}{b.motDate ? ` · MOT ${dow(b.motDate)}` : ""}</div>
                   </div>
                 </div>
               </Card>
@@ -4573,8 +4605,21 @@ function VehicleForm({ data, onClose, editVehicle }) {
   const [m, setM] = useState({ serviceWeeks: m0.serviceWeeks ?? defWeeks(v.vtype || ""), serviceLast: m0.serviceLast || "", motLast: m0.motLast || "", motDays: m0.motDays ?? (/18/.test(v.vtype || "") ? 3 : 1), tachoLast: m0.tachoLast || "", bookings: Array.isArray(m0.bookings) ? m0.bookings : [] });
   const set = (k, val) => setF(p => ({ ...p, [k]: val }));
   const setMv = (k, val) => setM(p => ({ ...p, [k]: val }));
-  const book = (type, start, days) => { if (!start) { alert("Set the last-done date first so a due date can be worked out."); return; } const snapped = type === "Service" ? nearestDow(start, 2) : type === "MOT" ? nearestDow(start, 1) : nextWeekday(start); setM(p => ({ ...p, bookings: [...p.bookings.filter(b => !(b.type === type && b.start === snapped)), { id: uid(), type, start: snapped, days: Math.max(1, Number(days) || 1) }] })); };
-  const editBooking = (id, k, val) => setM(p => ({ ...p, bookings: p.bookings.map(b => b.id === id ? { ...b, [k]: k === "days" ? Math.max(1, Number(val) || 1) : val } : b) }));
+  const book = (type, start, days) => {
+    if (!start) { alert("Set the last-done date first so a due date can be worked out."); return; }
+    if (type === "MOT") { const nb = motBooking(start, days); setM(p => ({ ...p, bookings: [...p.bookings.filter(b => !(b.type === "MOT" && (b.motDate || bookingEnd(b)) === nb.motDate)), nb] })); return; }
+    const snapped = type === "Service" ? nearestDow(start, 2) : nextWeekday(start);
+    setM(p => ({ ...p, bookings: [...p.bookings.filter(b => !(b.type === type && b.start === snapped)), { id: uid(), type, start: snapped, days: Math.max(1, Number(days) || 1) }] }));
+  };
+  const editBooking = (id, k, val) => setM(p => ({ ...p, bookings: p.bookings.map(b => {
+    if (b.id !== id) return b;
+    if (b.type === "MOT" && (k === "motDate" || k === "days")) {
+      const test = k === "motDate" ? val : (b.motDate || bookingEnd(b));
+      if (!test) return { ...b, [k]: val };
+      return motBooking(test, k === "days" ? val : b.days, b.id);
+    }
+    return { ...b, [k]: k === "days" ? Math.max(1, Number(val) || 1) : val };
+  }) }));
   const unbook = id => setM(p => ({ ...p, bookings: p.bookings.filter(b => b.id !== id) }));
   const nS = nextService(m), nM = nextMOT(m), nT = nextTacho(m);
   const inp = { width: "100%", padding: "9px 10px", border: "1px solid #D9E2E0", borderRadius: 9, fontSize: 14, boxSizing: "border-box", background: "#fff" };
@@ -4620,7 +4665,7 @@ function VehicleForm({ data, onClose, editVehicle }) {
 
         <Field label="Service interval (weeks)" hint="e.g. 18t = 6, 3.5t = 26"><Input type="number" value={m.serviceWeeks} onChange={x => setMv("serviceWeeks", x)} placeholder="weeks" /></Field>
         {DueRow({ label: "Service — Tuesdays", last: m.serviceLast, onLast: x => setMv("serviceLast", x), due: nS, days: 1, onBook: (due, days) => book("Service", due, days) })}
-        {DueRow({ label: "MOT — Mon to Wed", last: m.motLast, onLast: x => setMv("motLast", x), due: nM, days: Number(m.motDays) || 1, onBook: (due, days) => book("MOT", due, days),
+        {DueRow({ label: `MOT — garage has it ${Math.max(0, (Number(m.motDays) || 1) - 1)} working day${(Number(m.motDays) || 1) - 1 === 1 ? "" : "s"} before the test (weekdays only)`, last: m.motLast, onLast: x => setMv("motLast", x), due: nM, days: Number(m.motDays) || 1, onBook: (due, days) => book("MOT", due, days),
           extra: <div style={{ width: 92 }}><div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 3 }}>Days out</div><input type="number" value={m.motDays} onChange={e => setMv("motDays", e.target.value)} style={inp} /></div> })}
         {DueRow({ label: "Tacho — weekdays (every 2 years)", last: m.tachoLast, onLast: x => setMv("tachoLast", x), due: nT, days: 1, onBook: (due, days) => book("Tacho", due, days) })}
 
@@ -4630,11 +4675,13 @@ function VehicleForm({ data, onClose, editVehicle }) {
             {m.bookings.slice().sort((a, b) => (a.start || "").localeCompare(b.start || "")).map(b => (
               <div key={b.id} style={{ padding: "8px 0", borderBottom: "1px solid #F0F4F3" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#10211E" }}>{b.type} <span style={{ color: "#6A7B77", fontWeight: 600 }}>· {dow(b.start)}{b.days > 1 ? ` – ${dow(isoAdd(b.start, { days: b.days - 1 }))}` : ""}</span></div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#10211E" }}>{b.type} <span style={{ color: "#6A7B77", fontWeight: 600 }}>· {bookingDates(b).map(d => `${dow(d)} ${fmtUK(d).slice(0, 5)}`).join(", ")}{b.type === "MOT" ? ` (test ${dow(b.motDate || bookingEnd(b))})` : ""}</span></div>
                   <button onClick={() => unbook(b.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#94A4A0", marginBottom: 3 }}>Date</div><input type="date" value={b.start} onChange={e => editBooking(b.id, "start", e.target.value)} style={inp} /></div>
+                  {b.type === "MOT"
+                    ? <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#94A4A0", marginBottom: 3 }}>MOT test date</div><input type="date" value={b.motDate || bookingEnd(b)} onChange={e => editBooking(b.id, "motDate", e.target.value)} style={inp} /></div>
+                    : <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#94A4A0", marginBottom: 3 }}>Date</div><input type="date" value={b.start} onChange={e => editBooking(b.id, "start", e.target.value)} style={inp} /></div>}
                   <div style={{ width: 80 }}><div style={{ fontSize: 11, color: "#94A4A0", marginBottom: 3 }}>Days</div><input type="number" value={b.days} onChange={e => editBooking(b.id, "days", e.target.value)} style={inp} /></div>
                 </div>
               </div>
@@ -5031,7 +5078,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
   const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
   const bookedStaffOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || [])); const iso = isoOf(d); (data.staff || []).forEach(st => { if (staffOffOn(st, iso)) s.add(st.name); }); return s; };
-  const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start) { const end = isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }); if (iso >= b.start && iso <= end) out.push({ v, b }); } })); return out; };
+  const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (inBooking(b, iso)) out.push({ v, b }); })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
   const showStaffOff = true; // staff time off always shows, whatever is ticked
   const staffOffOnIso = iso => { const out = []; (data.staff || []).forEach(s => ((s.away) || []).forEach(b => { if (b.start) { const total = Math.max(1, Number(b.days) || 1); const end = isoAdd(b.start, { days: total - 1 }); if (iso >= b.start && iso <= end) { const dayNo = Math.round((new Date(iso + "T00:00") - new Date(b.start + "T00:00")) / 86400000) + 1; out.push({ s, b, dayNo, total }); } } })); return out; };
@@ -5091,7 +5138,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       style={{ background:"#F3F6FA", border:"1px solid #D3DEEA", borderLeft:"4px solid #64748B", borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer" }}>
       <div style={{ fontSize: big?11:9.5, fontWeight:800, color:"#475569", textTransform:"uppercase", letterSpacing:".05em" }}>🔧 Vehicle out · {b.type}</div>
       <div style={{ fontSize: big?14:12.5, fontWeight:800, color:"#10211E", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{v.name}</div>
-      {b.days > 1 && <div style={{ fontSize: big?12:10.5, color:"#6A7B77", marginTop:1, fontWeight:600 }}>{fmtUK(b.start)} – {fmtUK(isoAdd(b.start, { days: b.days - 1 }))}</div>}
+      {b.days > 1 && <div style={{ fontSize: big?12:10.5, color:"#6A7B77", marginTop:1, fontWeight:600 }}>{fmtUK(b.start)} – {fmtUK(bookingEnd(b))}{b.motDate ? ` · test ${fmtUK(b.motDate)}` : ""}</div>}
     </div>
   );
   const SurveyCard = ({ en, big }) => {
@@ -5245,7 +5292,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const nowIso = isoOf(today);
         const endIso = isoOf(new Date(today.getFullYear(), today.getMonth() + 2, 0)); // last day of next month
         const up = [];
-        (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start && b.start <= endIso && isoAdd(b.start, { days: Math.max(1, Number(b.days) || 1) - 1 }) >= nowIso) up.push({ v, b }); }));
+        (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (b.start && b.start <= endIso && bookingEnd(b) >= nowIso) up.push({ v, b }); }));
         up.sort((a, c) => (a.b.start || "").localeCompare(c.b.start || ""));
         if (!up.length) return null;
         return (
@@ -5274,7 +5321,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const items = [];
         if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (inRange(st.date)) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
         if (showSurveys) (data.enquiries||[]).forEach(en => { if (inRange(en.surveyDate) && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
-        if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { if (b.start && isoAdd(b.start,{days:Math.max(1,Number(b.days)||1)-1}) >= startIso && b.start <= endIso) items.push({ type:"maint", date: b.start < startIso ? startIso : b.start, time:"00", v, b }); }));
+        if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { const first = bookingDates(b).find(d => d >= startIso); if (first && first <= endIso) items.push({ type:"maint", date: first, time:"00", v, b }); }));
         if (showStaffOff) (data.staff||[]).forEach(s => ((s.away)||[]).forEach(b => { const total = Math.max(1,Number(b.days)||1); if (b.start && isoAdd(b.start,{days:total-1}) >= startIso && b.start <= endIso) { const shown = b.start < startIso ? startIso : b.start; const dayNo = Math.round((new Date(shown+"T00:00") - new Date(b.start+"T00:00"))/86400000) + 1; items.push({ type:"staffoff", date: shown, time:"00", s, b, dayNo, total }); } }));
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
         if (!items.length) return <Empty icon="calendar" text="Nothing this month or next" />;
