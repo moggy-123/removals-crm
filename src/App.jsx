@@ -288,10 +288,15 @@ function autoMaint(m0, today) {
       return { ...b, done: true };
     });
   }
-  // tidy: forget bookings that finished more than 90 days ago
-  const old = isoAdd(today, { days: -90 });
-  const kept = m.bookings.filter(b => bookingEnd(b) >= old);
-  if (kept.length !== m.bookings.length) { m.bookings = kept; changed = true; }
+  // A past booking dated AFTER the Last done you've entered can't have happened — drop it
+  // (otherwise it still shows on the calendar on the wrong day).
+  for (const [type, key] of MAINT_TYPES) {
+    if (!m[key]) continue;
+    const before = m.bookings.length;
+    m.bookings = m.bookings.filter(b => !(b.type === type && b.done && (type === "MOT" ? (b.motDate || bookingEnd(b)) : b.start) > m[key]));
+    if (m.bookings.length !== before) changed = true;
+  }
+  // Past bookings are kept, so the calendar keeps a history of every service, MOT and tacho.
   // 2. make sure the next one is booked
   const skipped = Array.isArray(m.skipped) ? m.skipped : [];
   for (const [type] of MAINT_TYPES) {
@@ -4586,10 +4591,15 @@ function CompanyView({ data, setView, setData }) {
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E" }}>{v.name}</div>
                 <div style={{ fontSize: 12, color: "#6A7B77" }}>{[v.reg, v.vtype, v.capacityCuFt ? `${v.capacityCuFt} cu ft` : ""].filter(Boolean).join(" · ") || "—"}</div>
                 {(() => {
-                  const items = [["Service", nextService(v.maint)], ["MOT", nextMOT(v.maint)], ["Tacho", nextTacho(v.maint)]].filter(x => x[1]);
+                  // Show the BOOKED day (what the calendar shows); if nothing's booked, the due date.
+                  const today = todayISO();
+                  const items = [["Service", nextService(v.maint)], ["MOT", nextMOT(v.maint)], ["Tacho", nextTacho(v.maint)]].filter(x => x[1]).map(([label, due]) => {
+                    const bk = ((v.maint && v.maint.bookings) || []).filter(b => b.type === label && bookingEnd(b) >= today).sort((a, b) => a.start.localeCompare(b.start))[0];
+                    return [label, bk ? bk.start : due, !!bk, bk];
+                  });
                   if (!items.length) return null;
-                  const soon = iso => { const days = Math.round((new Date(iso + "T00:00") - new Date()) / 86400000); return days < 0 ? "#DC2626" : days <= 14 ? "#B45309" : "#9CA3AF"; };
-                  return <div style={{ fontSize: 11.5, marginTop: 3, display: "flex", flexWrap: "wrap", gap: 8 }}>{items.map(([label, due]) => <span key={label} style={{ color: soon(due) }}>{label}: {fmtUK(due)}</span>)}</div>;
+                  const soon = (iso, booked) => { const days = Math.round((new Date(iso + "T00:00") - new Date()) / 86400000); return (!booked && days < 0) ? "#DC2626" : days <= 14 ? "#B45309" : "#9CA3AF"; };
+                  return <div style={{ fontSize: 11.5, marginTop: 3, display: "flex", flexWrap: "wrap", gap: 8 }}>{items.map(([label, d, booked, bk]) => <span key={label} style={{ color: soon(d, booked) }}>{label}: {booked ? (bk.days > 1 ? `${shortDay(bk.start)}–${shortDay(bookingEnd(bk))}` : shortDay(d)) : `${fmtUK(d)}${d < today ? " overdue" : ""}`}</span>)}</div>;
                 })()}
               </div>
             </div>
