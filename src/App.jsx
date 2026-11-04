@@ -2341,6 +2341,14 @@ function InventoryModal({ data, enquiry, onClose }) {
     );
   }
 
+  // Spot furniture that usually needs dismantling (beds, wardrobes…) in what's been typed.
+  const DIS_RE = /\b(bunk ?beds?|cabin ?beds?|beds?|bedframes?|bed frames?|divans?|cots?|wardrobes?|robes?|dining tables?|extending tables?|desks?|bookcases?|shelving units?|trampolines?|treadmills?|cross ?trainers?|multi ?gyms?|home ?gyms?|exercise bikes?|swing sets?|playhouses?|sheds?|greenhouses?|gazebos?)\b/i;
+  const DIS_NOT = /\b(bedside|bedding|bedroom|bedspread|wardrobe box|robe hooks?|bed linen|beds? only|garden bed|raised bed|flower bed|dog bed|cat bed|pet bed|bean ?bag)\b/i;
+  const disItemsIn = (text, room) => String(text || "").split(/\n|,|;|·/).map(x => x.trim()).filter(x => x && DIS_RE.test(x) && !DIS_NOT.test(x)).map(x => `${x.replace(/^[-•*]\s*/, "")} (${room})`);
+  const onDisList = item => dismantleNote.toLowerCase().includes(item.toLowerCase().replace(/\s*\([^)]*\)$/, ""));
+  const addDis = items => setDismantleNote(p => [p.trim(), ...items].filter(Boolean).join("\n"));
+  const allDisPending = () => Object.entries(freeRooms).flatMap(([room, r]) => disItemsIn(r.text, room)).filter(it => !onDisList(it));
+
   function renderFree(s) {
     const { label, isBedroom, isLounge } = s;
     const r = freeRooms[label] || { text: "", cuFt: "", wardrobe: 0 };
@@ -2361,6 +2369,18 @@ function InventoryModal({ data, enquiry, onClose }) {
         {isOpen && (
           <div style={{ padding: "10px 14px" }}>
             <textarea value={r.text} onChange={e => setFree(label, "text", e.target.value)} rows={4} placeholder="List the furniture in this room…" style={{ ...inputStyle, resize: "vertical", marginBottom: 8 }} />
+            {(() => {
+              const found = disItemsIn(r.text, label);
+              if (!found.length) return null;
+              return (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", margin: "0 0 8px" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77" }}>Dismantle &amp; reassemble?</span>
+                  {found.map(it => onDisList(it)
+                    ? <span key={it} style={{ fontSize: 12, fontWeight: 700, color: "#0F766E", background: "#E8F5F3", borderRadius: 99, padding: "4px 10px" }}>✓ {it.replace(/\s*\([^)]*\)$/, "")}</span>
+                    : <button key={it} type="button" onClick={() => addDis([it])} style={{ fontSize: 12, fontWeight: 700, color: TEAL, background: "#fff", border: `1.5px solid ${TEAL}`, borderRadius: 99, padding: "4px 10px", cursor: "pointer" }}>+ {it.replace(/\s*\([^)]*\)$/, "")}</button>)}
+                </div>
+              );
+            })()}
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>Volume</label>
               <input type="number" inputMode="decimal" value={r.cuFt} onChange={e => setFree(label, "cuFt", e.target.value)} placeholder="cu ft" style={{ ...inputStyle, width: 90 }} />
@@ -2411,7 +2431,10 @@ function InventoryModal({ data, enquiry, onClose }) {
 
       {invMode === "freehand" && (
         <div style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, padding: "12px 14px" }}>
-          <div style={{ fontWeight: 700, color: "#111827", marginBottom: 8 }}>Dismantle / Reassemble</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
+            <div style={{ fontWeight: 700, color: "#111827" }}>Dismantle / Reassemble</div>
+            {allDisPending().length > 0 && <button type="button" onClick={() => addDis(allDisPending())} style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", background: TEAL, border: "none", borderRadius: 9, padding: "6px 11px", cursor: "pointer" }}>+ Add all ({allDisPending().length})</button>}
+          </div>
           <textarea value={dismantleNote} onChange={e => setDismantleNote(e.target.value)} rows={3} placeholder="Items to dismantle and reassemble…" style={{ ...inputStyle, resize: "vertical" }} />
         </div>
       )}
