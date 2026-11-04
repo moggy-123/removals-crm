@@ -169,6 +169,27 @@ function readMessage(t, out, opts) {
   return { lines, message: msgM ? msgM[2].trim() : "" };
 }
 
+// Split a whole address typed on one line ("12 Laxton Drive, Kingswood, Wotton under Edge, Glos. GL12 8SQ")
+// into address line 1, line 2, town and postcode.
+const COUNTY_RE = /^(glos|gloucs|gloucestershire|somerset|n\.?\s*somerset|north somerset|avon|wilts|wiltshire|devon|dorset|cornwall|hants|hampshire|berks|berkshire|oxon|oxfordshire|herefordshire|worcs|worcestershire|south glos|s\.?\s*glos|south gloucestershire|bristol|monmouthshire|gwent|glamorgan|south glamorgan|mid glamorgan|west glamorgan|vale of glamorgan|powys|carmarthenshire|pembrokeshire|newport|cardiff|swansea|uk|united kingdom|england|wales)\.?$/i;
+function tidyAddress(a1, a2, town, pc) {
+  const PC = /\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b/i;
+  let line = String(a1 || "").trim(), postcode = String(pc || "").trim(), t = String(town || "").replace(/[\s.,]+$/, "").trim(), l2 = String(a2 || "").trim();
+  const m = line.match(PC);
+  if (!line.includes(",") && !m) return { address1: line, address2: l2, town: t, postcode };
+  if (m) { if (!postcode) postcode = (m[1] + " " + m[2]).toUpperCase(); line = line.replace(PC, " "); }
+  let parts = line.split(/\s*,\s*/).map(x => x.replace(/^[\s.]+|[\s.]+$/g, "").trim()).filter(Boolean);
+  // drop county / country and anything that's the town again
+  parts = parts.filter(x => !COUNTY_RE.test(x));
+  const same = (x, y) => x.toLowerCase().replace(/[^a-z]/g, "") === y.toLowerCase().replace(/[^a-z]/g, "");
+  if (t) parts = parts.filter((x, i) => i === 0 || !same(x, t));
+  if (!t && parts.length > 1) t = parts.pop();
+  if (parts.length > 1 && (/^(flat|apartment|apt|unit|suite|room|no\.?)\b/i.test(parts[0]) || /^\d+[a-z]?$/i.test(parts[0]))) parts.splice(0, 2, parts[0] + ", " + parts[1]);
+  const address1 = parts.shift() || "";
+  if (!l2 && parts.length) l2 = parts.join(", ");
+  return { address1, address2: l2, town: t, postcode: postcode.toUpperCase().replace(/\s+/g, " ") };
+}
+
 function parseEnquiryEmail(text) {
   let t = (text || "").replace(/\r/g, "");
   if (/<[a-z!\/][^>]*>/i.test(t)) t = stripEmailHtml(t);
@@ -231,6 +252,8 @@ function parseEnquiryEmail(text) {
   if (!fromBeds && !sectioned) fromBeds = "";
   if (!toBeds && out.toBedrooms) toBeds = out.toBedrooms;
   delete out.toBedrooms;
+  { const fa = tidyAddress(out.fromAddress1, out.fromAddress2, out.fromTown, out.fromPostcode); out.fromAddress1 = fa.address1; out.fromAddress2 = fa.address2; out.fromTown = fa.town; out.fromPostcode = fa.postcode; }
+  { const ta = tidyAddress(out.toAddress1, out.toAddress2, out.toTown, out.toPostcode); out.toAddress1 = ta.address1; out.toAddress2 = ta.address2; out.toTown = ta.town; out.toPostcode = ta.postcode; }
   if (!out.name && out.email) out.name = out.email.split("@")[0].replace(/[._\-]+/g, " ").replace(/\b\w/g, ch => ch.toUpperCase()).trim();
   const extras = [];
   const add = (label, val) => { if (val && val.trim()) extras.push(`${label}: ${val.trim()}`); };
@@ -294,7 +317,7 @@ export default async function handler(req, res) {
     const custId = uid();
     const customer = {
       id: custId, name: p.name || "Website enquiry", company: "", phone: p.phone || "", home_phone: "", email: p.email || "",
-      address1: p.fromAddress1 || "", address2: "", town: p.fromTown || "", county: "", postcode: p.fromPostcode || "",
+      address1: p.fromAddress1 || "", address2: p.fromAddress2 || "", town: p.fromTown || "", county: "", postcode: p.fromPostcode || "",
       cust_type: "Private", notes: "", updated_at: Date.now(), created_at: now,
     };
     if (p.contacts && p.contacts.length) customer.contacts = p.contacts;
@@ -303,9 +326,9 @@ export default async function handler(req, res) {
       enquiry_date: now.slice(0, 10), preferred_date: p.preferredDate || null,
       survey_date: null, survey_time: "", surveyor: "",
       date_flexible: !!p.dateFlexible, move_month: p.moveMonth || null,
-      from_address1: p.fromAddress1 || "", from_address2: "", from_town: p.fromTown || "", from_postcode: p.fromPostcode || "",
+      from_address1: p.fromAddress1 || "", from_address2: p.fromAddress2 || "", from_town: p.fromTown || "", from_postcode: p.fromPostcode || "",
       from_property_type: normalizePropertyType(p.fromPropertyType), from_bedrooms: p.fromBedrooms || "", from_floor: "", from_access: p.fromAccess || "",
-      to_address1: p.toAddress1 || "", to_address2: "", to_town: p.toTown || "", to_postcode: p.toPostcode || "",
+      to_address1: p.toAddress1 || "", to_address2: p.toAddress2 || "", to_town: p.toTown || "", to_postcode: p.toPostcode || "",
       to_property_type: normalizePropertyType(p.toPropertyType), to_floor: "", to_access: p.toAccess || "",
       inventory: [], volume_cuft: 0, volume_m3: 0, weight_kg: 0,
       extras: [], quote_lines: [], stages: [], quote_vat: false, quote_total: 0, quote_extra: { _meta: p.referredBy ? { referredBy: p.referredBy } : {} },
