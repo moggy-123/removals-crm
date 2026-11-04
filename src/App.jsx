@@ -414,12 +414,161 @@ function stampData(data) {
 
 let SAVING_IN_PROGRESS = false;
 
+// ── Change history (activity log) ───────────────────────────────────────────
+// Every save is compared with what was there before, and the differences (prices,
+// dates, contacts, move plans, status…) are written to the 'activity_log' table.
+// Entries are queued on the device first, so nothing is lost without signal.
+const LOG_QUEUE_KEY = "removals_log_queue";
+const LOG_FIELDS = {
+  customers: { name: "Name", phone: "Mobile", homePhone: "Home phone", email: "Email", address1: "Address", address2: "Address line 2", town: "Town", postcode: "Postcode", company: "Company", custType: "Type", notes: "Notes", contacts: "Other contacts", storageJobs: "Storage jobs" },
+  enquiries: { status: "Status", preferredDate: "Move date", moveMonth: "Move month", dateFlexible: "Flexible dates", surveyDate: "Survey date", surveyTime: "Survey time", surveyor: "Surveyor", surveyDone: "Surveyed", quoteTotal: "Quote price", quoteStatus: "Quote status", quoteLines: "Quote lines", fromAddress1: "From address", fromTown: "From town", fromPostcode: "From postcode", toAddress1: "To address", toTown: "To town", toPostcode: "To postcode", fromPropertyType: "From property", toPropertyType: "To property", fromBedrooms: "Bedrooms", inventory: "Inventory", toStore: "Into store", notes: "Notes", lostReason: "Lost reason", referredBy: "Referred by", exchanged: "Exchanged" },
+  jobs: { status: "Status", price: "Price", deposit: "Deposit", moveDate: "Move date", stages: "Move plan", notes: "Notes", depositPaid: "Deposit paid", balancePaid: "Balance paid" },
+  vehicles: { name: "Name", reg: "Reg", vtype: "Type", maint: "Servicing" },
+  staff: { name: "Name", role: "Role", phone: "Phone", active: "Active", away: "Time off" },
+};
+const LOG_MONEY = new Set(["quoteTotal", "price", "deposit"]);
+const LOG_DATES = new Set(["preferredDate", "surveyDate", "moveDate"]);
+function logWho() {
+  if (CURRENT_USER && CURRENT_USER.email) return CURRENT_USER.email;
+  const ua = navigator.userAgent || "";
+  return /iPad|Macintosh.*Mobile|Macintosh(?=.*Safari)(?!.*Chrome)/.test(ua) && navigator.maxTouchPoints > 1 ? "iPad" : /iPhone/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android" : "Computer";
+}
+function logFmt(table, k, v, d) {
+  if (k === "custType" && !v) v = "Private";
+  if (k === "status" && !v && table === "enquiries") v = "New";
+  if (v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length)) return "—";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (LOG_MONEY.has(k)) return "£" + Number(v || 0).toLocaleString("en-GB", { maximumFractionDigits: 2 });
+  if (LOG_DATES.has(k) && /^\d{4}-\d\d-\d\d/.test(String(v))) return fmtUK(String(v).slice(0, 10));
+  if (k === "moveMonth" && /^\d{4}-\d\d$/.test(String(v))) return fmtMonth(v);
+  if (k === "contacts") return v.filter(c => c && (c.name || c.phone)).map(c => [c.name, c.relation && `(${c.relation})`, c.phone].filter(Boolean).join(" ")).join("; ") || "—";
+  if (k === "stages") {
+    const vn = id => ((d && d.vehicles) || []).find(x => x.id === id)?.name || "";
+    return v.map(st => [st.type || "Day", st.date ? fmtUK(st.date) : "no date", st.time, (st.crew || []).length ? (st.crew || []).join(", ") : "", (st.vehicleIds || []).map(vn).filter(Boolean).join(", ")].filter(Boolean).join(" · ")).join(" | ");
+  }
+  if (k === "quoteLines") return v.filter(l => l && (l.desc || l.amount)).map(l => `${l.desc || "Line"} £${Number(l.amount || 0).toLocaleString("en-GB")}`).join("; ") || "—";
+  if (k === "inventory") return `${v.length} item${v.length !== 1 ? "s" : ""}`;
+  if (k === "storageJobs") return v.map(j => [j.location, j.value ? `£${j.value}` : "", j.dateIn && `in ${fmtUK(j.dateIn)}`, j.dateOut && `out ${fmtUK(j.dateOut)}`].filter(Boolean).join(" ")).join("; ");
+  if (k === "away") return v.map(a => `${a.reason || "Off"} ${a.start ? fmtUK(a.start) : ""}${Number(a.days) > 1 ? ` (${a.days} days)` : ""}`).join("; ");
+  if (k === "maint") return (v.bookings || []).filter(b => b.start >= todayISO()).map(b => `${b.type} ${fmtUK(b.start)}`).join("; ") || "—";
+  const s = String(v); return s.length > 160 ? s.slice(0, 157) + "…" : s;
+}
+const logSame = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null) || ((a ?? "") === "" && (b ?? "") === "") || (Array.isArray(a) && !a.length && (b == null)) || (Array.isArray(b) && !b.length && (a == null));
+function logRecName(table, r, d) {
+  if (!r) return "";
+  if (table === "customers") return r.name || "Customer";
+  if (table === "enquiries") return "Enquiry" + ([r.fromTown, r.toTown].filter(Boolean).length ? ` ${[r.fromTown, r.toTown].filter(Boolean).join(" → ")}` : "");
+  if (table === "jobs") { try { return "Move " + moveRef(d, r); } catch { return "Move"; } }
+  return r.name || table;
+}
+function diffForLog(prev, next) {
+  const out = [], at = new Date().toISOString(), who = logWho();
+  for (const table of TABLES) {
+    const fields = LOG_FIELDS[table]; if (!fields) continue;
+    const before = new Map((prev[table] || []).map(r => [r.id, r]));
+    for (const r of next[table] || []) {
+      const p = before.get(r.id);
+      const custId = table === "customers" ? r.id : (r.customerId || null);
+      if (!p) { out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `Created ${logRecName(table, r, next)}`, changes: [] }); continue; }
+      const changes = [];
+      for (const [k, label] of Object.entries(fields)) {
+        if (logSame(p[k], r[k])) continue;
+        const from = logFmt(table, k, p[k], prev), to = logFmt(table, k, r[k], next);
+        if (from === to) continue;
+        changes.push({ field: label, from, to });
+      }
+      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${logRecName(table, r, next)}: ${changes.map(c => c.field).join(", ")} changed`, changes });
+    }
+  }
+  return out;
+}
+function queueLog(entries) {
+  if (!entries || !entries.length) return;
+  try { const q = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]"); localStorage.setItem(LOG_QUEUE_KEY, JSON.stringify([...q, ...entries].slice(-1000))); } catch {}
+}
+function logDeletion(table, rec, d) {
+  if (!rec) return;
+  queueLog([{ id: uid() + uid(), at: new Date().toISOString(), who: logWho(), customer_id: table === "customers" ? rec.id : (rec.customerId || null), rec_table: table, rec_id: rec.id, summary: `Deleted ${logRecName(table, rec, d)}`, changes: [] }]);
+}
+let LOG_FLUSHING = false;
+async function flushLog() {
+  if (LOG_FLUSHING) return; LOG_FLUSHING = true;
+  try {
+    const q = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]");
+    if (!q.length) return;
+    const batch = q.slice(0, 100);
+    const { error } = await Promise.race([supabase.from("activity_log").upsert(batch), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 10000))]);
+    if (error) return; // table not set up yet / offline — keep them queued
+    const sent = new Set(batch.map(x => x.id));
+    const left = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]").filter(x => !sent.has(x.id));
+    localStorage.setItem(LOG_QUEUE_KEY, JSON.stringify(left));
+  } catch { /* try again later */ } finally { LOG_FLUSHING = false; }
+}
+async function loadLog(customerId) {
+  let rows = [], err = "";
+  try {
+    let qy = supabase.from("activity_log").select("*").order("at", { ascending: false }).limit(customerId ? 300 : 200);
+    if (customerId) qy = qy.eq("customer_id", customerId);
+    const { data, error } = await qy;
+    if (error) err = /activity_log|relation|does not exist|schema cache/i.test(error.message || "") ? "setup" : (error.message || "error"); else rows = data || [];
+  } catch (e) { err = "offline"; }
+  let q = []; try { q = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]"); } catch {}
+  const have = new Set(rows.map(r => r.id));
+  const pending = q.filter(x => !have.has(x.id) && (!customerId || x.customer_id === customerId)).map(x => ({ ...x, pending: true }));
+  return { rows: [...pending, ...rows].sort((a, b) => String(b.at).localeCompare(String(a.at))), err };
+}
+function HistoryList({ customerId, title = "History", startOpen = false }) {
+  const [open, setOpen] = useState(startOpen);
+  const [state, setState] = useState({ rows: null, err: "" });
+  const [expanded, setExpanded] = useState({});
+  useEffect(() => { if (open && !state.rows) loadLog(customerId).then(setState); /* eslint-disable-next-line */ }, [open]);
+  const rows = state.rows || [];
+  return (
+    <Card>
+      <div onClick={() => setOpen(o => !o)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>{title}</div>
+        <span style={{ fontSize: 13, fontWeight: 700, color: TEAL }}>{open ? "Hide ▾" : "Show ▸"}</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {!state.rows && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Loading…</div>}
+          {state.err === "setup" && <div style={{ fontSize: 12.5, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>The history table isn't set up in the database yet (run add-history.sql). Changes are being kept on this device until it is.</div>}
+          {state.err === "offline" && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>No signal — showing changes made on this device only.</div>}
+          {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>No changes recorded yet.</div>}
+          {rows.map(r => {
+            const ch = Array.isArray(r.changes) ? r.changes : [];
+            const isOpen = expanded[r.id] || ch.length <= 3;
+            const when = new Date(r.at);
+            return (
+              <div key={r.id} style={{ borderTop: "1px solid #F0F4F3", padding: "8px 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#10211E", minWidth: 0 }}>{ch.length ? (r.summary || "").replace(/:.*$/, "") : r.summary}</div>
+                  <div style={{ fontSize: 11.5, color: "#94A4A0", whiteSpace: "nowrap" }}>{isNaN(when) ? "" : `${fmtUK(when.toISOString().slice(0, 10))} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`}</div>
+                </div>
+                <div style={{ fontSize: 11.5, color: "#94A4A0", marginBottom: ch.length ? 4 : 0 }}>{r.who || ""}{r.pending ? " · not uploaded yet" : ""}</div>
+                {(isOpen ? ch : ch.slice(0, 3)).map((c, i) => (
+                  <div key={i} style={{ fontSize: 12.5, color: "#374151", lineHeight: 1.45 }}>
+                    <b>{c.field}:</b> <span style={{ color: "#9CA3AF", textDecoration: "line-through" }}>{c.from}</span> → <span style={{ color: "#0F766E", fontWeight: 600 }}>{c.to}</span>
+                  </div>
+                ))}
+                {!isOpen && <span onClick={() => setExpanded(e => ({ ...e, [r.id]: true }))} style={{ fontSize: 12, color: TEAL, fontWeight: 700, cursor: "pointer" }}>+ {ch.length - 3} more</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // Save then reload, waiting for the cloud push first (important on mobile)
 async function saveAndReload(data) {
   showSavingOverlay();
   SAVING_IN_PROGRESS = true;
+  try { queueLog(diffForLog(loadData(), data)); } catch { /* history is best effort */ }
   const stamped = stampData(data);
   setDB(JSON.stringify(stamped));
+  flushLog().catch(() => {});
   try {
     await Promise.race([
       pushChangedOnly(stamped),
@@ -479,6 +628,7 @@ function getTombstones() {
 // when its permissions silently block a delete, which used to leave "deleted" vans/staff in the
 // cloud — they then reappeared (as duplicates) after a reset. Throws if the row is still there.
 async function deleteRecord(table, id) {
+  try { const d0 = loadData(); const rec = (d0[table] || []).find(x => x.id === id); if (rec && !SKIP_DELLOG) logDeletion(table, rec, d0); } catch {}
   await deleteRecordRaw(table, id);
   const { data: left, error } = await supabase.from(table).select("id").eq("id", id);
   if (error) throw error;
@@ -594,6 +744,7 @@ async function doPullSync(setData, setSyncStatus, opts) {
     const merged = mergeAll(cloud, loadData());
     setDB(JSON.stringify(merged));
     if (!readOnly) pushChangedOnly(merged).catch(() => {});
+    if (!readOnly) flushLog().catch(() => {});
     setData(prev => { try { return JSON.stringify(prev) !== JSON.stringify(merged) ? merged : prev; } catch { return merged; } });
     if (setSyncStatus) setSyncStatus("synced");
   } catch { if (setSyncStatus) setSyncStatus(navigator.onLine === false ? "offline" : "synced"); }
@@ -4214,6 +4365,7 @@ function CustomerDetail({ data, id, setView }) {
           );
         })}
       </Card>
+      <HistoryList customerId={c.id} title="History of changes" />
     </div>
   );
 }
@@ -4324,6 +4476,7 @@ async function wipeBusinessData(data) {
   for (const [t, id] of all) { try { await deleteRecord(t, id); } catch {} }
   SKIP_DELLOG = false;
   await logCloudDeletes(all.map(([, id]) => id));
+  queueLog([{ id: uid() + uid(), at: new Date().toISOString(), who: logWho(), customer_id: null, rec_table: "all", rec_id: "", summary: `Deleted all customers, enquiries and jobs (${all.length} records)`, changes: [] }]); await flushLog();
   const cleared = { ...data, customers: [], enquiries: [], jobs: [] };
   setDB(JSON.stringify(cleared));
   try {
@@ -4590,6 +4743,7 @@ function CompanyView({ data, setView, setData }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         {LOGINS_ENABLED && <AccountCard />}
+        <HistoryList title="Activity log (all changes)" />
         {LOGINS_ENABLED && isAdmin() && <UsersAdmin data={data} />}
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 2px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Sync</h4>
