@@ -536,12 +536,7 @@ function RecentlyDeleted() {
     if (!confirm(`Undo ${ids.length} deletion${ids.length !== 1 ? "s" : ""} from ${fmtUK(day)}?\n\nAny phone or iPad that still has these records will put them back in the cloud the next time it syncs.`)) return;
     setBusy(true);
     try {
-      const cur = await readCloudDeletesFull();
-      const now = Date.now();
-      const nextIds = { ...cur.ids }, undone = { ...cur.undone };
-      ids.forEach(id => { delete nextIds[id]; undone[id] = now; });
-      const { error } = await supabase.from("app_config").upsert({ key: "deleted", value: { ids: nextIds, undone }, updated_at: now }, { onConflict: "key" });
-      if (error) throw error;
+      await undeleteInCloud(ids);
       removeTombstones(ids);
       await load();
       alert("Done. Open the app on any device that still shows those records and they'll upload again.");
@@ -702,6 +697,16 @@ async function readCloudDeletesFull() {
   return { ids: v.ids || {}, undone: v.undone || {} };
 }
 async function readCloudDeletes() { return (await readCloudDeletesFull()).ids; }
+// Take records OFF the shared deleted list (used by Restore and by Undo), so no device deletes them again.
+async function undeleteInCloud(ids) {
+  if (!ids || !ids.length) return;
+  const cur = await readCloudDeletesFull();
+  const now = Date.now();
+  const nextIds = { ...cur.ids }, undone = { ...cur.undone };
+  ids.forEach(id => { delete nextIds[id]; undone[id] = now; });
+  const { error } = await supabase.from("app_config").upsert({ key: "deleted", value: { ids: nextIds, undone }, updated_at: now }, { onConflict: "key" });
+  if (error) throw error;
+}
 async function logCloudDeletes(ids) {
   try {
     const cur = await readCloudDeletesFull().catch(() => ({ ids: {}, undone: {} }));
@@ -864,9 +869,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B141";
+  if (!t || isNaN(t)) return "B142";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B141 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B142 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -4513,6 +4518,9 @@ async function restoreBackup(currentData, inc) {
   // Un-delete: clear tombstones so the merge can't strip them back out,
   // and drop their sync signatures so they're re-pushed to the cloud.
   removeTombstones(restoredIds);
+  // ...and take them off the shared deleted list, or the next sync would delete them again.
+  try { await undeleteInCloud(restoredIds); }
+  catch (e) { alert("Restore needs a signal (it has to tell the cloud these records are back). Connect and try again.\n\n" + ((e && e.message) || "")); hideSavingOverlay(); return; }
   try {
     const sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}");
     restoredIds.forEach(id => { delete sigs[id]; });
