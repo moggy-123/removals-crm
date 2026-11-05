@@ -869,9 +869,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B142";
+  if (!t || isNaN(t)) return "B143";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B142 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B143 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -7165,6 +7165,21 @@ function NoAccessScreen({ email }) {
   );
 }
 function AccountCard() {
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pw1, setPw1] = useState(""), [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false), [msg, setMsg] = useState("");
+  async function changePw() {
+    setMsg("");
+    if (pw1.length < 8) { setMsg("Use at least 8 characters."); return; }
+    if (pw1 !== pw2) { setMsg("The two passwords don't match."); return; }
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pw1 });
+      if (error) throw error;
+      setPw1(""); setPw2(""); setPwOpen(false); alert("Password changed. Use the new one next time you sign in.");
+    } catch (e) { setMsg(/reauth|nonce|recent/i.test(e.message || "") ? "For security, sign out and back in, then change it straight away." : (e.message || "Couldn't change it.")); }
+    setBusy(false);
+  }
   return (
     <Card style={{ marginBottom: 0 }}>
       <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Your account</h4>
@@ -7173,8 +7188,22 @@ function AccountCard() {
           <div style={{ fontWeight: 700, color: "#10211E", overflow: "hidden", textOverflow: "ellipsis" }}>{CURRENT_USER.email}</div>
           <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{ROLE_LABEL[CURRENT_USER.role]}{CURRENT_USER.staffName ? ` · ${CURRENT_USER.staffName}` : ""}</div>
         </div>
-        <Btn size="sm" variant="grey" onClick={signOutFlow}>Sign out</Btn>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {!pwOpen && <Btn size="sm" variant="grey" onClick={() => setPwOpen(true)}>Change password</Btn>}
+          <Btn size="sm" variant="grey" onClick={signOutFlow}>Sign out</Btn>
+        </div>
       </div>
+      {pwOpen && (
+        <div style={{ marginTop: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
+          <Field label="New password"><Input type="password" value={pw1} onChange={setPw1} autoComplete="new-password" placeholder="At least 8 characters" /></Field>
+          <Field label="Type it again"><Input type="password" value={pw2} onChange={setPw2} autoComplete="new-password" /></Field>
+          {msg && <div style={{ fontSize: 12.5, color: "#B91C1C", fontWeight: 600, marginBottom: 8 }}>{msg}</div>}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8 }}>
+            <Btn variant="grey" style={{ width: "100%" }} onClick={() => { setPwOpen(false); setPw1(""); setPw2(""); setMsg(""); }}>Cancel</Btn>
+            <Btn style={{ width: "100%" }} disabled={busy} onClick={changePw}>{busy ? "Saving…" : "Save new password"}</Btn>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -7206,6 +7235,7 @@ function UsersAdmin({ data }) {
   }
   async function resend(u) {
     setBusy(true);
+    if (u.lastSignIn && !confirm(`Send ${u.email} an email with a link to set a new password?`)) { setBusy(false); return; }
     try { await usersApi("POST", { action: "resend", email: u.email, confirmed: u.confirmed }); alert(`Email sent to ${u.email}.`); } catch (e) { alert("Couldn't send: " + e.message); }
     setBusy(false);
   }
@@ -7241,7 +7271,7 @@ function UsersAdmin({ data }) {
           </div>
           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
             <Btn size="sm" variant="grey" style={{ padding: "6px 10px" }} onClick={() => setForm({ id: u.id, email: u.email, role: u.role || "crew", staffName: u.staffName || "" })}>Edit</Btn>
-            {!u.lastSignIn && <Btn size="sm" variant="grey" style={{ padding: "6px 10px" }} onClick={() => resend(u)}>Resend</Btn>}
+            <Btn size="sm" variant="grey" style={{ padding: "6px 10px" }} onClick={() => resend(u)}>{u.lastSignIn ? "Reset password" : "Resend"}</Btn>
             {u.email !== CURRENT_USER.email && <Btn size="sm" variant="danger" style={{ padding: "6px 10px" }} onClick={() => remove(u)}>Remove</Btn>}
           </div>
         </div>
