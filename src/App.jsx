@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { pullFromCloud, pushToCloud, pushOne, deleteRecord as deleteRecordRaw, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
@@ -429,7 +430,7 @@ const LOG_FIELDS = {
 const LOG_MONEY = new Set(["quoteTotal", "price", "deposit"]);
 const LOG_DATES = new Set(["preferredDate", "surveyDate", "moveDate"]);
 function logWho() {
-  if (CURRENT_USER && CURRENT_USER.email) return CURRENT_USER.email;
+  if (CURRENT_USER && (CURRENT_USER.staffName || CURRENT_USER.email)) return CURRENT_USER.staffName || CURRENT_USER.email;
   const ua = navigator.userAgent || "";
   return /iPad|Macintosh.*Mobile|Macintosh(?=.*Safari)(?!.*Chrome)/.test(ua) && navigator.maxTouchPoints > 1 ? "iPad" : /iPhone/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android" : "Computer";
 }
@@ -6929,7 +6930,7 @@ const PAGE_TITLES = { enquiries: "Enquiries", calendar: "Calendar", customers: "
 // ══ Logins & roles ═══════════════════════════════════════════════════════════
 // Remember the invite / password-reset link details before Supabase tidies the URL.
 const AUTH_HASH = typeof window !== "undefined" ? (window.location.hash || "") : "";
-const NEEDS_PASSWORD = /type=(invite|recovery)/.test(AUTH_HASH);
+const NEEDS_PASSWORD = /type=(invite|recovery|signup)/.test(AUTH_HASH);
 
 // Wipe this device's copy of the business data (used on sign out / when someone else signs in).
 function clearAppData() {
@@ -6948,17 +6949,64 @@ async function signOutFlow() {
   try { await supabase.auth.signOut(); } catch {}
   window.location.reload();
 }
+// Users are managed straight in Supabase (functions from setup-logins.sql), so no Vercel key is needed.
+let SIGNUP_CLIENT = null;
+function signupClient() {
+  // A separate, throwaway client: signing someone up must not sign YOU out.
+  if (!SIGNUP_CLIENT) SIGNUP_CLIENT = createClient(supabase.supabaseUrl, supabase.supabaseKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: "rm-signup-tmp" } });
+  return SIGNUP_CLIENT;
+}
+const friendlyUsersErr = e => {
+  const m = (e && (e.message || e.details)) || String(e || "");
+  if (/admin_list_users|admin_set_user|admin_delete_user|function .* does not exist|schema cache/i.test(m)) return "The logins setup hasn't been run in Supabase yet — run setup-logins.sql in the SQL Editor.";
+  if (/rate limit|too many/i.test(m)) return "Supabase is only allowed to send a few emails an hour — wait a bit and try again.";
+  if (/signups? not allowed|signup is disabled/i.test(m)) return "New sign-ups are switched off in Supabase (Authentication → Sign In / Providers → Allow new users to sign up). Switch it on.";
+  return m;
+};
 async function usersApi(method, body) {
-  const { data: { session } } = await supabase.auth.getSession();
-  const res = await fetch("/api/users", {
-    method,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session ? session.access_token : ""}` },
-    body: body ? JSON.stringify({ ...body, redirectTo: window.location.origin }) : undefined,
-  });
-  let out = {};
-  try { out = await res.json(); } catch {}
-  if (!res.ok) throw new Error(out.error || `Request failed (${res.status})`);
-  return out;
+  const redirectTo = window.location.origin;
+  try {
+    if (method === "GET") {
+      const { data, error } = await supabase.rpc("admin_list_users");
+      if (error) throw error;
+      return { users: (data || []).map(u => ({ id: u.id, email: u.email, role: u.role || "", staffName: u.staff_name || "", lastSignIn: u.last_sign_in || "", confirmed: !!u.confirmed })) };
+    }
+    if (method === "POST" && body.action === "resend") {
+      const email = String(body.email || "").trim().toLowerCase();
+      if (body.confirmed === false) {
+        const { error } = await signupClient().auth.resend({ type: "signup", email, options: { emailRedirectTo: redirectTo } });
+        if (!error) return { ok: true };
+      }
+      const { error: e2 } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      if (e2) throw e2;
+      return { ok: true };
+    }
+    if (method === "POST") {
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Enter a valid email address.");
+      const pw = Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, "0")).join("") + "Aa1!";
+      const { data, error } = await signupClient().auth.signUp({ email, password: pw, options: { emailRedirectTo: redirectTo } });
+      if (error && !/already|registered|exists/i.test(error.message || "")) throw error;
+      const { data: ok, error: e2 } = await supabase.rpc("admin_set_user", { p_email: email, p_role: body.role, p_staff: body.staffName || "" });
+      if (e2) throw e2;
+      if (!ok) throw new Error("Supabase didn't create the login — check the email address and try again.");
+      // If Supabase confirmed them straight away (email confirmation switched off), send a set-password email instead.
+      if (data && data.session) { try { await signupClient().auth.signOut(); } catch {} await supabase.auth.resetPasswordForEmail(email, { redirectTo }); }
+      return { ok: true };
+    }
+    if (method === "PATCH") {
+      const { data: ok, error } = await supabase.rpc("admin_set_user", { p_email: body.email, p_role: body.role, p_staff: body.staffName || "" });
+      if (error) throw error;
+      if (!ok) throw new Error("Couldn't find that login.");
+      return { ok: true };
+    }
+    if (method === "DELETE") {
+      const { error } = await supabase.rpc("admin_delete_user", { p_id: body.id });
+      if (error) throw error;
+      return { ok: true };
+    }
+  } catch (e) { throw new Error(friendlyUsersErr(e)); }
+  throw new Error("Unknown request");
 }
 
 function AuthShell({ title, children }) {
@@ -7072,10 +7120,10 @@ function UsersAdmin({ data }) {
     if (form.role === "crew" && !form.staffName) { alert("Pick which staff member this is — crew only see jobs they're booked on."); return; }
     setBusy(true);
     try {
-      if (form.id) await usersApi("PATCH", { id: form.id, role: form.role, staffName: form.staffName });
+      if (form.id) await usersApi("PATCH", { id: form.id, email: form.email, role: form.role, staffName: form.staffName });
       else await usersApi("POST", { email: form.email.trim(), role: form.role, staffName: form.staffName });
       setForm(null); await load();
-      if (!form.id) alert(`Invite sent to ${form.email.trim()}. They'll get an email with a link to set their password.`);
+      if (!form.id) alert(`Invite sent to ${form.email.trim()}. They'll get an email from Supabase — tapping the link opens the app and asks them to choose a password.`);
     } catch (e) { alert("Couldn't save: " + e.message); }
     setBusy(false);
   }
@@ -7087,7 +7135,7 @@ function UsersAdmin({ data }) {
   }
   async function resend(u) {
     setBusy(true);
-    try { await usersApi("POST", { action: "resend", email: u.email }); alert(`Email sent to ${u.email}.`); } catch (e) { alert("Couldn't send: " + e.message); }
+    try { await usersApi("POST", { action: "resend", email: u.email, confirmed: u.confirmed }); alert(`Email sent to ${u.email}.`); } catch (e) { alert("Couldn't send: " + e.message); }
     setBusy(false);
   }
   const roleHelp = { admin: "Everything, including settings and deleting", office: "Everything except settings and deleting", surveyor: "Everything except settings and deleting", crew: "Only their own jobs for today, from 7:30am" };
@@ -7095,7 +7143,7 @@ function UsersAdmin({ data }) {
     <Card style={{ marginBottom: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <h4 style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Users &amp; access</h4>
-        {!form && <Btn size="sm" onClick={() => setForm({ email: "", role: "crew", staffName: "" })}>+ Add user</Btn>}
+        {!form && <Btn size="sm" onClick={() => setForm({ email: "", role: "office", staffName: "" })}>+ Add user</Btn>}
       </div>
       {err && <div style={{ fontSize: 12.5, color: "#B91C1C", fontWeight: 600, marginBottom: 8 }}>{err}</div>}
       {form && (
@@ -7103,7 +7151,7 @@ function UsersAdmin({ data }) {
           {!form.id && <Field label="Email"><Input type="email" value={form.email} onChange={v => setForm({ ...form, email: v })} placeholder="name@example.com" /></Field>}
           {form.id && <div style={{ fontWeight: 700, marginBottom: 10 }}>{form.email}</div>}
           <Field label="Role" hint={roleHelp[form.role]}><Select value={form.role} onChange={v => setForm({ ...form, role: v })} options={["admin", "office", "surveyor", "crew"]} /></Field>
-          <Field label="Staff member" hint="Links the login to your Staff list (crew must be linked)">
+          <Field label="Staff member" hint="Their name in the change log. Crew must be linked — it's how they see their jobs.">
             <Select value={form.staffName} onChange={v => setForm({ ...form, staffName: v })} options={staffNames} placeholder="Not linked" />
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8 }}>
@@ -7230,7 +7278,7 @@ function CrewApp() {
 
 // ── The gate: login → set password (invites) → the right app for your role ──
 // Logins are built but switched OFF until Dave is ready to set them up.
-const LOGINS_ENABLED = false;
+const LOGINS_ENABLED = true;
 function AuthGate() {
   if (!LOGINS_ENABLED) return <MainApp />;
   return <AuthGateInner />;
@@ -7438,6 +7486,7 @@ function MainApp() {
             <div>
               <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: "-.02em", lineHeight: 1.1 }}>Removals CRM</div>
               <div style={{ fontSize: 10, color: "#94A4A0", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".09em" }}>Enquiries &amp; moves</div>
+              <div style={{ fontSize: 10, color: "#94A4A0", fontWeight: 600, letterSpacing: ".02em", marginTop: 1 }}>{BUILD_LABEL}</div>
             </div>
           </div>
           <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
@@ -7477,7 +7526,7 @@ function MainApp() {
           </div>
           <div>
             <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", letterSpacing: "-.02em", lineHeight: 1.15 }}>{PAGE_TITLES[view.screen] || "Removals CRM"}</div>
-            <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>{PAGE_TITLES[view.screen] ? "Removals CRM" : <>Enquiries &amp; moves</>}</div>
+            <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>{PAGE_TITLES[view.screen] ? "Removals CRM" : <>Enquiries &amp; moves</>}<span style={{ textTransform: "none", letterSpacing: 0, opacity: .8, fontWeight: 600 }}> · {BUILD_LABEL.split(" (")[0]}</span></div>
           </div>
         </div>
         <SyncDot />
