@@ -336,6 +336,15 @@ export default async function handler(req, res) {
       lost_reason: "", notes: p.notes || "", updated_at: Date.now(), created_at: now,
     };
 
+    // Preferred: the inbound_add function in Supabase (setup-logins.sql) — keeps working after the
+    // database is locked to signed-in users, without needing a secret key in Vercel.
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      const rr = await sb("rpc/inbound_add", { method: "POST", body: JSON.stringify({ p_secret: INBOUND_SECRET, p_customer: customer, p_enquiry: enquiry }) });
+      if (rr.ok) return send(200, { ok: true, customer: customer.name, via: "rpc" });
+      const t = await rr.text();
+      if (!/inbound_add|Could not find|schema cache|PGRST202/i.test(t)) return send(500, { error: "inbound_add failed: " + t });
+      // function not set up yet → fall back to inserting directly (works until the database is locked)
+    }
     let cr = await sb("customers", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(customer) });
     if (!cr.ok && customer.contacts) {
       // 'contacts' column not added yet: save without it (the details are still in the notes)
