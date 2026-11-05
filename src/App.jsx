@@ -518,6 +518,58 @@ async function loadLog(customerId) {
   const pending = q.filter(x => !have.has(x.id) && (!customerId || x.customer_id === customerId)).map(x => ({ ...x, pending: true }));
   return { rows: [...pending, ...rows].sort((a, b) => String(b.at).localeCompare(String(a.at))), err };
 }
+// Admin: see deletions by day and undo a batch (e.g. records removed by mistake).
+function RecentlyDeleted() {
+  const [open, setOpen] = useState(false);
+  const [days, setDays] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      const { ids } = await readCloudDeletesFull();
+      const by = {};
+      Object.entries(ids).forEach(([id, t]) => { const d = new Date(Number(t)).toISOString().slice(0, 10); (by[d] = by[d] || []).push(id); });
+      setDays(Object.entries(by).sort((a, b) => b[0].localeCompare(a[0])));
+    } catch { setDays([]); }
+  };
+  useEffect(() => { if (open && !days) load(); /* eslint-disable-next-line */ }, [open]);
+  async function undo(day, ids) {
+    if (!confirm(`Undo ${ids.length} deletion${ids.length !== 1 ? "s" : ""} from ${fmtUK(day)}?\n\nAny phone or iPad that still has these records will put them back in the cloud the next time it syncs.`)) return;
+    setBusy(true);
+    try {
+      const cur = await readCloudDeletesFull();
+      const now = Date.now();
+      const nextIds = { ...cur.ids }, undone = { ...cur.undone };
+      ids.forEach(id => { delete nextIds[id]; undone[id] = now; });
+      const { error } = await supabase.from("app_config").upsert({ key: "deleted", value: { ids: nextIds, undone }, updated_at: now }, { onConflict: "key" });
+      if (error) throw error;
+      removeTombstones(ids);
+      await load();
+      alert("Done. Open the app on any device that still shows those records and they'll upload again.");
+    } catch (e) { alert("Couldn't undo: " + ((e && e.message) || e)); }
+    setBusy(false);
+  }
+  return (
+    <Card style={{ marginBottom: 0 }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Recently deleted</div>
+        <span style={{ fontSize: 13, fontWeight: 700, color: TEAL }}>{open ? "Hide ▾" : "Show ▸"}</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {!days && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Loading…</div>}
+          {days && !days.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Nothing deleted recently.</div>}
+          {(days || []).map(([day, ids]) => (
+            <div key={day} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px solid #F0F4F3" }}>
+              <div style={{ fontSize: 13.5 }}><b>{fmtUK(day)}</b> <span style={{ color: "#6A7B77" }}>· {ids.length} record{ids.length !== 1 ? "s" : ""} deleted</span></div>
+              <Btn size="sm" variant="grey" disabled={busy} onClick={() => undo(day, ids)}>Undo</Btn>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function HistoryList({ customerId, title = "History", startOpen = false }) {
   const [open, setOpen] = useState(startOpen);
   const [state, setState] = useState({ rows: null, err: "" });
@@ -643,24 +695,31 @@ async function deleteRecord(table, id) {
 // reads that list when it syncs, so a deleted record stays deleted everywhere.
 let SKIP_DELLOG = false;
 const DELLOG_DAYS = 180;
-async function readCloudDeletes() {
+async function readCloudDeletesFull() {
   const { data: row, error } = await supabase.from("app_config").select("value").eq("key", "deleted").maybeSingle();
   if (error) throw error;
-  return (row && row.value && row.value.ids) || {};
+  const v = (row && row.value) || {};
+  return { ids: v.ids || {}, undone: v.undone || {} };
 }
+async function readCloudDeletes() { return (await readCloudDeletesFull()).ids; }
 async function logCloudDeletes(ids) {
   try {
-    const cur = await readCloudDeletes().catch(() => ({}));
+    const cur = await readCloudDeletesFull().catch(() => ({ ids: {}, undone: {} }));
     const now = Date.now(), cutoff = now - DELLOG_DAYS * 864e5;
-    const next = {};
-    Object.entries(cur).forEach(([k, t]) => { if (Number(t) > cutoff) next[k] = t; });
-    ids.forEach(id => { if (id) next[id] = now; });
-    await supabase.from("app_config").upsert({ key: "deleted", value: { ids: next }, updated_at: now }, { onConflict: "key" });
+    const next = {}, undone = {};
+    Object.entries(cur.ids).forEach(([k, t]) => { if (Number(t) > cutoff) next[k] = t; });
+    Object.entries(cur.undone).forEach(([k, t]) => { if (Number(t) > cutoff) undone[k] = t; });
+    ids.forEach(id => { if (id) { next[id] = now; delete undone[id]; } });
+    await supabase.from("app_config").upsert({ key: "deleted", value: { ids: next, undone }, updated_at: now }, { onConflict: "key" });
   } catch { /* best effort — the local tombstone still applies on this device */ }
 }
 async function applyCloudDeletes() {
   try {
-    const ids = Object.keys(await readCloudDeletes());
+    const full = await readCloudDeletesFull();
+    // Deletions an admin has undone: lift them on this device too (so they're not deleted again).
+    const undoneIds = Object.keys(full.undone || {});
+    if (undoneIds.length) removeTombstones(undoneIds);
+    const ids = Object.keys(full.ids);
     if (!ids.length) return;
     const have = new Set(getTombstones());
     const fresh = ids.filter(id => !have.has(id));
@@ -4745,6 +4804,7 @@ function CompanyView({ data, setView, setData }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         {LOGINS_ENABLED && <AccountCard />}
         <HistoryList title="Activity log (all changes)" />
+        {isAdmin() && <RecentlyDeleted />}
         {LOGINS_ENABLED && isAdmin() && <UsersAdmin data={data} />}
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 2px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Sync</h4>
@@ -5777,19 +5837,22 @@ function mergeArrays(cloudArr, localArr, deleted, goneElsewhere) {
 // Records this device has synced before but which are no longer in the cloud were deleted on
 // another device (e.g. the Home Screen app vs Safari). Drop them here too. Safety net: if a
 // table suddenly looks mostly empty, assume a cloud glitch rather than mass deletion and skip.
+// Records this device has synced before but the cloud no longer has.
+// It used to guess these had been deleted elsewhere and drop them — but if the cloud
+// ever answers "nothing" (e.g. permissions changing), that wrongly wiped real records.
+// Now: real deletes come only from the shared deleted list (applyCloudDeletes), and
+// anything else the cloud has lost is uploaded again from this device.
 function findGoneElsewhere(cloud, local) {
   let sigs = {};
   try { sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); } catch {}
-  const gone = new Set();
+  const dead = new Set(getTombstones());
+  let changed = false;
   TABLES.forEach(t => {
     const inCloud = new Set((cloud[t] || []).map(r => r.id));
-    const synced = (local[t] || []).filter(r => Object.prototype.hasOwnProperty.call(sigs, r.id));
-    const missing = synced.filter(r => !inCloud.has(r.id));
-    if (!missing.length) return;
-    if (missing.length > 5 && missing.length > synced.length / 2) return; // looks like a glitch — don't wipe
-    missing.forEach(r => gone.add(r.id));
+    (local[t] || []).forEach(r => { if (!inCloud.has(r.id) && !dead.has(r.id) && Object.prototype.hasOwnProperty.call(sigs, r.id)) { delete sigs[r.id]; changed = true; } });
   });
-  return gone;
+  if (changed) { try { localStorage.setItem(SIG_KEY, JSON.stringify(sigs)); } catch {} }
+  return new Set();
 }
 function mergeAll(cloud, local) {
   const goneElsewhere = findGoneElsewhere(cloud, local);
