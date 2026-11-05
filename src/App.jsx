@@ -869,9 +869,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B143";
+  if (!t || isNaN(t)) return "B145";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B143 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B145 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -1818,7 +1818,7 @@ function readMessage(t, out, opts) {
 
   // Other contact numbers ("my husband's no is 07970… and his name is Andy")
   const mainP = (out.phone || "").replace(/\D/g, "");
-  const PH = /(?:\+?44\s?|0)\d[\d\s-]{8,12}\d/g;
+  const PH = /(?:\+?44[ \t]?|0)\d[\d \t-]{8,12}\d/g;
   while ((m = PH.exec(msg))) {
     let p = m[0].replace(/[\s-]/g, ""); if (p.startsWith("+44") || p.startsWith("44")) p = "0" + p.replace(/^\+?44/, "");
     if (!mainP) { out.phone = p; continue; }
@@ -1855,6 +1855,50 @@ function tidyAddress(a1, a2, town, pc) {
   return { address1, address2: l2, town: t, postcode: postcode.toUpperCase().replace(/\s+/g, " ") };
 }
 
+
+// ── Email replies copied from the inbox ─────────────────────────────────────
+// "We are moving from / 2 Faye Close / Warmley / BS30 5AE" style blocks, our own
+// quoted message underneath ("On 5 Nov … wrote:"), and our own phone numbers/emails.
+const OWN_EMAIL_RE = /rjremovals\.co\.uk|rj-removals|rjremovals\.com/i;
+const OWN_PHONES = ["01179611112", "01454550873"];
+const FROM_HDR = /^\s*(?:we\s+are\s+|we're\s+|i\s+am\s+|i'm\s+)?(?:moving|move|relocating)\s+(?:out\s+)?from\b|^\s*(?:current|collection|pick\s*up|pickup|old|existing|from)\s+address\b|^\s*from\s*:?\s*$/i;
+const TO_HDR = /^\s*(?:and\s+)?(?:we\s+are\s+|we're\s+|i\s+am\s+|i'm\s+)?(?:moving|move|going|relocating)\s+(?:in)?to\b|^\s*(?:new|delivery|destination|to)\s+address\b|^\s*to\s*:?\s*$/i;
+function splitQuotedReply(t) {
+  const m = t.match(/^[ \t>]*(On .{4,160}?wrote:|-{2,}\s*Original Message\s*-{2,}|From:[^\n]*\n[ \t]*(?:Sent|Date):)/im);
+  if (!m || m.index < 10) return { body: t, quoted: "" };
+  return { body: t.slice(0, m.index), quoted: t.slice(m.index) };
+}
+// Lines under a "moving from" / "moving to" heading, up to a blank line or the next heading.
+function addressBlock(t, hdr, otherHdr) {
+  const lines = t.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!hdr.test(line)) continue;
+    // inline: "We're moving from 2 Faye Close, Warmley BS30 5AE"
+    const rest = line.replace(hdr, "").replace(/^[\s:,-]+/, "").trim();
+    const PCx = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+    if (rest && (PCx.test(rest) || /^\d/.test(rest))) return rest;
+    const got = [];
+    for (let k = i + 1; k < lines.length && got.length < 6; k++) {
+      const l = lines[k].trim();
+      if (!l) { if (got.length) break; else continue; }
+      if (otherHdr.test(l) || hdr.test(l) || /^(many thanks|thanks|thank you|kind regards|regards|cheers|sent from)/i.test(l)) break;
+      got.push(l.replace(/[,]+$/, ""));
+      if (PCx.test(l)) break; // postcode ends the address
+    }
+    if (got.length) return got.join(", ");
+  }
+  return "";
+}
+function nameFromReply(body, quoted) {
+  // Customer's sign-off: "Many thanks\nChelsie"
+  const so = body.match(/(?:many thanks|thanks|thank you|kind regards|best regards|regards|cheers|best wishes)[,!.]*\s*\n\s*([A-Z][a-zA-Z'’-]+(?:\s+[A-Z][a-zA-Z'’-]+){0,2})\s*(?:\n|$)/i);
+  if (so && !/^sent\b/i.test(so[1])) return so[1].trim();
+  // Our quoted greeting to them: "Morning Chelsie"
+  const gr = (quoted || "").match(/^[ \t>]*(?:good\s+)?(?:morning|afternoon|evening|hi|hello|hiya|dear)\s+([A-Z][a-zA-Z'’-]+)/im);
+  return gr ? gr[1] : "";
+}
+
 function parseEnquiryEmail(text) {
   let t = (text || "").replace(/\r/g, "");
   if (/<[a-z!\/][^>]*>/i.test(t)) t = stripEmailHtml(t);
@@ -1862,8 +1906,14 @@ function parseEnquiryEmail(text) {
   const out = { referredBy: "", name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", fromAccess: "", fromPropertyType: "", fromBedrooms: "", toAddress1: "", toTown: "", toPostcode: "", toAccess: "", toPropertyType: "", preferredDate: "", moveMonth: "", dateFlexible: false, notes: "" };
   const PC = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i;
   const PCG = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/gi;
-  const em = t.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); if (em) out.email = em[0];
-  const ph = t.match(/(\+?44|0)[\d\s()-]{8,13}\d/); if (ph) { let p = ph[0].replace(/[()\s-]/g, ""); if (p.startsWith("+44")) p = "0" + p.slice(3); out.phone = p; }
+  // A copied email reply: work from the customer's part; our own quoted message is kept aside.
+  const reply = splitQuotedReply(t);
+  const quotedPart = reply.quoted;
+  t = reply.body;
+  const pickEmail = txt => (String(txt || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).find(e => !OWN_EMAIL_RE.test(e)) || "";
+  out.email = pickEmail(t) || pickEmail(quotedPart);
+  const pickPhone = txt => { for (const m of String(txt || "").match(/(\+?44|0)[\d \t()-]{8,13}\d/g) || []) { let p = m.replace(/[()\s-]/g, ""); if (p.startsWith("+44")) p = "0" + p.slice(3); if (!OWN_PHONES.includes(p)) return p; } return ""; };
+  out.phone = pickPhone(t) || pickPhone(quotedPart);
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const fieldIn = (block, labels) => { for (const L of labels) { const m = block.match(new RegExp("^[ \\t]*" + esc(L) + "[ \\t]*:[ \\t]*(.+?)[ \\t]*$", "im")); if (m && m[1].trim()) return m[1].trim(); } return ""; };
   { const lp = fieldIn(t, ["phone", "mobile", "telephone", "tel", "phone number", "contact number"]).replace(/[()\s-]/g, ""); if (/^(\+?44|0)\d{9,10}$/.test(lp)) out.phone = lp.startsWith("+44") ? "0" + lp.slice(3) : lp; }
@@ -1919,6 +1969,12 @@ function parseEnquiryEmail(text) {
   if (!out.preferredDate) { const mm = (moveVal || "").match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i); if (mm) out.moveMonth = monthNameToYM(mm[1]); }
   if (!out.preferredDate && /\bno\b/i.test(moveVal)) out.dateFlexible = true;
 
+  if (!sectioned) {
+    const fb = addressBlock(t, FROM_HDR, TO_HDR), tb = addressBlock(t, TO_HDR, FROM_HDR);
+    if (fb) { out.fromAddress1 = fb; out.fromAddress2 = ""; out.fromPostcode = ""; out.fromTown = ""; labelledPC = true; }
+    if (tb) { out.toAddress1 = tb; out.toAddress2 = ""; out.toPostcode = ""; out.toTown = ""; labelledPC = true; }
+  }
+  if (!out.name) out.name = nameFromReply(t, quotedPart);
   const rm = readMessage(t, out, { lockPostcodes: sectioned || labelledPC });
   out.fromPropertyType = normalizePropertyType(out.fromPropertyType); out.toPropertyType = normalizePropertyType(out.toPropertyType);
   if (!fromBeds && !sectioned) fromBeds = "";
@@ -1973,8 +2029,13 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
   const [pickerKey, setPickerKey] = useState(0);
   const autofill = () => {
     const p = parseEnquiryEmail(pasteText);
-    setNewCust({ name: p.name || "", phone: p.phone || "", email: p.email || "", contacts: p.contacts || [] });
-    setCustomerId("");
+    // Already a customer? (same email or mobile, or the only customer with that name) → use them, don't duplicate.
+    const digits = x => String(x || "").replace(/\D/g, "");
+    const custs = data.customers || [];
+    let match = custs.find(c => (p.email && (c.email || "").toLowerCase() === p.email.toLowerCase()) || (p.phone && digits(c.phone) && digits(c.phone) === digits(p.phone)));
+    if (!match && p.name) { const nm = p.name.toLowerCase().replace(/^(mr|mrs|ms|miss|dr)\.?\s+/, ""); const hits = custs.filter(c => (c.name || "").toLowerCase().split(/\s+/).includes(nm.split(/\s+/)[0]) && (nm.split(/\s+/).length === 1 || (c.name || "").toLowerCase().includes(nm))); if (hits.length === 1) match = hits[0]; }
+    if (match) { setNewCust({ name: "", phone: "", email: "", contacts: [] }); setCustomerId(match.id); }
+    else { setNewCust({ name: p.name || "", phone: p.phone || "", email: p.email || "", contacts: p.contacts || [] }); setCustomerId(""); }
     setF(prev => ({ ...prev,
       fromAddress1: p.fromAddress1 || prev.fromAddress1, fromAddress2: p.fromAddress2 || prev.fromAddress2, fromTown: p.fromTown || prev.fromTown, fromPostcode: p.fromPostcode || prev.fromPostcode,
       referredBy: p.referredBy || prev.referredBy,
@@ -2049,6 +2110,26 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
         </Field>
       )}
 
+      {e.id && (!pasteOpen
+        ? <Btn size="sm" variant="grey" style={{ marginBottom: 10 }} onClick={() => setPasteOpen(true)}><Icon name="mail" size={14} /> Paste an email to fill in details</Btn>
+        : <div style={{ background: "#F9FAFB", border: "1px solid #F3F4F6", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+            <div style={{ fontSize: 12.5, color: "#374151", marginBottom: 8 }}>Paste the customer's email (e.g. their reply with the addresses). Only the move details below get filled in — check them before saving.</div>
+            <Textarea value={pasteText} onChange={setPasteText} rows={6} placeholder="Paste the email here…" />
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <Btn size="sm" variant="grey" onClick={() => setPasteOpen(false)}>Cancel</Btn>
+              <Btn size="sm" disabled={!pasteText.trim()} onClick={() => {
+                const p = parseEnquiryEmail(pasteText);
+                setF(prev => ({ ...prev,
+                  fromAddress1: p.fromAddress1 || prev.fromAddress1, fromAddress2: p.fromAddress1 ? (p.fromAddress2 || "") : prev.fromAddress2, fromTown: p.fromTown || prev.fromTown, fromPostcode: p.fromPostcode || prev.fromPostcode,
+                  toAddress1: p.toAddress1 || prev.toAddress1, toAddress2: p.toAddress1 ? (p.toAddress2 || "") : prev.toAddress2, toTown: p.toTown || prev.toTown, toPostcode: p.toPostcode || prev.toPostcode,
+                  fromAccess: p.fromAccess || prev.fromAccess, toAccess: p.toAccess || prev.toAccess,
+                  fromPropertyType: p.fromPropertyType || prev.fromPropertyType, toPropertyType: p.toPropertyType || prev.toPropertyType, fromBedrooms: p.fromBedrooms || prev.fromBedrooms,
+                  preferredDate: p.preferredDate || prev.preferredDate, moveMonth: p.moveMonth || prev.moveMonth, dateFlexible: p.dateFlexible || prev.dateFlexible,
+                }));
+                setPasteOpen(false); setPasteText("");
+              }}>Fill in</Btn>
+            </div>
+          </div>)}
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date">
         <Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} />
@@ -7174,10 +7255,14 @@ function AccountCard() {
     if (pw1 !== pw2) { setMsg("The two passwords don't match."); return; }
     setBusy(true);
     try {
+      // Make sure this device still has a live sign-in (it can lapse if the app sat open a long time).
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) { const r = await supabase.auth.refreshSession(); session = r && r.data && r.data.session; }
+      if (!session) throw new Error("SESSION_GONE");
       const { error } = await supabase.auth.updateUser({ password: pw1 });
       if (error) throw error;
       setPw1(""); setPw2(""); setPwOpen(false); alert("Password changed. Use the new one next time you sign in.");
-    } catch (e) { setMsg(/reauth|nonce|recent/i.test(e.message || "") ? "For security, sign out and back in, then change it straight away." : (e.message || "Couldn't change it.")); }
+    } catch (e) { setMsg(/SESSION_GONE|session missing|reauth|nonce|recent|jwt/i.test(e.message || "") ? "Your sign-in on this device has expired. Tap Sign out, sign back in, then change your password straight away." : (e.message || "Couldn't change it.")); }
     setBusy(false);
   }
   return (
