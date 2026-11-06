@@ -869,9 +869,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B146";
+  if (!t || isNaN(t)) return "B147";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B146 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B147 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -7349,12 +7349,12 @@ function UsersAdmin({ data }) {
       {users === null && <div style={{ fontSize: 13, color: "#94A4A0" }}>Loading…</div>}
       {users && users.length === 0 && !err && <div style={{ fontSize: 13, color: "#94A4A0" }}>No users yet.</div>}
       {(users || []).map(u => (
-        <div key={u.id} style={{ padding: "9px 0", borderTop: "1px solid #EEF3F2", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <div style={{ minWidth: 0 }}>
+        <div key={u.id} style={{ padding: "10px 0", borderTop: "1px solid #EEF3F2" }}>
+          <div style={{ minWidth: 0, marginBottom: 7 }}>
             <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14, overflow: "hidden", textOverflow: "ellipsis" }}>{u.email}</div>
             <div style={{ fontSize: 12, color: "#6A7B77" }}>{ROLE_LABEL[u.role] || "No role"}{u.staffName ? ` · ${u.staffName}` : ""} · {u.lastSignIn ? `last in ${fmtDateShort(u.lastSignIn.slice(0, 10))}` : "invited, not signed in yet"}</div>
           </div>
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <Btn size="sm" variant="grey" style={{ padding: "6px 10px" }} onClick={() => setForm({ id: u.id, email: u.email, role: u.role || "crew", staffName: u.staffName || "" })}>Edit</Btn>
             <Btn size="sm" variant="grey" style={{ padding: "6px 10px" }} onClick={() => resend(u)}>{u.lastSignIn ? "Reset password" : "Resend"}</Btn>
             {u.email !== CURRENT_USER.email && <Btn size="sm" variant="danger" style={{ padding: "6px 10px" }} onClick={() => remove(u)}>Remove</Btn>}
