@@ -571,6 +571,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
   const [expanded, setExpanded] = useState({});
   useEffect(() => { if (open && !state.rows) loadLog(customerId).then(setState); /* eslint-disable-next-line */ }, [open]);
   const rows = state.rows || [];
+  const refOf = (() => { const m = {}; try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {} return id => m[id]; })();
   return (
     <Card>
       <div onClick={() => setOpen(o => !o)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
@@ -589,11 +590,15 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
             const when = new Date(r.at);
             return (
               <div key={r.id} style={{ borderTop: "1px solid #F0F4F3", padding: "8px 0", minWidth: 0, overflowWrap: "anywhere" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#10211E", minWidth: 0, flex: 1 }}>{ch.length ? (r.summary || "").replace(/:.*$/, "") : r.summary}</div>
-                  <div style={{ fontSize: 11.5, color: "#94A4A0", whiteSpace: "nowrap" }}>{isNaN(when) ? "" : `${fmtUK(when.toISOString().slice(0, 10)).slice(0, 5)} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 800, color: "#10211E" }}>
+                  {r.who || "Unknown"} · {isNaN(when) ? "" : `${fmtUK(when.toISOString().slice(0, 10))} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`}
+                  {r.pending ? <span style={{ fontWeight: 600, color: "#B45309", fontSize: 11.5 }}> · not uploaded yet</span> : null}
                 </div>
-                <div style={{ fontSize: 11.5, color: "#94A4A0", marginBottom: ch.length ? 4 : 0 }}>{r.who || ""}{r.pending ? " · not uploaded yet" : ""}</div>
+                <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: ch.length ? 4 : 0 }}>
+                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? <b style={{ color: TEAL }}>#{c.ref}</b> : null; })()}
+                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? " · " : ""; })()}
+                  {ch.length ? (r.summary || "").replace(/:.*$/, "") : r.summary}
+                </div>
                 {(isOpen ? ch : ch.slice(0, 3)).map((c, i) => (
                   <div key={i} style={{ fontSize: 12.5, color: "#374151", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word" }}>
                     <b>{c.field}:</b> <span style={{ color: "#9CA3AF", textDecoration: "line-through" }}>{c.from}</span> → <span style={{ color: "#0F766E", fontWeight: 600 }}>{c.to}</span>
@@ -869,9 +874,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B147";
+  if (!t || isNaN(t)) return "B148";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B147 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B148 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
