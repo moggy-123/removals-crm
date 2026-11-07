@@ -115,7 +115,7 @@ function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(d
 // Brand
 const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
 
-const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost", "Let Go"];
+const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost", "Not quoted", "Let Go"];
 const JOB_STATUSES = ["Provisional", "Confirmed", "Completed", "Let Go"];
 const PROPERTY_TYPES = ["Detached house", "Semi-detached house", "Terraced house", "End of terrace house", "Townhouse", "Cottage", "House",
   "Detached bungalow", "Semi-detached bungalow", "Bungalow", "Flat / Apartment", "Maisonette", "Farmhouse", "Barn conversion",
@@ -156,6 +156,7 @@ const STATUS_META = {
   Surveyed:    { color: "#0891B2", bg: "#ECFEFF" },
   Booked:      { color: "#0891B2", bg: "#ECFEFF" },
   "Let Go":    { color: "#6B7280", bg: "#F3F4F6" },
+  "Not quoted": { color: "#6B7280", bg: "#F3F4F6" },
   Quoted:      { color: "#D97706", bg: "#FFFBEB" },
   Won:         { color: "#059669", bg: "#ECFDF5" },
   Lost:        { color: "#DC2626", bg: "#FEF2F2" },
@@ -874,9 +875,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B154";
+  if (!t || isNaN(t)) return "B156";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B154 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B156 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -1028,6 +1029,12 @@ function customerDeleteSummary(d, customerId) {
   const bits = [ne ? `${ne} enquir${ne === 1 ? "y" : "ies"}` : "", nj ? `${nj} move${nj === 1 ? "" : "s"}` : ""].filter(Boolean);
   return bits.length ? ` This also deletes their ${bits.join(" and ")}.` : "";
 }
+// We decided not to quote (too far, too small, not our kind of job…). Doesn't count against win rates.
+async function markNotQuotedFlow(data, en) {
+  const reason = prompt("Didn't quote — reason? (optional, e.g. too far, too small, customer cancelled before survey)");
+  if (reason === null) return;
+  await saveAndReload(upsertLocal(data, "enquiries", { ...en, status: "Not quoted", lostReason: reason.trim() }));
+}
 // Ask for a reason and mark lost. Cancel = no change.
 async function markLostFlow(data, en) {
   const reason = await pickLostReason(normalizeLost(en.lostReason));
@@ -1157,7 +1164,7 @@ function NewEnqCallBtn({ data, e, small }) {
 
 // Quote reminder for a surveyed enquiry with no move yet: "build" or "send", else null.
 function quoteTodo(data, e) {
-  if (!e || ["Lost", "Let Go", "Won"].includes(e.status) || (data.jobs || []).some(j => j.enquiryId === e.id)) return null;
+  if (!e || ["Lost", "Let Go", "Not quoted", "Won"].includes(e.status) || (data.jobs || []).some(j => j.enquiryId === e.id)) return null;
   if (!(e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted"].includes(e.status))) return null;
   if (!(Number(e.quoteTotal) > 0)) return { t: "Quote to build", c: "#0369A1" };
   if (!["Sent", "Accepted"].includes(e.quoteStatus)) return { t: "⚠️ Quote not emailed", c: "#C2410C" };
@@ -1169,7 +1176,7 @@ const enqGroup = e => (e.status === "New" && e.surveyDate) ? "Survey booked" : e
 // A survey is "missed" when its date has passed and it was never done (not surveyed, no inventory).
 function isMissedSurvey(e, todayIso = todayISO()) {
   return !!(e && e.surveyDate && e.surveyDate < todayIso && !e.surveyDone && !(e.inventory && e.inventory.length)
-    && !["Surveyed", "Quoted", "Won", "Lost", "Let Go"].includes(e.status));
+    && !["Surveyed", "Quoted", "Won", "Lost", "Let Go", "Not quoted"].includes(e.status));
 }
 function missedSurveys(data) { const t = todayISO(); return (data.enquiries || []).filter(e => isMissedSurvey(e, t)).sort((a, b) => a.surveyDate.localeCompare(b.surveyDate)); }
 function autoCompletePastMoves(d) {
@@ -1213,7 +1220,7 @@ function Dashboard({ data, setView, setData }) {
     .sort((a, b) => a.st.date.localeCompare(b.st.date))
     .slice(0, 6);
   const followUps = [
-    ...enquiries.filter(e => e.followUpDate && e.status !== "Lost").map(e => ({ kind: "enquiry", key: "e" + e.id, id: e.id, customerId: e.customerId, date: e.followUpDate, time: e.followUpTime || "", note: e.followUpNote, status: e.status })),
+    ...enquiries.filter(e => e.followUpDate && !["Lost", "Not quoted"].includes(e.status)).map(e => ({ kind: "enquiry", key: "e" + e.id, id: e.id, customerId: e.customerId, date: e.followUpDate, time: e.followUpTime || "", note: e.followUpNote, status: e.status })),
     ...(data.customers || []).filter(c => c.followUpDate).map(c => ({ kind: "customer", key: "c" + c.id, id: c.id, customerId: c.id, date: c.followUpDate, time: c.followUpTime || "", note: c.followUpNote })),
   ].sort((a, b) => ((a.date || "") + (a.time || "99:99")).localeCompare((b.date || "") + (b.time || "99:99"))).slice(0, 12);
   const custById = id => (data.customers || []).find(c => c.id === id) || {};
@@ -1221,7 +1228,7 @@ function Dashboard({ data, setView, setData }) {
     .filter(e => e.status === "New" && !e.surveyDate)
     .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   const todaysSurveys = enquiries
-    .filter(e => e.surveyDate === todayISO() && e.status !== "Lost")
+    .filter(e => e.surveyDate === todayISO() && !["Lost", "Not quoted"].includes(e.status))
     .sort((a, b) => (a.surveyTime || "").localeCompare(b.surveyTime || ""));
   // Availability today
   const todayIso = todayISO();
@@ -1253,7 +1260,7 @@ function Dashboard({ data, setView, setData }) {
   const _now = new Date();
   const nowHM = String(_now.getHours()).padStart(2, "0") + ":" + String(_now.getMinutes()).padStart(2, "0");
   const surveyLapsed = e => e.surveyDate < todayIso || (e.surveyDate === todayIso && !!e.surveyTime && e.surveyTime <= nowHM);
-  const isSurveyed = e => !!(e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won", "Lost", "Let Go"].includes(e.status));
+  const isSurveyed = e => !!(e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won", "Lost", "Let Go", "Not quoted"].includes(e.status));
   // Upcoming surveys, plus today's that have passed but aren't marked surveyed (shown red).
   // Earlier days' missed surveys live in the red "Missed survey" box at the top instead.
   // A survey stays on Home until its quote has been built AND emailed (or a move is created).
@@ -1262,7 +1269,7 @@ function Dashboard({ data, setView, setData }) {
   const quoteSent = e => quoteBuilt(e) && ["Sent", "Accepted"].includes(e.quoteStatus);
   const surveyStage = e => !isSurveyed(e) ? (surveyLapsed(e) ? "overdue" : "booked") : !quoteBuilt(e) ? "needQuote" : !quoteSent(e) ? "notSent" : "done";
   const upcomingSurveys = enquiries
-    .filter(e => e.surveyDate && !["Lost", "Let Go", "Won"].includes(e.status) && !hasMove(e))
+    .filter(e => e.surveyDate && !["Lost", "Let Go", "Not quoted", "Won"].includes(e.status) && !hasMove(e))
     .filter(e => surveyStage(e) === "booked")
     .sort((a, b) => (a.surveyDate + (a.surveyTime || "")).localeCompare(b.surveyDate + (b.surveyTime || "")));
   const bookedStaffToday = new Set(todayStages.flatMap(st => st.crew || []));
@@ -1311,7 +1318,7 @@ function Dashboard({ data, setView, setData }) {
         const TEALC = { tint: { borderColor: "#CDE7E2", background: "#F4FBF9" }, col: TEAL_D };
         const sm = { width: "100%", minWidth: 0, padding: "8px 4px", whiteSpace: "nowrap", fontSize: 13 };
         enquiries.forEach(e => {
-          if (["Lost", "Let Go"].includes(e.status)) return;
+          if (["Lost", "Let Go", "Not quoted"].includes(e.status)) return;
           const route = `${e.fromTown || e.fromPostcode || "—"} → ${e.toTown || e.toPostcode || "—"}`;
           if (surveyOverdue(e)) items.push({ key: "ms" + e.id, p: 1, sort: e.surveyDate, e, ...RED, label: `⚠️ Missed survey · was due ${fmtDateShort(e.surveyDate)}${e.surveyTime ? ` ${e.surveyTime}` : ""}`, sub: route, acts: [
             <Btn key="r" size="sm" style={sm} onClick={() => setResched(e)}>Reschedule</Btn>,
@@ -1379,7 +1386,7 @@ function Dashboard({ data, setView, setData }) {
       {(() => {
         const tMoves = jobs.filter(j => j.status !== "Let Go").flatMap(j => jobStages(j).filter(st => st.date === todayIso).map(st => ({ j, st })))
           .sort((a, b) => (a.st.time || "99").localeCompare(b.st.time || "99"));
-        const tSurveys = enquiries.filter(e => e.surveyDate === todayIso && !["Lost", "Let Go"].includes(e.status))
+        const tSurveys = enquiries.filter(e => e.surveyDate === todayIso && !["Lost", "Let Go", "Not quoted"].includes(e.status))
           .sort((a, b) => (a.surveyTime || "99").localeCompare(b.surveyTime || "99"));
         return (
           <>
@@ -2812,7 +2819,7 @@ function QuoteModal({ data, enquiry, onClose }) {
       quoteVat: vat, quoteTotal: total,
       quoteExtra: { ...extra, lateKey: extra.lateKey ?? "FREE", mpPct: Number(extra.mpPct) || 10 },
       quoteStatus: status, quoteSentDate: sentDate ?? enquiry.quoteSentDate,
-      status: ["Won", "Lost"].includes(enquiry.status) ? enquiry.status : (total > 0 ? "Quoted" : enquiry.status),
+      status: ["Won", "Lost", "Not quoted"].includes(enquiry.status) ? enquiry.status : (total > 0 ? "Quoted" : enquiry.status),
     };
   }
   // Keep the linked move's price in step with the quote total
@@ -3882,7 +3889,7 @@ function EnquiryDetail({ data, id, setView }) {
   const showQuoteCard = planDone || quoteDone;
   const nextHint = !surveyDone ? "Next: complete the survey — the move plan appears once it's done."
     : !planDone ? "Next: add the move plan — the quote appears once it's done."
-    : !quoteDone && !["Won", "Lost"].includes(e.status) ? "Next: build the quote — you can then create the provisional move."
+    : !quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) ? "Next: build the quote — you can then create the provisional move."
     : "";
 
   return (
@@ -4010,17 +4017,19 @@ function EnquiryDetail({ data, id, setView }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {quoteDone && !["Won", "Lost"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
+        {quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
       </div>
       {(() => {
-        const showFu = !linkedJob, showLost = !["Won", "Lost"].includes(e.status);
-        const n = (showFu ? 1 : 0) + (showLost ? 1 : 0);
+        const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
+        const showNq = showLost && !linkedJob && !(Number(e.quoteTotal) > 0);
+        const n = (showFu ? 1 : 0) + (showLost ? 1 : 0) + (showNq ? 1 : 0);
         const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
         return <>
           {n > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: `repeat(${n}, 1fr)`, gap: 8, marginTop: 8 }}>
               {showFu && <Btn variant="primary" style={eq} onClick={setFollowUp}>⏰ Follow-up</Btn>}
               {showLost && <Btn variant="grey" style={{ ...eq, color: "#B91C1C" }} onClick={markLost}>✕ Mark Lost</Btn>}
+              {showNq && <Btn variant="grey" style={{ ...eq, color: "#4B5563" }} onClick={() => markNotQuotedFlow(data, e)}>🚫 Didn't quote</Btn>}
             </div>
           )}
           <div style={{ display: "grid", gridTemplateColumns: canDelete() ? "1fr 1fr" : "1fr", gap: 8, marginTop: 8 }}>
@@ -4095,7 +4104,7 @@ function CustomersList({ data, setView }) {
         const lastDone = cJobs.filter(j => j.status === "Completed").sort((x, y) => (jobMoveDate(y) || "").localeCompare(jobMoveDate(x) || ""))[0];
         const badge = activeMove ? activeMove.status : latestEnq ? enqBadge(data, latestEnq) : lastDone ? "Completed" : null;
         // Quote still to build / email (surveyed, no move yet)
-        const qe = (data.enquiries || []).filter(e => e.customerId === c.id && !["Lost", "Let Go", "Won"].includes(e.status) && !cJobs.some(j => j.enquiryId === e.id)
+        const qe = (data.enquiries || []).filter(e => e.customerId === c.id && !["Lost", "Let Go", "Not quoted", "Won"].includes(e.status) && !cJobs.some(j => j.enquiryId === e.id)
           && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted"].includes(e.status))
           && !(Number(e.quoteTotal) > 0 && ["Sent", "Accepted"].includes(e.quoteStatus)));
         const quoteFlag = qe.length ? (qe.some(e => Number(e.quoteTotal) > 0) ? { t: "⚠️ Quote not emailed", c: "#C2410C" } : { t: "Quote to build", c: "#0369A1" }) : null;
@@ -4304,7 +4313,7 @@ function CustomerDetail({ data, id, setView }) {
   const jobs = (data.jobs || []).filter(j => j.customerId === id);
   // Storage and move options only appear once the customer has been surveyed (or already has a move / storage job).
   // A lost / let-go enquiry doesn't count, even if it was surveyed before it was lost.
-  const surveyedEnq = enquiries.some(e => !["Lost", "Let Go"].includes(e.status) && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won"].includes(e.status)));
+  const surveyedEnq = enquiries.some(e => !["Lost", "Let Go", "Not quoted"].includes(e.status) && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won"].includes(e.status)));
   const showMoveStorage = surveyedEnq || jobs.length > 0 || getStorageJobs(c).length > 0;
   const latest = enquiries[0];
   const openEnquiryEdit = en => { try { sessionStorage.setItem("removals_open_edit", en.id); } catch {} setView({ screen: "enquiryDetail", id: en.id }); };
@@ -4315,7 +4324,7 @@ function CustomerDetail({ data, id, setView }) {
   }
   // Quote still to build / still to email for a surveyed enquiry with no move yet
   const quotePanel = (() => {
-    const pending = enquiries.filter(e => !["Lost", "Let Go", "Won"].includes(e.status) && !jobs.some(j => j.enquiryId === e.id)
+    const pending = enquiries.filter(e => !["Lost", "Let Go", "Not quoted", "Won"].includes(e.status) && !jobs.some(j => j.enquiryId === e.id)
       && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted"].includes(e.status))
       && !(Number(e.quoteTotal) > 0 && ["Sent", "Accepted"].includes(e.quoteStatus)));
     if (!pending.length) return null;
@@ -4349,7 +4358,7 @@ function CustomerDetail({ data, id, setView }) {
     if (showMoveStorage) return null;
     let line, btn;
     if (!latest) { line = "No enquiry yet."; btn = <Btn size="sm" onClick={() => setView({ screen: "newEnquiry", customerId: c.id })}>+ New enquiry</Btn>; }
-    else if (["Lost", "Let Go"].includes(latest.status)) { line = `Enquiry ${latest.status === "Lost" ? "lost" : "let go"}${latest.lostReason ? ` — ${latest.lostReason}` : ""}. Changed their mind?`; btn = <Btn size="sm" onClick={() => reopenAndRebook(latest)}>📅 Rebook survey</Btn>; }
+    else if (["Lost", "Let Go", "Not quoted"].includes(latest.status)) { line = `${latest.status === "Lost" ? "Enquiry lost" : latest.status === "Not quoted" ? "We didn't quote" : "Enquiry let go"}${latest.lostReason ? ` — ${latest.lostReason}` : ""}. Changed their mind?`; btn = <Btn size="sm" onClick={() => reopenAndRebook(latest)}>📅 Rebook survey</Btn>; }
     else if (surveyOverdue(latest)) { line = `Survey missed — was due ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)})${latest.surveyTime ? ` · ${latest.surveyTime}` : ""}.`; btn = <Btn size="sm" onClick={() => setResched(latest)}>📅 Reschedule</Btn>; }
     else if (latest.surveyDate) { line = `Survey booked: ${fmtDate(latest.surveyDate)} (${dow(latest.surveyDate)})${latest.surveyTime ? ` · ${latest.surveyTime}` : ""}.`; btn = <Btn size="sm" variant="grey" onClick={() => openEnquiryEdit(latest)}>📅 Rebook survey</Btn>; }
     else { line = `Survey not booked yet.${latest.newCalledAt ? ` Last called ${fmtDateShort(latest.newCalledAt.slice(0, 10))}.` : " Not called yet."}`; btn = <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}><NewEnqCallBtn data={data} e={latest} /><Btn size="sm" variant="grey" onClick={() => openEnquiryEdit(latest)}>📅 Book survey</Btn></div>; }
@@ -4460,6 +4469,7 @@ function CustomerDetail({ data, id, setView }) {
             <StatusBadge status={enqBadge(data, e)} />
           </div>
           {e.status === "Lost" && <div style={{ fontSize: 13, color: "#B91C1C", fontWeight: 600, marginTop: 6 }}>Lost reason: {e.lostReason || "none given"}</div>}
+          {e.status === "Not quoted" && <div style={{ fontSize: 13, color: "#6B7280", fontWeight: 600, marginTop: 6 }}>We didn't quote{e.lostReason ? `: ${e.lostReason}` : ""}</div>}
         </Card>
       ))}
 
@@ -4905,8 +4915,8 @@ function enquiryOutcome(data, e) {
     surveyed, quoted, won,
     completed: !!jobs.find(j => j.status === "Completed"),
     provisional: !!provisional,
-    open: quoted && !won && e.status !== "Lost" && e.status !== "Let Go",
-    lost: e.status === "Lost", letGo: e.status === "Let Go",
+    open: quoted && !won && !["Lost", "Let Go", "Not quoted"].includes(e.status),
+    lost: e.status === "Lost", letGo: e.status === "Let Go", notQuoted: e.status === "Not quoted",
     lostReason: e.status === "Lost" ? normalizeLost(e.lostReason) : "",
     quote: Number(e.quoteTotal) || Number(jobs[0] && jobs[0].price) || 0,
     value,
@@ -4948,8 +4958,8 @@ function ReportsView({ data }) {
   const money = arr => arr.reduce((a, o) => a + o.value, 0);
   const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
   const gbp0 = n => "£" + Math.round(n || 0).toLocaleString("en-GB");
-  // Win rate is won ÷ quoted, so quotes still waiting for an answer keep it honest.
-  const decided = arr => sum(arr, o => o.quoted || o.won);
+  // Win rate = jobs booked ÷ leads (leads we chose not to quote don't count).
+  const decided = arr => sum(arr, o => !o.notQuoted);
 
   const wonN = sum(rows, o => o.won);
   const head = (t, sub) => <div style={{ marginBottom: 10 }}><div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>{t}</div>{sub && <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{sub}</div>}</div>;
@@ -4959,7 +4969,7 @@ function ReportsView({ data }) {
   // Lead sources
   const sources = group(rows, o => o.source).map(([k, arr]) => ({ k, n: arr.length, surveyed: sum(arr, o => o.surveyed), quoted: sum(arr, o => o.quoted), open: sum(arr, o => o.open), won: sum(arr, o => o.won), lost: sum(arr, o => o.lost), win: pct(sum(arr, o => o.won), decided(arr)), money: money(arr) }))
     .sort((a, b) => b.money - a.money || b.won - a.won || b.n - a.n);
-  const bestSrc = sources.filter(s => s.k !== "Not recorded" && s.k !== "Other" && s.quoted >= 3).sort((a, b) => b.win - a.win)[0];
+  const bestSrc = sources.filter(s => s.k !== "Not recorded" && s.k !== "Other" && s.n >= 3).sort((a, b) => b.win - a.win)[0];
   const topMoney = Math.max(1, ...sources.map(s => s.money));
   // Funnel
   const funnel = [["Enquiries", rows.length], ["Surveyed", sum(rows, o => o.surveyed)], ["Quotes given", sum(rows, o => o.quoted)], ["Won", wonN], ["Completed", sum(rows, o => o.completed)]];
@@ -5017,10 +5027,11 @@ function ReportsView({ data }) {
       </div>
 
       <Card>
-        {head("Lead sources", "Quoted = quotes still waiting for an answer. Win % = won ÷ (won + lost + quoted). ★ = best win rate, 3+ quotes. £ won by source is in the bars below.")}
+        {head("Lead sources", "Quoted = quotes still waiting for an answer. Win % = won ÷ leads (leads we didn't quote aren't counted). ★ = best win rate (3+ leads). £ won by source is in the bars below.")}
         {!sources.length ? <div style={{ fontSize: 13, color: "#9CA3AF" }}>No enquiries in this period.</div> : <>
           <Table first="Source" rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Quoted", r => r.open], ["Won", r => r.won], ["Lost", r => r.lost], ["Win %", r => `${r.win}%`, true]]} />
           <div style={{ marginTop: 12 }}>{sources.map(s => <div key={s.k} style={{ display: "grid", gridTemplateColumns: "110px 1fr 70px", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}><span style={{ color: "#374151", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.k}</span><Bar v={s.money} max={topMoney} /><span style={{ textAlign: "right", color: "#6A7B77" }}>{gbp0(s.money)}</span></div>)}</div>
+          {rows.some(o => o.notQuoted) && <div style={{ fontSize: 12, color: "#6A7B77", marginTop: 8 }}>{sum(rows, o => o.notQuoted)} lead{sum(rows, o => o.notQuoted) !== 1 ? "s" : ""} marked "Didn't quote" — left out of the win %.</div>}
           {sources.some(s => s.k === "Not recorded") && <div style={{ fontSize: 12, color: "#B45309", marginTop: 8 }}>"Not recorded" = enquiries with no Referred by. New enquiries now have to have one.</div>}
         </>}
       </Card>
@@ -5042,6 +5053,14 @@ function ReportsView({ data }) {
             <span style={{ color: "#6A7B77" }}><b style={{ color: "#10211E" }}>{lostN}</b> · {pct(lostN, funnel[2][1])}% of quotes given</span>
           </div>
           <Bar v={lostN} max={Math.max(1, funnel[0][1])} color="#DC2626" />
+          {(() => { const nq = sum(rows, o => o.notQuoted); return nq ? (
+            <div style={{ marginTop: 9 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
+                <span style={{ fontWeight: 700, color: "#6B7280" }}>Didn't quote</span>
+                <span style={{ color: "#6A7B77" }}><b style={{ color: "#10211E" }}>{nq}</b> · not counted in win %</span>
+              </div>
+              <Bar v={nq} max={Math.max(1, funnel[0][1])} color="#9CA3AF" />
+            </div>) : null; })()}
           {(() => { const waiting = sum(rows, o => o.open); return (
             <div style={{ marginTop: 9 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
@@ -5793,7 +5812,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const today = new Date();
   const hasStaff = st => !!(st.crew && st.crew.length);
   const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
-  const rawSurveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && en.status !== "Lost").sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
+  const rawSurveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && !["Lost", "Not quoted"].includes(en.status)).sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
   const jobsOn = d => showMoves ? rawJobsOn(d) : [];
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
@@ -6041,7 +6060,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const inRange = d => d && d >= startIso && d <= endIso;
         const items = [];
         if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (inRange(st.date)) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
-        if (showSurveys) (data.enquiries||[]).forEach(en => { if (inRange(en.surveyDate) && en.status!=="Lost") items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
+        if (showSurveys) (data.enquiries||[]).forEach(en => { if (inRange(en.surveyDate) && !["Lost","Not quoted"].includes(en.status)) items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
         if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { const first = bookingDates(b).find(d => d >= startIso); if (first && first <= endIso) items.push({ type:"maint", date: first, time:"00", v, b }); }));
         if (showStaffOff) (data.staff||[]).forEach(s => ((s.away)||[]).forEach(b => { const total = Math.max(1,Number(b.days)||1); if (b.start && isoAdd(b.start,{days:total-1}) >= startIso && b.start <= endIso) { const shown = b.start < startIso ? startIso : b.start; const dayNo = Math.round((new Date(shown+"T00:00") - new Date(b.start+"T00:00"))/86400000) + 1; items.push({ type:"staffoff", date: shown, time:"00", s, b, dayNo, total }); } }));
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
