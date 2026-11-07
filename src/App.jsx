@@ -874,9 +874,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B151";
+  if (!t || isNaN(t)) return "B152";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B151 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B152 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -4905,6 +4905,7 @@ function enquiryOutcome(data, e) {
     surveyed, quoted, won,
     completed: !!jobs.find(j => j.status === "Completed"),
     provisional: !!provisional,
+    open: quoted && !won && e.status !== "Lost" && e.status !== "Let Go",
     lost: e.status === "Lost", letGo: e.status === "Let Go",
     lostReason: e.status === "Lost" ? normalizeLost(e.lostReason) : "",
     quote: Number(e.quoteTotal) || Number(jobs[0] && jobs[0].price) || 0,
@@ -4938,15 +4939,15 @@ function ReportsView({ data }) {
   const group = (arr, key) => { const m = {}; arr.forEach(o => { const k = key(o); if (k == null || k === "") return; (m[k] = m[k] || []).push(o); }); return Object.entries(m); };
 
   // Lead sources
-  const sources = group(rows, o => o.source).map(([k, arr]) => ({ k, n: arr.length, surveyed: sum(arr, o => o.surveyed), quoted: sum(arr, o => o.quoted), won: sum(arr, o => o.won), lost: sum(arr, o => o.lost), win: pct(sum(arr, o => o.won), decided(arr)), money: money(arr) }))
+  const sources = group(rows, o => o.source).map(([k, arr]) => ({ k, n: arr.length, surveyed: sum(arr, o => o.surveyed), quoted: sum(arr, o => o.quoted), open: sum(arr, o => o.open), won: sum(arr, o => o.won), lost: sum(arr, o => o.lost), win: pct(sum(arr, o => o.won), decided(arr)), money: money(arr) }))
     .sort((a, b) => b.money - a.money || b.won - a.won || b.n - a.n);
   const bestSrc = sources.filter(s => s.k !== "Not recorded" && s.k !== "Other" && s.quoted >= 3).sort((a, b) => b.win - a.win)[0];
   const topMoney = Math.max(1, ...sources.map(s => s.money));
   // Funnel
-  const funnel = [["Enquiries", rows.length], ["Surveyed", sum(rows, o => o.surveyed)], ["Quoted", sum(rows, o => o.quoted)], ["Won", wonN], ["Completed", sum(rows, o => o.completed)]];
+  const funnel = [["Enquiries", rows.length], ["Surveyed", sum(rows, o => o.surveyed)], ["Quotes given", sum(rows, o => o.quoted)], ["Won", wonN], ["Completed", sum(rows, o => o.completed)]];
   const lostN = sum(rows, o => o.lost);
   // Surveyors
-  const survs = group(rows.filter(o => o.surveyor), o => o.surveyor).map(([k, arr]) => { const q = arr.filter(o => o.quote > 0); return { k, surveyed: sum(arr, o => o.surveyed), quoted: sum(arr, o => o.quoted), won: sum(arr, o => o.won), win: pct(sum(arr, o => o.won), decided(arr)), avgQuote: q.length ? q.reduce((a, o) => a + o.quote, 0) / q.length : 0, money: money(arr) }; }).sort((a, b) => b.money - a.money);
+  const survs = group(rows.filter(o => o.surveyor), o => o.surveyor).map(([k, arr]) => { const q = arr.filter(o => o.quote > 0); return { k, surveyed: sum(arr, o => o.surveyed), quoted: sum(arr, o => o.quoted), open: sum(arr, o => o.open), won: sum(arr, o => o.won), win: pct(sum(arr, o => o.won), decided(arr)), avgQuote: q.length ? q.reduce((a, o) => a + o.quote, 0) / q.length : 0, money: money(arr) }; }).sort((a, b) => b.money - a.money);
   // Lost reasons
   const lostRows = rows.filter(o => o.lost);
   const reasons = group(lostRows, o => o.lostReason).map(([k, arr]) => ({ k, n: arr.length, srcs: group(arr, o => o.source).sort((a, b) => b[1].length - a[1].length).slice(0, 2).map(([s, a]) => `${s} ${a.length}`).join(", ") })).sort((a, b) => b.n - a.n);
@@ -4986,7 +4987,7 @@ function ReportsView({ data }) {
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 10, marginBottom: 14 }}>
-        {[["Leads", rows.length], ["Quoted", sum(rows, o => o.quoted)], ["Won", wonN], ["Lost", sum(rows, o => o.lost)], ["Win rate", `${pct(wonN, decided(rows))}%`], ["£ won", gbp0(money(rows)), wonN ? `avg ${gbp0(money(rows) / wonN)}` : ""]].map(([l, v, sub]) => (
+        {[["Leads", rows.length], ["Quoted (waiting)", sum(rows, o => o.open)], ["Won", wonN], ["Lost", sum(rows, o => o.lost)], ["Win rate", `${pct(wonN, decided(rows))}%`], ["£ won", gbp0(money(rows)), wonN ? `avg ${gbp0(money(rows) / wonN)}` : ""]].map(([l, v, sub]) => (
           <div key={l} style={{ background: "#fff", borderRadius: 14, padding: "12px 14px", boxShadow: "0 1px 3px rgba(16,33,30,.06)" }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: "#10211E" }}>{v}</div>
             <div style={{ fontSize: 12, color: "#6A7B77", fontWeight: 600 }}>{l}{sub ? <span style={{ fontWeight: 500 }}> · {sub}</span> : null}</div>
@@ -4995,9 +4996,9 @@ function ReportsView({ data }) {
       </div>
 
       <Card>
-        {head("Lead sources", "Win % = won ÷ quoted (quotes still waiting count until they're decided). ★ = best win rate, 3+ quotes. £ won by source is in the bars below.")}
+        {head("Lead sources", "Quoted = quotes still waiting for an answer. Win % = won ÷ (won + lost + quoted). ★ = best win rate, 3+ quotes. £ won by source is in the bars below.")}
         {!sources.length ? <div style={{ fontSize: 13, color: "#9CA3AF" }}>No enquiries in this period.</div> : <>
-          <Table first="Source" rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Quoted", r => r.quoted], ["Won", r => r.won], ["Lost", r => r.lost], ["Win %", r => `${r.win}%`, true]]} />
+          <Table first="Source" rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Quoted", r => r.open], ["Won", r => r.won], ["Lost", r => r.lost], ["Win %", r => `${r.win}%`, true]]} />
           <div style={{ marginTop: 12 }}>{sources.map(s => <div key={s.k} style={{ display: "grid", gridTemplateColumns: "110px 1fr 70px", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}><span style={{ color: "#374151", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.k}</span><Bar v={s.money} max={topMoney} /><span style={{ textAlign: "right", color: "#6A7B77" }}>{gbp0(s.money)}</span></div>)}</div>
           {sources.some(s => s.k === "Not recorded") && <div style={{ fontSize: 12, color: "#B45309", marginTop: 8 }}>"Not recorded" = enquiries with no Referred by. New enquiries now have to have one.</div>}
         </>}
@@ -5017,14 +5018,14 @@ function ReportsView({ data }) {
         <div style={{ marginTop: 4, paddingTop: 9, borderTop: "1px solid #F0F4F3" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
             <span style={{ fontWeight: 700, color: "#B91C1C" }}>Lost</span>
-            <span style={{ color: "#6A7B77" }}><b style={{ color: "#10211E" }}>{lostN}</b> · {pct(lostN, funnel[2][1])}% of quoted</span>
+            <span style={{ color: "#6A7B77" }}><b style={{ color: "#10211E" }}>{lostN}</b> · {pct(lostN, funnel[2][1])}% of quotes given</span>
           </div>
           <Bar v={lostN} max={Math.max(1, funnel[0][1])} color="#DC2626" />
-          {(() => { const waiting = Math.max(0, funnel[2][1] - wonN - lostN); return (
+          {(() => { const waiting = sum(rows, o => o.open); return (
             <div style={{ marginTop: 9 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
-                <span style={{ fontWeight: 700, color: "#B45309" }}>Quoted, awaiting answer</span>
-                <span style={{ color: "#6A7B77" }}><b style={{ color: "#10211E" }}>{waiting}</b> · {pct(waiting, funnel[2][1])}% of quoted</span>
+                <span style={{ fontWeight: 700, color: "#B45309" }}>Quoted (waiting)</span>
+                <span style={{ color: "#6A7B77" }}><b style={{ color: "#10211E" }}>{waiting}</b> · {pct(waiting, funnel[2][1])}% of quotes given</span>
               </div>
               <Bar v={waiting} max={Math.max(1, funnel[0][1])} color="#F59E0B" />
             </div>); })()}
@@ -5034,7 +5035,7 @@ function ReportsView({ data }) {
       {!who && <Card>
         {head("Surveyors", "Average quote: " + (survs.map(s => `${s.k.split(" ")[0]} ${gbp0(s.avgQuote)}`).join(" · ") || "—"))}
         {!survs.length ? <div style={{ fontSize: 13, color: "#9CA3AF" }}>No surveys with a surveyor in this period.</div>
-          : <Table first="Surveyor" rows={survs} cols={[["Surveys", r => r.surveyed], ["Quoted", r => r.quoted], ["Won", r => r.won], ["Win %", r => `${r.win}%`, true], ["£ won", r => gbp0(r.money), true]]} />}
+          : <Table first="Surveyor" rows={survs} cols={[["Surveys", r => r.surveyed], ["Quoted", r => r.open], ["Won", r => r.won], ["Win %", r => `${r.win}%`, true], ["£ won", r => gbp0(r.money), true]]} />}
       </Card>}
 
       <Card>
