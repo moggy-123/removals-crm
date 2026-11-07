@@ -234,6 +234,25 @@ function nameFromReply(body, quoted) {
   return gr ? gr[1] : "";
 }
 
+const LEAD_SOURCES = ["Moved Before", "Customer Referral", "Google", "YBA", "Vehicle Spotted", "Estate Agent", "Website", "Reference Line"];
+// Turn whatever was typed (or came in by email) into one of the sources above.
+function normalizeReferral(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const hit = LEAD_SOURCES.find(x => x.toLowerCase() === s.toLowerCase());
+  if (hit) return hit;
+  const t = s.toLowerCase();
+  if (/reference\s*line|ref\.?\s*line/.test(t)) return "Reference Line";
+  if (/moved?\s*(with\s*(you|us)\s*)?before|previous|used (you|us)|repeat|return(ing)? customer|again|existing customer|past customer/.test(t)) return "Moved Before";
+  if (/recommend|referr|friend|family|word of mouth|neighbou?r|colleague|relative/.test(t)) return "Customer Referral";
+  if (/estate|agent|letting|solicitor/.test(t)) return "Estate Agent";
+  if (/\byba\b|yell/.test(t)) return "YBA";
+  if (/van|lorry|vehicle|truck|spotted|saw (your|you|the)|on the road/.test(t)) return "Vehicle Spotted";
+  if (/google|search|internet|maps/.test(t)) return "Google";
+  if (/website|web site|\bweb\b|online|site/.test(t)) return "Website";
+  return "Other";
+}
+
 function parseEnquiryEmail(text) {
   let t = (text || "").replace(/\r/g, "");
   if (/<[a-z!\/][^>]*>/i.test(t)) t = stripEmailHtml(t);
@@ -303,6 +322,7 @@ function parseEnquiryEmail(text) {
     if (tb) { out.toAddress1 = tb; out.toAddress2 = ""; out.toPostcode = ""; out.toTown = ""; labelledPC = true; }
   }
   if (!out.name) out.name = nameFromReply(t, quotedPart);
+  out.referredBy = normalizeReferral(out.referredBy);
   const rm = readMessage(t, out, { lockPostcodes: sectioned || labelledPC });
   out.fromPropertyType = normalizePropertyType(out.fromPropertyType); out.toPropertyType = normalizePropertyType(out.toPropertyType);
   if (!fromBeds && !sectioned) fromBeds = "";
