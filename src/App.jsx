@@ -874,9 +874,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B152";
+  if (!t || isNaN(t)) return "B153";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B152 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B153 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -4913,18 +4913,35 @@ function enquiryOutcome(data, e) {
     town: (e.fromTown || "").trim(),
     beds: Number(e.fromBedrooms) || 0,
     created: String(e.createdAt || e.surveyDate || "").slice(0, 10),
+    surveyDate: String(e.surveyDate || "").slice(0, 10),
+    moveDate: (() => { const j = wonJob || provisional || jobs[0]; const ds = j ? jobStages(j).map(st => st.date).filter(Boolean).sort() : []; return ds[0] || j?.moveDate || e.preferredDate || (e.moveMonth ? e.moveMonth + "-01" : ""); })(),
   };
 }
 
 function ReportsView({ data }) {
   const [period, setPeriod] = useState(() => { try { return localStorage.getItem("rm_rep_period") || "12m"; } catch { return "12m"; } });
   const [who, setWho] = useState("");
-  useEffect(() => { try { localStorage.setItem("rm_rep_period", period); } catch {} }, [period]);
+  const [basis, setBasis] = useState(() => { try { return localStorage.getItem("rm_rep_basis") || "survey"; } catch { return "survey"; } });
+  useEffect(() => { try { localStorage.setItem("rm_rep_period", period); localStorage.setItem("rm_rep_basis", basis); } catch {} }, [period, basis]);
   const today = todayISO();
-  const from = { "1m": today.slice(0, 7) + "-01", "3m": isoAdd(today, { months: -3 }), "6m": isoAdd(today, { months: -6 }), "12m": isoAdd(today, { months: -12 }), ytd: today.slice(0, 4) + "-01-01", all: "" }[period] || "";
+  const monthStart = today.slice(0, 7) + "-01";
+  const monthEnd = isoAdd(isoAdd(monthStart, { months: 1 }), { days: -1 });
+  const nextStart = isoAdd(monthStart, { months: 1 });
+  const [from, to] = {
+    "1m": [monthStart, monthEnd],
+    "next": [nextStart, isoAdd(isoAdd(nextStart, { months: 1 }), { days: -1 })],
+    "last": [isoAdd(monthStart, { months: -1 }), isoAdd(monthStart, { days: -1 })],
+    "3m": [isoAdd(today, { months: -3 }), basis === "created" ? today : isoAdd(today, { months: 3 })],
+    "6m": [isoAdd(today, { months: -6 }), basis === "created" ? today : isoAdd(today, { months: 6 })],
+    "12m": [isoAdd(today, { months: -12 }), basis === "created" ? today : isoAdd(today, { months: 12 })],
+    ytd: [today.slice(0, 4) + "-01-01", today.slice(0, 4) + "-12-31"],
+    all: ["", ""],
+  }[period] || ["", ""];
+  const dateOf = o => basis === "survey" ? o.surveyDate : basis === "move" ? o.moveDate : o.created;
   const all = (data.enquiries || []).map(e => enquiryOutcome(data, e));
   const surveyors = Array.from(new Set(all.map(o => o.surveyor).filter(Boolean))).sort();
-  const rows = all.filter(o => (!from || !o.created || o.created >= from) && (!who || o.surveyor === who));
+  const inRange = o => { if (!from && !to) return true; const d = dateOf(o); if (!d) return false; return (!from || d >= from) && (!to || d <= to); };
+  const rows = all.filter(o => inRange(o) && (!who || o.surveyor === who));
 
   const sum = (arr, f) => arr.reduce((a, o) => a + (f(o) ? 1 : 0), 0);
   const money = arr => arr.reduce((a, o) => a + o.value, 0);
@@ -4953,7 +4970,7 @@ function ReportsView({ data }) {
   const reasons = group(lostRows, o => o.lostReason).map(([k, arr]) => ({ k, n: arr.length, srcs: group(arr, o => o.source).sort((a, b) => b[1].length - a[1].length).slice(0, 2).map(([s, a]) => `${s} ${a.length}`).join(", ") })).sort((a, b) => b.n - a.n);
   // Monthly (always last 12 months, filtered by surveyor only)
   const months = Array.from({ length: 12 }, (_, i) => isoAdd(today.slice(0, 7) + "-01", { months: -(11 - i) }).slice(0, 7));
-  const monthly = months.map(m => { const arr = all.filter(o => o.created.slice(0, 7) === m && (!who || o.surveyor === who)); return { m, n: arr.length, won: sum(arr, o => o.won) }; });
+  const monthly = months.map(m => { const arr = all.filter(o => (dateOf(o) || "").slice(0, 7) === m && (!who || o.surveyor === who)); return { m, n: arr.length, won: sum(arr, o => o.won) }; });
   const maxMonth = Math.max(1, ...monthly.map(x => x.n));
   // Areas & sizes
   const towns = group(rows, o => o.town ? o.town.replace(/\b\w/g, c => c.toUpperCase()) : "").map(([k, arr]) => ({ k, n: arr.length, won: sum(arr, o => o.won), win: pct(sum(arr, o => o.won), decided(arr)), money: money(arr) })).sort((a, b) => b.n - a.n).slice(0, 8);
@@ -4978,7 +4995,14 @@ function ReportsView({ data }) {
     <div>
       <Card>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-          {[["1m", "This month"], ["3m", "3 months"], ["6m", "6 months"], ["12m", "12 months"], ["ytd", "This year"], ["all", "All time"]].map(([v, l]) => chip(v, l, period, setPeriod))}
+          {[["last", "Last month"], ["1m", "This month"], ["next", "Next month"], ["3m", "3 months"], ["6m", "6 months"], ["12m", "12 months"], ["ytd", "This year"], ["all", "All time"]].map(([v, l]) => chip(v, l, period, setPeriod))}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 10 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginRight: 2 }}>Go by:</span>
+          {[["created", "Enquiry date"], ["survey", "Survey date"], ["move", "Move date"]].map(([v, l]) => chip(v, l, basis, setBasis))}
+        </div>
+        <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 10 }}>
+          {from || to ? `${from ? fmtUK(from) : "start"} – ${to ? fmtUK(to) : "today"}` : "All dates"} · by {basis === "survey" ? "survey date" : basis === "move" ? "move date" : "the date the enquiry came in"}{period.endsWith("m") && period !== "1m" && basis !== "created" ? " (past and upcoming)" : ""}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {chip("", "All surveyors", who, setWho)}
