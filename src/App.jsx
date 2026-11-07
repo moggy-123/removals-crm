@@ -874,9 +874,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B149";
+  if (!t || isNaN(t)) return "B150";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B149 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B150 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -4943,6 +4943,7 @@ function ReportsView({ data }) {
   const topMoney = Math.max(1, ...sources.map(s => s.money));
   // Funnel
   const funnel = [["Enquiries", rows.length], ["Surveyed", sum(rows, o => o.surveyed)], ["Quoted", sum(rows, o => o.quoted)], ["Won", wonN], ["Completed", sum(rows, o => o.completed)]];
+  const lostN = sum(rows, o => o.lost);
   // Surveyors
   const survs = group(rows.filter(o => o.surveyor), o => o.surveyor).map(([k, arr]) => { const q = arr.filter(o => o.quote > 0); return { k, surveyed: sum(arr, o => o.surveyed), quoted: sum(arr, o => o.quoted), won: sum(arr, o => o.won), win: pct(sum(arr, o => o.won), decided(arr)), avgQuote: q.length ? q.reduce((a, o) => a + o.quote, 0) / q.length : 0, money: money(arr) }; }).sort((a, b) => b.money - a.money);
   // Lost reasons
@@ -4995,7 +4996,7 @@ function ReportsView({ data }) {
       <Card>
         {head("Lead sources", "Win rate = won ÷ (won + lost). ★ = best win rate (2+ decided jobs).")}
         {!sources.length ? <div style={{ fontSize: 13, color: "#9CA3AF" }}>No enquiries in this period.</div> : <>
-          <Table first="Source" rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Won", r => r.won], ["Win %", r => `${r.win}%`, true], ["£ won", r => gbp0(r.money), true]]} />
+          <Table first="Source" rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Won", r => r.won], ["Lost", r => r.lost], ["Win %", r => `${r.win}%`, true], ["£ won", r => gbp0(r.money), true]]} />
           <div style={{ marginTop: 12 }}>{sources.map(s => <div key={s.k} style={{ display: "grid", gridTemplateColumns: "110px 1fr 70px", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}><span style={{ color: "#374151", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.k}</span><Bar v={s.money} max={topMoney} /><span style={{ textAlign: "right", color: "#6A7B77" }}>{gbp0(s.money)}</span></div>)}</div>
           {sources.some(s => s.k === "Not recorded") && <div style={{ fontSize: 12, color: "#B45309", marginTop: 8 }}>"Not recorded" = enquiries with no Referred by. New enquiries now have to have one.</div>}
         </>}
@@ -5012,6 +5013,13 @@ function ReportsView({ data }) {
             <Bar v={v} max={Math.max(1, funnel[0][1])} color={i === 3 ? "#059669" : TEAL} />
           </div>
         ))}
+        <div style={{ marginTop: 4, paddingTop: 9, borderTop: "1px solid #F0F4F3" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
+            <span style={{ fontWeight: 700, color: "#B91C1C" }}>Lost</span>
+            <span style={{ color: "#6A7B77" }}><b style={{ color: "#10211E" }}>{lostN}</b> · {pct(lostN, rows.length)}% of enquiries · {pct(lostN, funnel[2][1])}% of quoted</span>
+          </div>
+          <Bar v={lostN} max={Math.max(1, funnel[0][1])} color="#DC2626" />
+        </div>
       </Card>
 
       {!who && <Card>
