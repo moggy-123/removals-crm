@@ -874,9 +874,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B153";
+  if (!t || isNaN(t)) return "B154";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B153 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B154 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -4921,8 +4921,9 @@ function enquiryOutcome(data, e) {
 function ReportsView({ data }) {
   const [period, setPeriod] = useState(() => { try { return localStorage.getItem("rm_rep_period") || "12m"; } catch { return "12m"; } });
   const [who, setWho] = useState("");
-  const [basis, setBasis] = useState(() => { try { return localStorage.getItem("rm_rep_basis") || "survey"; } catch { return "survey"; } });
-  useEffect(() => { try { localStorage.setItem("rm_rep_period", period); localStorage.setItem("rm_rep_basis", basis); } catch {} }, [period, basis]);
+  // Reports go by the survey date (or the date the enquiry came in, if there's no survey yet).
+  const basis = "survey";
+  useEffect(() => { try { localStorage.setItem("rm_rep_period", period); } catch {} }, [period]);
   const today = todayISO();
   const monthStart = today.slice(0, 7) + "-01";
   const monthEnd = isoAdd(isoAdd(monthStart, { months: 1 }), { days: -1 });
@@ -4937,7 +4938,7 @@ function ReportsView({ data }) {
     ytd: [today.slice(0, 4) + "-01-01", today.slice(0, 4) + "-12-31"],
     all: ["", ""],
   }[period] || ["", ""];
-  const dateOf = o => basis === "survey" ? o.surveyDate : basis === "move" ? o.moveDate : o.created;
+  const dateOf = o => o.surveyDate || o.created;
   const all = (data.enquiries || []).map(e => enquiryOutcome(data, e));
   const surveyors = Array.from(new Set(all.map(o => o.surveyor).filter(Boolean))).sort();
   const inRange = o => { if (!from && !to) return true; const d = dateOf(o); if (!d) return false; return (!from || d >= from) && (!to || d <= to); };
@@ -4997,12 +4998,8 @@ function ReportsView({ data }) {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
           {[["last", "Last month"], ["1m", "This month"], ["next", "Next month"], ["3m", "3 months"], ["6m", "6 months"], ["12m", "12 months"], ["ytd", "This year"], ["all", "All time"]].map(([v, l]) => chip(v, l, period, setPeriod))}
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 10 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginRight: 2 }}>Go by:</span>
-          {[["created", "Enquiry date"], ["survey", "Survey date"], ["move", "Move date"]].map(([v, l]) => chip(v, l, basis, setBasis))}
-        </div>
         <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 10 }}>
-          {from || to ? `${from ? fmtUK(from) : "start"} – ${to ? fmtUK(to) : "today"}` : "All dates"} · by {basis === "survey" ? "survey date" : basis === "move" ? "move date" : "the date the enquiry came in"}{period.endsWith("m") && period !== "1m" && basis !== "created" ? " (past and upcoming)" : ""}
+          {from || to ? `${from ? fmtUK(from) : "start"} – ${to ? fmtUK(to) : "today"}` : "All dates"} · by survey date
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {chip("", "All surveyors", who, setWho)}
