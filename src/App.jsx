@@ -879,12 +879,13 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
+const BUILD_NO = "B165";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B164";
+  if (!t || isNaN(t)) return BUILD_NO;
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B163 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `${BUILD_NO} · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -8082,6 +8083,8 @@ function MainApp() {
     return (
       <div style={{ display: "flex", height: "100vh", maxWidth: 1360, margin: "0 auto", background: "#EEF3F2", boxShadow: "0 0 60px rgba(16,33,30,.06)" }}>
         <ResponsiveStyles device={device} />
+        <ReadOnlyStyles />
+        <UpdateNotice />
         <aside style={{ width: 244, flexShrink: 0, background: "#fff", borderRight: "1px solid #E9EEED", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "22px 18px 18px" }}>
             <div style={{ width: 44, height: 44, borderRadius: 13, background: `linear-gradient(145deg, ${TEAL}, ${TEAL_D})`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 16px rgba(14,124,115,.32)" }}>
@@ -8090,7 +8093,7 @@ function MainApp() {
             <div>
               <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: "-.02em", lineHeight: 1.1 }}>Removals CRM</div>
               <div style={{ fontSize: 10, color: "#94A4A0", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".09em" }}>Enquiries &amp; moves</div>
-              <div style={{ fontSize: 10, color: "#94A4A0", fontWeight: 600, letterSpacing: ".02em", marginTop: 1 }}>{BUILD_LABEL}</div>
+              <div onClick={() => { if (confirm("Check for a newer version of the app?")) updateAppNow(); }} style={{ fontSize: 10, color: "#94A4A0", fontWeight: 600, letterSpacing: ".02em", marginTop: 1, cursor: "pointer" }}>{BUILD_LABEL.split(" (")[0]} ↻</div>
             </div>
           </div>
           <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
