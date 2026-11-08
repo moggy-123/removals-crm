@@ -879,7 +879,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B165";
+const BUILD_NO = "B166";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5171,18 +5171,27 @@ function ReportsView({ data }) {
 // Fetch the newest version: ask the service worker to update, clear its cached files,
 // then reload. Customer data is kept (it lives separately, and unsynced changes are uploaded first).
 async function updateAppNow(setMsg) {
+  // A clean update: save first, then drop the stored copy of the app completely and load a
+  // fresh one from the website. (Clearing half of it while the old copy was still in charge is
+  // what could leave a blank screen on the iPhone.)
   try {
     setMsg && setMsg("Checking…");
     try { await Promise.race([pushChangedOnly(loadData()), new Promise(r => setTimeout(r, 6000))]); } catch {}
+    setMsg && setMsg("Updating…");
     if ("serviceWorker" in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.update().catch(() => {})));
-      regs.forEach(r => { if (r.waiting) r.waiting.postMessage({ type: "SKIP_WAITING" }); });
+      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
     }
-    if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
-    setMsg && setMsg("Updating…");
-  } catch { /* reload anyway */ }
-  setTimeout(() => window.location.reload(), 300);
+    if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k).catch(() => {}))); }
+  } catch { /* load the fresh copy anyway */ }
+  setTimeout(() => window.location.replace("/?fresh=" + Date.now()), 300);
+}
+// If a part of the app that loads later (e.g. the PDF viewer) has gone after an update, reload once.
+if (typeof window !== "undefined") {
+  window.addEventListener("vite:preloadError", (e) => {
+    try { if (sessionStorage.getItem("removals_chunk_reload")) return; sessionStorage.setItem("removals_chunk_reload", "1"); } catch { return; }
+    e.preventDefault(); window.location.reload();
+  });
 }
 // ── "New version available" notice ───────────────────────────────────────────
 // Every few minutes (and when the app comes back to the front) it quietly checks the
