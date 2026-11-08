@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { pullFromCloud, pushToCloud, pushOne, deleteRecord as deleteRecordRaw, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
@@ -879,7 +879,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B166";
+const BUILD_NO = "B167";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1675,7 +1675,8 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
   const selected = customers.find(c => c.id === customerId);
   const listRef = useRef(null);
   const norm = s => (s || "").toLowerCase();
-  const filtered = q.trim() ? customers.filter(c => `${c.name || ""} ${c.company || ""} ${c.phone || ""} ${c.homePhone || ""} ${(c.contacts || []).map(x => `${x.name || ""} ${x.phone || ""}`).join(" ")} ${c.town || ""} ${c.postcode || ""} ${c.ref ? "#" + c.ref + " " + c.ref : ""}`.toLowerCase().includes(norm(q.trim()))).slice(0, 50) : [];
+  const searchIndex = useMemo(() => q.trim() ? buildCustomerSearch(data) : {}, [data, !!q.trim()]);
+  const filtered = q.trim() ? customers.filter(c => customerMatches(searchIndex, c, q)).slice(0, 50) : [];
   const groups = {};
   customers.forEach(c => { const ch = (c.name || "#").trim().charAt(0).toUpperCase(); const key = /[A-Z]/.test(ch) ? ch : "#"; (groups[key] = groups[key] || []).push(c); });
   const letters = Object.keys(groups).sort();
@@ -1703,7 +1704,7 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
           </div>
         ) : (
           <div>
-            <Input value={q} onChange={setQ} placeholder="Search name, ref #, phone, postcode…" />
+            <Input value={q} onChange={setQ} placeholder="Search anything – name, address, phone, email…" />
             {q.trim() ? (
               <div style={{ marginTop: 8, maxHeight: 300, overflowY: "auto" }}>
                 {filtered.length === 0 ? <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>No matches</div>
@@ -4092,6 +4093,40 @@ function EnquiryDetail({ data, id, setView }) {
   );
 }
 
+// ── Customer search: looks through every field of the customer AND their enquiries/moves
+// (addresses, postcodes, emails, notes, contacts…). Every word typed must appear somewhere.
+const SEARCH_SKIP_KEY = /^(id|.*Id|.*Ids|inventory|items|photos?|images?|signature.*|sig|pdf.*|history|log|createdAt|updatedAt|_.*)$/;
+function searchBits(v, out, depth) {
+  if (v == null || depth > 4) return;
+  if (typeof v === "string") { if (v.length < 2000 && !v.startsWith("data:")) out.push(v); return; }
+  if (typeof v === "number") { out.push(String(v)); return; }
+  if (Array.isArray(v)) { v.forEach(x => searchBits(x, out, depth + 1)); return; }
+  if (typeof v === "object") for (const k of Object.keys(v)) { if (!SEARCH_SKIP_KEY.test(k)) searchBits(v[k], out, depth + 1); }
+}
+function buildCustomerSearch(data) {
+  const extra = {};
+  const add = (cid, rec) => { if (!cid) return; const bits = []; searchBits(rec, bits, 0); (extra[cid] = extra[cid] || []).push(...bits); };
+  (data.enquiries || []).forEach(e => add(e.customerId, e));
+  (data.jobs || []).forEach(j => add(j.customerId, j));
+  const map = {};
+  (data.customers || []).forEach(c => {
+    const bits = []; searchBits(c, bits, 0);
+    if (c.ref) bits.push("#" + c.ref);
+    const text = (bits.join(" ") + " " + (extra[c.id] || []).join(" ")).toLowerCase();
+    map[c.id] = text + " " + text.replace(/\s+/g, ""); // squashed copy so "BS11AA" finds "BS1 1AA"
+  });
+  return map;
+}
+function customerMatches(index, c, q) {
+  const words = (q || "").toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const text = index[c.id] || "";
+  if (words.every(w => text.includes(w))) return true;
+  // Phone numbers typed with spaces or +44 still match however they were saved
+  const qd = q.replace(/\D/g, "").replace(/^44/, "0");
+  return qd.length >= 5 && /^[\d\s()+-]+$/.test(q.trim()) && text.replace(/\D/g, "").includes(qd);
+}
+
 // ── Customers ───────────────────────────────────────────────────────────────
 function CustomersList({ data, setView }) {
   const [q, setQ] = useState("");
@@ -4099,8 +4134,9 @@ function CustomersList({ data, setView }) {
   const [showRefPanel, setShowRefPanel] = useState(false);
   const [startVal, setStartVal] = useState(String(getRefStart()));
   const [busy, setBusy] = useState(false);
+  const searchIndex = useMemo(() => q.trim() ? buildCustomerSearch(data) : {}, [data, !!q.trim()]);
   const customers = [...(data.customers || [])]
-    .filter(c => !q || (`${c.name} ${c.company} ${c.phone} ${c.town} ${c.ref || ""} ${(c.contacts || []).map(x => `${x.name || ""} ${x.phone || ""}`).join(" ")}`.toLowerCase().includes(q.toLowerCase()) || (q.replace(/\D/g, "").length >= 5 && `${c.phone || ""} ${c.homePhone || ""} ${(c.contacts || []).map(x => x.phone || "").join(" ")}`.replace(/\D/g, "").includes(q.replace(/\D/g, "")))))
+    .filter(c => !q.trim() || customerMatches(searchIndex, c, q))
     // Newest first: highest reference number at the top. Brand-new customers still waiting for a
     // reference (it's given on the next sync) go above everyone, newest first.
     .sort((a, b) => {
@@ -4133,7 +4169,7 @@ function CustomersList({ data, setView }) {
 
       {showRefPanel && false && <div />}
 
-      <div style={{ marginBottom: 12 }}><Input value={q} onChange={setQ} placeholder="🔍 Search customers…" /></div>
+      <div style={{ marginBottom: 12 }}><Input value={q} onChange={setQ} placeholder="🔍 Search anything – name, address, postcode, phone, email…" /></div>
       {customers.length === 0 && <Empty icon="customers" text="No customers yet" />}
       {customers.map(c => {
         const cJobs = (data.jobs || []).filter(j => j.customerId === c.id);
