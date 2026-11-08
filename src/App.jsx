@@ -882,9 +882,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B162";
+  if (!t || isNaN(t)) return "B163";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B162 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B163 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -986,11 +986,20 @@ function Modal({ title, onClose, children, wide }) {
             <button onClick={onClose} style={{ background: "#EEF3F2", border: "none", borderRadius: 99, width: 34, height: 34, cursor: "pointer", fontSize: 18, color: "#6A7B77" }}>×</button>
           </div>
         </div>
-        <div style={{ overflowY: "auto", padding: "0 20px 20px", flex: 1 }}>{children}</div>
+        <div style={{ overflowY: "auto", padding: "0 20px 20px", flex: 1 }}>
+          {isReadOnly()
+            ? <><div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", background: "#F3F4F6", borderRadius: 8, padding: "6px 10px", marginBottom: 12 }}>👁 View only</div><div className="rm-ro">{children}</div></>
+            : children}
+        </div>
       </div>
     </div>
   );
 }
+// Read-only users: everything inside a pop-up is look-only. Room headers (data-ro-ok) can still open/close.
+const RO_CSS = `.rm-ro *{pointer-events:none!important}
+.rm-ro [data-ro-ok],.rm-ro [data-ro-ok] *{pointer-events:auto!important}
+.rm-ro button:not([data-ro-ok]):not([data-ro-show]){display:none!important}
+.rm-ro input,.rm-ro textarea,.rm-ro select{background:#F9FAFB!important;color:#10211E!important;-webkit-text-fill-color:#10211E}`;
 function Empty({ icon, text }) {
   return (
     <div style={{ textAlign: "center", padding: "48px 20px", color: "#94A4A0" }}>
@@ -2463,7 +2472,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   const DisPill = ({ slot }) => {
     const v = lines[slot];
     if (!v || !v.dismantle) return null;
-    return <button onClick={() => toggleWho(slot)} style={{ marginTop: 6, border: "none", background: TEAL, color: "#fff", borderRadius: 99, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>Dismantle &amp; reassemble: {v.dismantle} ⟲</button>;
+    return <button data-ro-show onClick={() => toggleWho(slot)} style={{ marginTop: 6, border: "none", background: TEAL, color: "#fff", borderRadius: 99, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>Dismantle &amp; reassemble: {v.dismantle} ⟲</button>;
   };
   const rec = recommendVehicle(aTot.cuFt);
 
@@ -2570,7 +2579,7 @@ function InventoryModal({ data, enquiry, onClose }) {
     };
     return (
       <div style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
-        <button onClick={() => setOpenSection(isOpen ? null : label)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#111827" }}>
+        <button data-ro-ok onClick={() => setOpenSection(isOpen ? null : label)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#111827" }}>
           <span>{label}</span>
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {isBedroom && beds.length > 1 && <span onClick={e => { e.stopPropagation(); removeBedroom(label); }} style={{ color: "#DC2626", fontSize: 13, fontWeight: 600 }}>Remove</span>}
@@ -2691,7 +2700,7 @@ function InventoryModal({ data, enquiry, onClose }) {
     const hasData = (r.text || "").trim() || Number(r.cuFt) > 0 || Number(r.wardrobe) > 0;
     return (
       <div key={label} style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, overflow: "hidden" }}>
-        <button onClick={() => setOpenSection(isOpen ? null : label)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#111827" }}>
+        <button data-ro-ok onClick={() => setOpenSection(isOpen ? null : label)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#111827" }}>
           <span>{label}</span>
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {isBedroom && beds.length > 1 && <span onClick={e => { e.stopPropagation(); removeBedroom(label); }} style={removeLink}>Remove</span>}
@@ -3966,10 +3975,10 @@ function EnquiryDetail({ data, id, setView }) {
             {((e.inventory && e.inventory.length) || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "surveyPdf", id: e.id })}><Icon name="quote" size={14} /> Survey &amp; move plan PDF</Btn> : null}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-            {surveyOverdue(e) && <Btn size="sm" variant="danger" onClick={() => setShowResched(true)}>📅 Reschedule</Btn>}
+            {!isReadOnly() && surveyOverdue(e) && <Btn size="sm" variant="danger" onClick={() => setShowResched(true)}>📅 Reschedule</Btn>}
             <NewEnqCallBtn data={data} e={e} small />
-            <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {e.volumeCuFt ? "Edit" : "Start"}</Btn>
-            {e.surveyDate && (() => { const surveyed = e.surveyDone || ["Surveyed", "Quoted", "Won"].includes(e.status); return <Btn size="sm" variant={surveyed ? "grey" : "primary"} onClick={async () => { const done = !surveyed; await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{surveyed ? "✓ Surveyed" : "Mark surveyed"}</Btn>; })()}
+            {(!isReadOnly() || (e.inventory && e.inventory.length)) && <Btn size="sm" onClick={() => setShowInv(true)}><Icon name="box" size={14} /> {isReadOnly() ? "View" : e.volumeCuFt ? "Edit" : "Start"}</Btn>}
+            {!isReadOnly() && e.surveyDate && (() => { const surveyed = e.surveyDone || ["Surveyed", "Quoted", "Won"].includes(e.status); return <Btn size="sm" variant={surveyed ? "grey" : "primary"} onClick={async () => { const done = !surveyed; await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{surveyed ? "✓ Surveyed" : "Mark surveyed"}</Btn>; })()}
           </div>
         </div>
       </Card>
@@ -3993,7 +4002,7 @@ function EnquiryDetail({ data, id, setView }) {
               </div>
             )}
           </div>
-          <Btn size="sm" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {(e.stages && e.stages.length) ? "Edit" : "Add"}</Btn>
+          {(!isReadOnly() || (e.stages && e.stages.length)) && <Btn size="sm" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {isReadOnly() ? "View" : (e.stages && e.stages.length) ? "Edit" : "Add"}</Btn>}
         </div>
       </Card>}
 
@@ -4007,7 +4016,7 @@ function EnquiryDetail({ data, id, setView }) {
               {e.quoteSentDate ? ` · sent ${fmtDateShort(e.quoteSentDate)}` : ""}
             </div>
           </div>
-          <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {e.quoteTotal ? "Edit" : "Build"}</Btn>
+          {(!isReadOnly() || e.quoteTotal) && <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {isReadOnly() ? "View" : e.quoteTotal ? "Edit" : "Build"}</Btn>}
         </div>
         {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
         {(() => { const q = quoteChase(data, e); return q ? (
@@ -4032,7 +4041,7 @@ function EnquiryDetail({ data, id, setView }) {
                 {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}
               </div>
             </div>
-            <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> Manage</Btn>
+            <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {isReadOnly() ? "View" : "Manage"}</Btn>
           </div>
         </Card>
       )}
@@ -4047,13 +4056,14 @@ function EnquiryDetail({ data, id, setView }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
+        {!isReadOnly() && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
       </div>
       {(() => {
         const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
         const showNq = showLost && !linkedJob && !(Number(e.quoteTotal) > 0);
         const n = (showFu ? 1 : 0) + (showLost ? 1 : 0) + (showNq ? 1 : 0);
         const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
+        if (isReadOnly()) return <Btn variant="grey" style={{ ...eq, marginTop: 8 }} onClick={() => setShowEdit(true)}>👁 View enquiry details</Btn>;
         return <>
           {n > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: `repeat(${n}, 1fr)`, gap: 8, marginTop: 8 }}>
@@ -7905,6 +7915,7 @@ function AuthGateInner() {
 }
 export default AuthGate;
 
+function ReadOnlyStyles() { return isReadOnly() ? <style>{RO_CSS}</style> : null; }
 function ReadOnlyBanner() {
   return <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", color: "#4B5563", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 700, marginBottom: 12 }}>👁 Read-only access — you can look at everything but can't change anything.</div>;
 }
@@ -8111,6 +8122,7 @@ function MainApp() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#EEF3F2" }}>
       <ResponsiveStyles device={device} />
+      <ReadOnlyStyles />
       <UpdateNotice />
       <style>{".rm-page-title{display:none!important}"}</style>
       <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
