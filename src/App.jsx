@@ -879,7 +879,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B168";
+const BUILD_NO = "B169";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -7841,6 +7841,16 @@ function CrewPreviewModal({ data, job, onClose }) {
     </Modal>
   );
 }
+function CrewPdfButton({ data, en, cust }) {
+  const [busy, setBusy] = useState(false);
+  const open = async () => {
+    setBusy(true);
+    try { const { bytes, ref } = await buildSurveyPdf(en, cust, data, "staff"); const f = new File([bytes], `MovePlan-STAFF-${ref || "RJ"}.pdf`, { type: "application/pdf" }); await showPdf(f, f.name); }
+    catch (ex) { alert("Could not open the move plan: " + ((ex && ex.message) || ex)); }
+    setBusy(false);
+  };
+  return <button type="button" data-ro-ok onClick={open} disabled={busy} style={{ width: "100%", margin: "4px 0 10px", padding: "11px 12px", borderRadius: 11, border: "1.5px solid #CFE3DF", background: "#F3FAF8", color: TEAL_D, fontWeight: 800, fontSize: 14.5, cursor: "pointer" }}>{busy ? "Opening…" : "📄 Open full move plan (staff copy)"}</button>;
+}
 const CREW_OPENS_AT = "07:30";
 function crewAddress(parts) { return parts.filter(Boolean).join(", "); }
 function CrewJobCard({ data, j, st }) {
@@ -7880,6 +7890,7 @@ function CrewJobCard({ data, j, st }) {
       {st.notes && <><H>Notes</H><div style={{ fontSize: 14, color: "#374151", whiteSpace: "pre-wrap" }}>{st.notes}</div></>}
       <H>Inventory</H>
       {rooms.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0" }}>No inventory recorded.</div>}
+      {en.id && <CrewPdfButton data={data} en={en} cust={cust} />}
       {rooms.map(([room, items]) => {
         const moving = items.filter(it => it.qty > 0 && !it.dismantleNote), staying = items.filter(it => it.qty < 0), dis = items.filter(it => it.dismantleNote);
         return (
