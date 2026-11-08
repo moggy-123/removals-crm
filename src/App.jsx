@@ -878,9 +878,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B158";
+  if (!t || isNaN(t)) return "B159";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B158 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B159 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -1205,6 +1205,7 @@ function Dashboard({ data, setView, setData }) {
   const dashShow = ""; // the Surveys / Moves / Servicing buttons were removed
   const [tmOpen, toggleTm] = useRemembered("removals_home_today_moves");
   const [tsOpen, toggleTs] = useRemembered("removals_home_today_surveys");
+  const [svOpen, toggleSv] = useRemembered("removals_home_servicing", false);
   const [editFu, setEditFu] = useState(null);
   const [resched, setResched] = useState(null);
   const [chaseFor, setChaseFor] = useState(null);
@@ -1491,12 +1492,11 @@ function Dashboard({ data, setView, setData }) {
 
       {(dashShow === "" || dashShow === "servicing") && (() => {
         const list = upcomingServicing.filter(({ b }) => inWindow(b.start));
-        if (dashShow === "" && list.length === 0) return null;
         return (
         <>
-          {dashShow === "" && <SectionTitle>Upcoming servicing</SectionTitle>}
-          <div style={{ marginBottom: 18 }}>
-            {list.length === 0 ? <Empty icon="truck" text="No servicing this month or next" /> : list.map(({ v, b }, ix) => (
+          {dashShow === "" && <CollapseBar title="Servicing" count={list.length} open={svOpen} onToggle={toggleSv} color="#475569" emptyText="None this month or next" />}
+          {(dashShow !== "" || svOpen) && <div style={{ marginBottom: 18 }}>
+            {list.length === 0 ? (dashShow !== "" ? <Empty icon="truck" text="No servicing this month or next" /> : null) : list.map(({ v, b }, ix) => (
               <Card key={ix} onClick={() => setView({ screen: "calendar", calMode: "day", date: b.start })} style={{ borderColor: "#D3DEEA", background: "#F3F6FA" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
@@ -1507,7 +1507,7 @@ function Dashboard({ data, setView, setData }) {
                 </div>
               </Card>
             ))}
-          </div>
+          </div>}
         </>
         );
       })()}
