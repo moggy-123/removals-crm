@@ -879,7 +879,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B167";
+const BUILD_NO = "B168";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3845,6 +3845,7 @@ function EnquiryDetail({ data, id, setView }) {
   const [showQuote, setShowQuote] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [showMove, setShowMove] = useState(false);
+  const [showCrew, setShowCrew] = useState(false);
   const [rebook, setRebook] = useState(false);
   const [showResched, setShowResched] = useState(false);
   const [showChaseDate, setShowChaseDate] = useState(false);
@@ -4043,10 +4044,14 @@ function EnquiryDetail({ data, id, setView }) {
                 {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}
               </div>
             </div>
-            <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {isReadOnly() ? "View" : "Manage"}</Btn>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
+              <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {isReadOnly() ? "View" : "Manage"}</Btn>
+              <Btn size="sm" variant="grey" onClick={() => setShowCrew(true)}>👷 Crew view</Btn>
+            </div>
           </div>
         </Card>
       )}
+      {showCrew && linkedJob && <CrewPreviewModal data={data} job={linkedJob} onClose={() => setShowCrew(false)} />}
 
       {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
@@ -5729,6 +5734,7 @@ function JobDetail({ data, id, setView }) {
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const [confirming, setConfirming] = useState(false);
+  const [crewPreview, setCrewPreview] = useState(false);
   const vehLabel = vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; };
 
   const setStage = (idx, key, val) => setF(p => ({ ...p, stages: p.stages.map((st, i) => i === idx ? { ...st, [key]: val } : st) }));
@@ -5830,11 +5836,11 @@ function JobDetail({ data, id, setView }) {
         </div>
       )}
       {customer && <OtherContacts customer={customer} onLog={en => logComm(customer.id, en)} />}
-      {customer && j.enquiryId && (
-        <div style={{ marginBottom: 12 }}>
-          <Btn size="sm" variant="grey" onClick={() => setView({ screen: "enquiryDetail", id: j.enquiryId })}>View enquiry</Btn>
-        </div>
-      )}
+      <div style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {customer && j.enquiryId && <Btn size="sm" variant="grey" onClick={() => setView({ screen: "enquiryDetail", id: j.enquiryId })}>View enquiry</Btn>}
+        <Btn size="sm" variant="grey" onClick={() => setCrewPreview(true)}>👷 Crew view</Btn>
+      </div>
+      {crewPreview && <CrewPreviewModal data={data} job={j} onClose={() => setCrewPreview(false)} />}
 
       <Card>
         <Row label="From" value={[j.fromAddress1, j.fromAddress2, j.fromTown, j.fromPostcode].filter(Boolean).join(", ")} />
@@ -7824,6 +7830,17 @@ function UsersAdmin({ data }) {
 }
 
 // ── Crew: just their jobs for today, shown from 7:30am ──
+function CrewPreviewModal({ data, job, onClose }) {
+  const stages = jobStages(job);
+  return (
+    <Modal title="What the crew see" onClose={onClose}>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 10 }}>This is the job as porters and drivers see it on their phones (on the day, from 7:30am).</div>
+      <div style={{ background: "#EEF3F2", borderRadius: 14, padding: 10 }}>
+        {stages.length ? stages.map((st, i) => <CrewJobCard key={st.id || i} data={data} j={job} st={st} />) : <div style={{ fontSize: 13, color: "#94A4A0" }}>No days booked on this move yet.</div>}
+      </div>
+    </Modal>
+  );
+}
 const CREW_OPENS_AT = "07:30";
 function crewAddress(parts) { return parts.filter(Boolean).join(", "); }
 function CrewJobCard({ data, j, st }) {
