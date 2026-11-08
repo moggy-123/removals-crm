@@ -875,9 +875,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B156";
+  if (!t || isNaN(t)) return "B157";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B156 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B157 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -5127,6 +5127,27 @@ function ReportsView({ data }) {
   );
 }
 
+// Fetch the newest version: ask the service worker to update, clear its cached files,
+// then reload. Customer data is kept (it lives separately, and unsynced changes are uploaded first).
+async function updateAppNow(setMsg) {
+  try {
+    setMsg && setMsg("Checking…");
+    try { await Promise.race([pushChangedOnly(loadData()), new Promise(r => setTimeout(r, 6000))]); } catch {}
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.update().catch(() => {})));
+      regs.forEach(r => { if (r.waiting) r.waiting.postMessage({ type: "SKIP_WAITING" }); });
+    }
+    if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
+    setMsg && setMsg("Updating…");
+  } catch { /* reload anyway */ }
+  setTimeout(() => window.location.reload(), 300);
+}
+function UpdateButton({ style }) {
+  const [msg, setMsg] = useState("");
+  return <Btn size="sm" variant="grey" style={style} disabled={!!msg} onClick={() => updateAppNow(setMsg)}>{msg || "↻ Update app"}</Btn>;
+}
+
 function CompanyView({ data, setView, setData }) {
   const restoreRef = useRef(null);
   const [restoring, setRestoring] = useState(false);
@@ -5195,7 +5216,10 @@ function CompanyView({ data, setView, setData }) {
   return (
     <div>
       <h2 className="rm-page-title" style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>Company</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 16 }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build {BUILD_LABEL}</span></div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: "#6A7B77" }}>Your fleet and team · <span style={{ color: TEAL, fontWeight: 700 }}>build {BUILD_LABEL}</span></div>
+        <UpdateButton />
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Btn style={{ width: "100%", marginBottom: 0 }} onClick={() => setView({ screen: "reports" })}>📊 Reports — where leads come from &amp; what wins</Btn>
@@ -8021,7 +8045,7 @@ function MainApp() {
           </div>
           <div>
             <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", letterSpacing: "-.02em", lineHeight: 1.15 }}>{PAGE_TITLES[view.screen] || "Removals CRM"}</div>
-            <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>{PAGE_TITLES[view.screen] ? "Removals CRM" : <>Enquiries &amp; moves</>}<span style={{ textTransform: "none", letterSpacing: 0, opacity: .8, fontWeight: 600 }}> · {BUILD_LABEL.split(" (")[0]}</span></div>
+            <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>{PAGE_TITLES[view.screen] ? "Removals CRM" : <>Enquiries &amp; moves</>}<span onClick={() => { if (confirm("Check for a newer version of the app?")) updateAppNow(); }} style={{ textTransform: "none", letterSpacing: 0, opacity: .8, fontWeight: 600, cursor: "pointer" }}> · {BUILD_LABEL.split(" (")[0]} ↻</span></div>
           </div>
         </div>
         <SyncDot />
