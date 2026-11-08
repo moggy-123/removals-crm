@@ -21,6 +21,26 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Safety net: if the app hasn't appeared after 12 seconds (e.g. a half-finished update on
+         the iPhone), show a button that clears the stored copy and loads a fresh one. -->
+    <script>
+      setTimeout(function () {
+        var root = document.getElementById("root");
+        if (!root || root.children.length) return;
+        var box = document.createElement("div");
+        box.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;font-family:system-ui,sans-serif;background:#F8FAFC;color:#10211E";
+        box.innerHTML = '<div style="font-size:18px;font-weight:700">The app didn\'t load properly</div><div style="font-size:15px;color:#5B6B67">Tap below to load a fresh copy. Your saved work is kept.</div><button id="rj-fix" style="background:#0F766E;color:#fff;border:none;border-radius:12px;padding:14px 22px;font-size:16px;font-weight:700">Reload the app</button>';
+        document.body.appendChild(box);
+        document.getElementById("rj-fix").onclick = function () {
+          this.textContent = "Loading…";
+          var go = function () { location.replace("/?fresh=" + Date.now()); };
+          var jobs = [];
+          try { if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })); } catch (e) {}
+          try { if (window.caches) jobs.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })); } catch (e) {}
+          Promise.all(jobs).then(go, go); setTimeout(go, 4000);
+        };
+      }, 12000);
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
