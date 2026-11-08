@@ -878,9 +878,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B159";
+  if (!t || isNaN(t)) return "B160";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B159 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B160 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -5146,6 +5146,45 @@ async function updateAppNow(setMsg) {
   } catch { /* reload anyway */ }
   setTimeout(() => window.location.reload(), 300);
 }
+// ── "New version available" notice ───────────────────────────────────────────
+// Every few minutes (and when the app comes back to the front) it quietly checks the
+// live site. If the app's code file has changed since this copy loaded, a bar appears.
+function currentScriptName() {
+  const sc = Array.from(document.querySelectorAll("script[type=module][src]")).map(x => x.getAttribute("src")).find(x => /\/assets\/index-.*\.js/.test(x || ""));
+  return sc ? sc.split("/").pop() : "";
+}
+async function newVersionWaiting() {
+  const mine = currentScriptName();
+  if (!mine) return false; // running the developer preview, nothing to compare
+  try {
+    const r = await fetch(`/index.html?v=${Date.now()}`, { cache: "no-store" });
+    if (!r.ok) return false;
+    const m = (await r.text()).match(/\/assets\/(index-[^"']+\.js)/);
+    return !!(m && m[1] !== mine);
+  } catch { return false; }
+}
+function UpdateNotice() {
+  const [ready, setReady] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const check = async () => { if (alive && !document.hidden && await newVersionWaiting() && alive) setReady(true); };
+    const t0 = setTimeout(check, 4000);
+    const iv = setInterval(check, 5 * 60 * 1000);
+    const onVis = () => { if (!document.hidden) check(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; clearTimeout(t0); clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+  if (!ready || hidden) return null;
+  return (
+    <div style={{ position: "fixed", left: 12, right: 12, bottom: "calc(env(safe-area-inset-bottom, 0px) + 78px)", zIndex: 9000, maxWidth: 520, margin: "0 auto", background: "#0F2E2A", color: "#fff", borderRadius: 14, padding: "11px 12px 11px 16px", display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 24px rgba(0,0,0,.25)" }}>
+      <div style={{ flex: 1, fontSize: 14, fontWeight: 700 }}>✨ A new version of the app is ready</div>
+      <button type="button" onClick={() => updateAppNow(setBusy)} disabled={!!busy} style={{ background: "#14B8A6", color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>{busy || "Update"}</button>
+      <button type="button" onClick={() => setHidden(true)} aria-label="Later" style={{ background: "none", border: "none", color: "#A7C4BF", fontSize: 20, lineHeight: 1, cursor: "pointer", padding: "0 2px" }}>×</button>
+    </div>
+  );
+}
 function UpdateButton({ style }) {
   const [msg, setMsg] = useState("");
   return <Btn size="sm" variant="grey" style={style} disabled={!!msg} onClick={() => updateAppNow(setMsg)}>{msg || "↻ Update app"}</Btn>;
@@ -7780,6 +7819,7 @@ function CrewApp() {
   return (
     <div style={{ minHeight: "100vh", background: "#EEF3F2" }}>
       <ResponsiveStyles device="phone" />
+      <UpdateNotice />
       <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 11 }}>
         <div>
           <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", lineHeight: 1.15 }}>Today's jobs</div>
@@ -8043,6 +8083,7 @@ function MainApp() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#EEF3F2" }}>
       <ResponsiveStyles device={device} />
+      <UpdateNotice />
       <style>{".rm-page-title{display:none!important}"}</style>
       <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
