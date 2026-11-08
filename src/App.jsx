@@ -170,7 +170,8 @@ const STATUS_META = {
 // ── Who's signed in ─────────────────────────────────────────────────────────
 // Roles: admin (everything) · office / surveyor (everything except settings & deleting) · crew (today's jobs only)
 let CURRENT_USER = { role: "admin", email: "", staffName: "" };
-const ROLE_LABEL = { admin: "Admin", office: "Office", surveyor: "Surveyor", crew: "Crew" };
+const ROLE_LABEL = { admin: "Admin", office: "Office", surveyor: "Surveyor", viewer: "Read only", crew: "Crew" };
+const isReadOnly = () => CURRENT_USER.role === "viewer";
 const isAdmin = () => CURRENT_USER.role === "admin";
 const canDelete = () => isAdmin();
 
@@ -617,6 +618,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
 
 // Save then reload, waiting for the cloud push first (important on mobile)
 async function saveAndReload(data) {
+  if (isReadOnly()) { alert("You have read-only access, so changes can't be saved. Ask Dave if you need to change something."); return; }
   showSavingOverlay();
   SAVING_IN_PROGRESS = true;
   try { queueLog(diffForLog(loadData(), data)); } catch { /* history is best effort */ }
@@ -682,6 +684,7 @@ function getTombstones() {
 // when its permissions silently block a delete, which used to leave "deleted" vans/staff in the
 // cloud — they then reappeared (as duplicates) after a reset. Throws if the row is still there.
 async function deleteRecord(table, id) {
+  if (isReadOnly()) throw new Error("Read-only access — can't delete.");
   try { const d0 = loadData(); const rec = (d0[table] || []).find(x => x.id === id); if (rec && !SKIP_DELLOG) logDeletion(table, rec, d0); } catch {}
   await deleteRecordRaw(table, id);
   const { data: left, error } = await supabase.from(table).select("id").eq("id", id);
@@ -810,7 +813,7 @@ async function doPullSync(setData, setSyncStatus, opts) {
   LAST_SYNC_AT = now;
   try {
     const cloud = await pullCloud();
-    const readOnly = (opts && opts.readOnly) || CURRENT_USER.role === "crew";
+    const readOnly = (opts && opts.readOnly) || CURRENT_USER.role === "crew" || CURRENT_USER.role === "viewer";
     if (!readOnly) purgeTombstoned(cloud).catch(() => {});
     const merged = mergeAll(cloud, loadData());
     setDB(JSON.stringify(merged));
@@ -875,9 +878,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B157";
+  if (!t || isNaN(t)) return "B158";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B157 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B158 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -7425,7 +7428,7 @@ function clearAppData() {
 }
 async function signOutFlow() {
   let pending = false;
-  if (CURRENT_USER.role !== "crew") try {
+  if (CURRENT_USER.role !== "crew" && CURRENT_USER.role !== "viewer") try {
     await Promise.race([pushChangedOnly(loadData()), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000))]);
   } catch { pending = true; }
   if (pending && !confirm("Some changes on this device haven't uploaded yet (no signal?). If you sign out now they'll be lost.\n\nSign out anyway?")) return;
@@ -7656,19 +7659,19 @@ function UsersAdmin({ data }) {
     try { await usersApi("POST", { action: "resend", email: u.email, confirmed: u.confirmed }); alert(`Email sent to ${u.email}.`); } catch (e) { alert("Couldn't send: " + e.message); }
     setBusy(false);
   }
-  const roleHelp = { admin: "Everything, including settings and deleting", office: "Everything except settings and deleting", surveyor: "Everything except settings and deleting", crew: "Only their own jobs for today, from 7:30am" };
+  const roleHelp = { admin: "Everything, including settings and deleting", office: "Everything except settings and deleting", surveyor: "Everything except settings and deleting", viewer: "Can see everything but can't change, add or delete anything", crew: "Only their own jobs for today, from 7:30am" };
   return (
     <Card style={{ marginBottom: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <h4 style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Users &amp; access</h4>
-        {!form && <Btn size="sm" onClick={() => setForm({ email: "", role: "office", staffName: "" })}>+ Add user</Btn>}
+        {!form && <Btn size="sm" onClick={() => setForm({ email: "", role: "viewer", staffName: "" })}>+ Add user</Btn>}
       </div>
       {err && <div style={{ fontSize: 12.5, color: "#B91C1C", fontWeight: 600, marginBottom: 8 }}>{err}</div>}
       {form && (
         <div style={{ border: "1px solid #E3E9E8", borderRadius: 12, padding: 12, marginBottom: 10, background: "#F7FAF9" }}>
           {!form.id && <Field label="Email"><Input type="email" value={form.email} onChange={v => setForm({ ...form, email: v })} placeholder="name@example.com" /></Field>}
           {form.id && <div style={{ fontWeight: 700, marginBottom: 10 }}>{form.email}</div>}
-          <Field label="Role" hint={roleHelp[form.role]}><Select value={form.role} onChange={v => setForm({ ...form, role: v })} options={["admin", "office", "surveyor", "crew"]} /></Field>
+          <Field label="Role" hint={roleHelp[form.role]}><Select value={form.role} onChange={v => setForm({ ...form, role: v })} options={["admin", "office", "surveyor", "viewer", "crew"]} /></Field>
           <Field label="Staff member" hint="Their name in the change log. Crew must be linked — it's how they see their jobs.">
             <Select value={form.staffName} onChange={v => setForm({ ...form, staffName: v })} options={staffNames} placeholder="Not linked" />
           </Field>
@@ -7834,6 +7837,9 @@ function AuthGateInner() {
 }
 export default AuthGate;
 
+function ReadOnlyBanner() {
+  return <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", color: "#4B5563", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 700, marginBottom: 12 }}>👁 Read-only access — you can look at everything but can't change anything.</div>;
+}
 function MainApp() {
   const [data, setData] = useState(loadData);
   const [view, setViewState] = useState(() => {
@@ -7971,7 +7977,7 @@ function MainApp() {
 
   function content() {
     const full = fullScreen();
-    if (full) return <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: 1080, margin: "0 auto" }}>{full}</div></div>;
+    if (full) return <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: 1080, margin: "0 auto" }}>{isReadOnly() && <ReadOnlyBanner />}{full}</div></div>;
     const sec = SECTIONS[sectionKey];
     if (!sec) return null;
     const { List, Detail } = sec;
