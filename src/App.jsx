@@ -109,6 +109,10 @@ const APPLIANCE_RE = /\b(washing machine|washer|dish ?washer|tumble dryer|dryer|
 const AMERICAN_FRIDGE_RE = /american\s+(fridge|style)/i;
 // Show dismantle only for furniture: not boxes/bags, not electrical/appliances — except American fridge freezers.
 const canDismantle = name => !isBoxItem(name) && (!APPLIANCE_RE.test(name || "") || AMERICAN_FRIDGE_RE.test(name || ""));
+// Items that usually need dismantling and reassembling — ticked automatically when added to a survey.
+const LIKELY_DISMANTLE_RE = /\b(bunk ?beds?|cabin ?beds?|high ?sleepers?|mid ?sleepers?|bed ?frames?|bedsteads?|four ?poster|beds?|cots?|wardrobes?|robes?|armoires?|dining tables?|extending tables?|kitchen tables?|garden tables?|patio tables?|tables?|desks?|workstations?|bookcases?|shelving units?|wall units?|tv units?|display cabinets?|dressers?|welsh dressers?|dressing tables?|corner sofas?|sectional|sofa ?beds?|trampolines?|treadmills?|cross ?trainers?|multi ?gyms?|home ?gyms?|weight benches?|exercise bikes?|rowing machines?|swing sets?|climbing frames?|playhouses?|sheds?|greenhouses?|gazebos?|pergolas?|pool tables?|snooker tables?|table tennis|american (fridge|style)|mirrors? \(wall\)|headboards?)\b/i;
+const NOT_DISMANTLE_RE = /\b(bedside|bedding|bedroom|bed ?linen|coffee tables?|side tables?|lamp tables?|nest of tables|occasional tables?|console|hall tables?|telephone tables?|children'?s tables?|kids'? tables?|dressing table stool|table lamps?|tablecloths?|garden bed|flower bed|raised bed|dog bed|cat bed|pet bed|bean ?bag|boxes?|bags?|mattress|duvet|pillows?|chairs?)\b/i;
+const likelyDismantle = name => canDismantle(name) && LIKELY_DISMANTLE_RE.test(name || "") && !NOT_DISMANTLE_RE.test(name || "");
 function maxCustomerRef(data) { return (data.customers || []).reduce((m, c) => Math.max(m, Number(c.ref) || 0), 0); }
 function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(data) + 1); }
 
@@ -878,9 +882,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B161";
+  if (!t || isNaN(t)) return "B162";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B161 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B162 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -2380,10 +2384,18 @@ function InventoryModal({ data, enquiry, onClose }) {
       const n = Math.max(-20, cur + d);
       const next = { ...p };
       if (n === 0) delete next[slot];
-      else next[slot] = { ...(p[slot] || meta), qty: n };
+      else {
+        next[slot] = { ...(p[slot] || meta), qty: n };
+        // Newly added bed, wardrobe, dining table…: tick "Dismantle & reassemble" (untick it if not needed).
+        if (cur === 0 && n > 0 && !next[slot].dismantle && likelyDismantle(next[slot].name)) next[slot] = { ...next[slot], dismantle: "Mover" };
+        if (n < 0 && next[slot].dismantle) next[slot] = { ...next[slot], dismantle: "" }; // not moving → nothing to dismantle
+      }
       return next;
     });
   }
+  // Items already on this survey that probably need dismantling but aren't ticked
+  const disSuggest = Object.entries(lines).filter(([, v]) => v && v.qty > 0 && !v.dismantle && likelyDismantle(v.name));
+  const tickAllDis = () => setLines(p => { const n = { ...p }; disSuggest.forEach(([slot]) => { if (n[slot]) n[slot] = { ...n[slot], dismantle: "Mover" }; }); return n; });
   function addCustom(label, catalogRoom) {
     const name = (prompt("Item name?") || "").trim();
     if (!name) return;
@@ -2440,7 +2452,7 @@ function InventoryModal({ data, enquiry, onClose }) {
   const toggleWho = slot => setLines(p => p[slot] ? { ...p, [slot]: { ...p[slot], dismantle: p[slot].dismantle === "Customer" ? "Mover" : "Customer" } } : p);
   const DisCheck = ({ slot }) => {
     const v = lines[slot];
-    if (!v || v.qty <= 0) return null;
+    if (!v || v.qty <= 0 || !canDismantle(v.name)) return null;
     return (
       <label style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, cursor: "pointer", userSelect: "none", flexShrink: 0 }}>
         <span style={{ fontSize: 8.5, color: v.dismantle ? TEAL : "#9CA3AF", fontWeight: 700, lineHeight: 1, whiteSpace: "nowrap" }}>Dismantle</span>
@@ -2744,6 +2756,12 @@ function InventoryModal({ data, enquiry, onClose }) {
       )}
 
       {invMode === "detailed" && <div style={{ marginBottom: 12 }}><Input value={search} onChange={setSearch} placeholder="🔍 Search items…" /></div>}
+      {invMode === "detailed" && disSuggest.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "#E8F5F3", border: "1px solid #BFE3DD", borderRadius: 10, padding: "8px 12px", marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, color: "#0B5F58", fontWeight: 600 }}>{disSuggest.length} item{disSuggest.length !== 1 ? "s" : ""} probably need dismantling ({disSuggest.slice(0, 3).map(([, v]) => v.name).join(", ")}{disSuggest.length > 3 ? "…" : ""})</div>
+          <Btn size="sm" onClick={tickAllDis}>Tick them</Btn>
+        </div>
+      )}
 
       {invMode === "detailed" && detailView === "az" ? renderAZ() : sections.map(s => {
         if (s.addBedroom) return (invMode === "freehand" || !search) ? <button key="addbed" onClick={addBedroom} style={{ width: "100%", marginBottom: 8, padding: "10px", borderRadius: 10, border: `1.5px dashed ${TEAL}`, background: "#F0FDFA", color: TEAL, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add another bedroom</button> : null;
