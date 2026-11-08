@@ -878,9 +878,9 @@ function upsertLocal(data, table, record) {
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
-  if (!t || isNaN(t)) return "B160";
+  if (!t || isNaN(t)) return "B161";
   const when = t.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
-  return `B160 · ${when}${sha ? ` (${sha})` : ""}`;
+  return `B161 · ${when}${sha ? ` (${sha})` : ""}`;
 })();
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -1008,6 +1008,15 @@ function moveSeqOf(data, job) {
   const i = sib.findIndex(j => j.id === job.id);
   return i >= 0 ? i + 1 : 1;
 }
+// Volume to be moved for a job (from its survey), e.g. "850 cu ft". Items marked NOT MOVING are left out.
+function jobVolume(data, j) {
+  const e = j && (data.enquiries || []).find(x => x.id === j.enquiryId);
+  if (!e) return 0;
+  let v = Number(e.volumeCuFt) || 0;
+  if (!v && Array.isArray(e.inventory)) v = e.inventory.filter(it => !it.notMoving).reduce((a, it) => a + (Number(it.cuFt) || 0) * (Number(it.qty) || 1), 0);
+  return Math.round(v);
+}
+const volText = (data, j) => { const v = jobVolume(data, j); return v ? `${v.toLocaleString("en-GB")} cu ft` : ""; };
 function moveRef(data, job) {
   const c = (data.customers || []).find(x => x.id === job.customerId);
   const seq = moveSeqOf(data, job);
@@ -1407,7 +1416,7 @@ function Dashboard({ data, setView, setData }) {
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>Today{st.time ? ` · ${st.time}` : ""} · {st.type || "Move"}</div>
                       <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
-                      <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}</div>
+                      <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}{volText(data, j) ? <b style={{ color: "#10211E" }}> · 📦 {volText(data, j)}</b> : null}</div>
                       <div style={{ fontSize: 12.5, color: "#41514E", marginTop: 3, fontWeight: 600 }}>🚚 {resLine}</div>
                     </div>
                     <StatusBadge status={j.status} />
@@ -4481,7 +4490,7 @@ function CustomerDetail({ data, id, setView }) {
       {jobs.filter(j => j.status !== "Completed").sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || "")).map(j => (
         <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}</div>
+            <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
             <StatusBadge status={j.status} />
           </div>
         </Card>
@@ -4493,7 +4502,7 @@ function CustomerDetail({ data, id, setView }) {
           {jobs.filter(j => j.status === "Completed").sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || "")).map(j => (
             <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}</div>
+                <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
                 <StatusBadge status={j.status} />
               </div>
             </Card>
@@ -4558,7 +4567,7 @@ function JobsList({ data, setView }) {
               <div style={{ fontSize: 12, fontWeight: 800, color: TEAL_D }}>{moveRef(data, j)}</div>
               <div style={{ fontWeight: 700, color: "#111827", marginTop: 1 }}>{custName(data, j.customerId)}</div>
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {j.fromTown || "—"} → {j.toTown || "—"}</div>
-              <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{j.vehicle || "—"} · {gbp(j.price)}{j.deposit ? ` · dep ${gbp(j.deposit)}${j.depositPaid ? " ✓" : ""}` : ""}</div>
+              <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{volText(data, j) ? <b style={{ color: "#41514E" }}>📦 {volText(data, j)} · </b> : null}{j.vehicle || "—"} · {gbp(j.price)}{j.deposit ? ` · dep ${gbp(j.deposit)}${j.depositPaid ? " ✓" : ""}` : ""}</div>
             </div>
             <StatusBadge status={j.status} />
           </div>
@@ -5734,7 +5743,7 @@ function JobDetail({ data, id, setView }) {
       <button onClick={() => setView({ screen: "enquiries", filter: "Won" })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: "1.5px solid #D3DDDB", borderRadius: 10, padding: "10px 16px", fontSize: 15.5, fontWeight: 800, color: NAVY, cursor: "pointer" }}><Icon name="back" size={16} /> Back</button>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 8px" }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D, letterSpacing: ".02em" }}>{moveRef(data, j)}</div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D, letterSpacing: ".02em" }}>{moveRef(data, j)}{volText(data, j) ? <span style={{ color: "#41514E" }}> · 📦 {volText(data, j)}</span> : null}</div>
           <h2 style={{ margin: "2px 0 0", fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, j.customerId)}</h2>
         </div>
         <StatusBadge status={f.status} />
@@ -5920,6 +5929,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:2, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
         {j.fromTown || "—"} → {j.toTown || "—"}
       </div>
+      {volText(data, j) && <div style={{ fontSize: big?12:10.5, color:"#10211E", marginTop:1, fontWeight:800, whiteSpace:"nowrap" }}>📦 {volText(data, j)}</div>}
       {big && (
         <div style={{ fontSize:12, color:"#41514E", marginTop:6, display:"flex", flexWrap:"wrap", alignItems:"center", gap:"2px 10px" }}>
           <span>{resLine}</span>
@@ -7764,7 +7774,7 @@ function CrewJobCard({ data, j, st }) {
   ) : null;
   return (
     <Card>
-      <div style={{ fontSize: 11, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.time ? `${st.time} · ` : ""}{st.type || "Move"}</div>
+      <div style={{ fontSize: 11, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.time ? `${st.time} · ` : ""}{st.type || "Move"}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, margin: "2px 0 8px" }}>
         <div style={{ fontSize: 18, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"}</div>
         {phone && <a href={`tel:${phone}`} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, background: TEAL, color: "#fff", fontWeight: 800, fontSize: 14, textDecoration: "none" }}>📞 Call</a>}
