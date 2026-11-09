@@ -879,7 +879,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B170";
+const BUILD_NO = "B171";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5049,7 +5049,7 @@ function ReportsView({ data }) {
   const group = (arr, key) => { const m = {}; arr.forEach(o => { const k = key(o); if (k == null || k === "") return; (m[k] = m[k] || []).push(o); }); return Object.entries(m); };
 
   // Lead sources
-  const sources = group(rows, o => o.source).map(([k, arr]) => ({ k, n: arr.length, surveyed: sum(arr, o => o.surveyed), quoted: sum(arr, o => o.quoted), open: sum(arr, o => o.open), won: sum(arr, o => o.won), lost: sum(arr, o => o.lost), win: pct(sum(arr, o => o.won), decided(arr)), money: money(arr) }))
+  const sources = group(rows, o => o.source).map(([k, arr]) => ({ k, n: arr.length, dq: decided(arr), surveyed: sum(arr, o => o.surveyed), quoted: sum(arr, o => o.quoted), open: sum(arr, o => o.open), won: sum(arr, o => o.won), lost: sum(arr, o => o.lost), win: pct(sum(arr, o => o.won), decided(arr)), money: money(arr) }))
     .sort((a, b) => b.money - a.money || b.won - a.won || b.n - a.n);
   const bestSrc = sources.filter(s => s.k !== "Not recorded" && s.k !== "Other" && s.n >= 3).sort((a, b) => b.win - a.win)[0];
   const topMoney = Math.max(1, ...sources.map(s => s.money));
@@ -5109,9 +5109,9 @@ function ReportsView({ data }) {
       </div>
 
       <Card>
-        {head("Lead sources", "% = share of all leads in this period. Quoted = quotes still waiting for an answer. Win % = won ÷ leads (leads we didn't quote aren't counted). ★ = best win rate (3+ leads). £ won by source is in the bars below.")}
+        {head("Lead sources", "% = share of leads in this period (not counting ones we didn't quote). Quoted = quotes still waiting for an answer. Win % = won ÷ leads (leads we didn't quote aren't counted). ★ = best win rate (3+ leads). £ won by source is in the bars below.")}
         {!sources.length ? <div style={{ fontSize: 13, color: "#9CA3AF" }}>No enquiries in this period.</div> : <>
-          <Table first="Source" lead={["%", r => `${pct(r.n, rows.length)}%`]} rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Quoted", r => r.open], ["Won", r => r.won], ["Lost", r => r.lost], ["Win %", r => `${r.win}%`, true]]} />
+          <Table first="Source" lead={["%", r => `${pct(r.dq, decided(rows))}%`]} rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Quoted", r => r.open], ["Won", r => r.won], ["Lost", r => r.lost], ["Win %", r => `${r.win}%`, true]]} />
           <div style={{ marginTop: 12 }}>{sources.map(s => <div key={s.k} style={{ display: "grid", gridTemplateColumns: "110px 1fr 70px", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}><span style={{ color: "#374151", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.k}</span><Bar v={s.money} max={topMoney} /><span style={{ textAlign: "right", color: "#6A7B77" }}>{gbp0(s.money)}</span></div>)}</div>
           {rows.some(o => o.notQuoted) && <div style={{ fontSize: 12, color: "#6A7B77", marginTop: 8 }}>{sum(rows, o => o.notQuoted)} lead{sum(rows, o => o.notQuoted) !== 1 ? "s" : ""} marked "Didn't quote" — left out of the win %.</div>}
           {sources.some(s => s.k === "Not recorded") && <div style={{ fontSize: 12, color: "#B45309", marginTop: 8 }}>"Not recorded" = enquiries with no Referred by. New enquiries now have to have one.</div>}
