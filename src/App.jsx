@@ -879,7 +879,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B169";
+const BUILD_NO = "B170";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5074,11 +5074,11 @@ function ReportsView({ data }) {
 
   const th = { fontSize: 10.5, fontWeight: 800, color: "#94A4A0", textTransform: "uppercase", letterSpacing: ".04em", padding: "0 0 6px", textAlign: "right", whiteSpace: "nowrap" };
   const td = { fontSize: 13, padding: "7px 0", borderTop: "1px solid #F0F4F3", textAlign: "right", whiteSpace: "nowrap" };
-  const Table = ({ cols, rows: rs, first }) => (
+  const Table = ({ cols, rows: rs, first, lead }) => (
     <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 300 }}>
-        <thead><tr><th style={{ ...th, textAlign: "left" }}>{first}</th>{cols.map(c => <th key={c[0]} style={{ ...th, paddingLeft: 10 }}>{c[0]}</th>)}</tr></thead>
-        <tbody>{rs.map(r => <tr key={r.k} style={r.hl ? { background: "#F0FAF8" } : null}><td style={{ ...td, textAlign: "left", fontWeight: 700, color: "#10211E", whiteSpace: "normal" }}>{r.k}{r.hl ? " ★" : ""}</td>{cols.map(c => <td key={c[0]} style={{ ...td, paddingLeft: 10, fontWeight: c[2] ? 800 : 500, color: c[2] ? TEAL : "#374151" }}>{c[1](r)}</td>)}</tr>)}</tbody>
+        <thead><tr>{lead && <th style={{ ...th, textAlign: "left", paddingRight: 8 }}>{lead[0]}</th>}<th style={{ ...th, textAlign: "left" }}>{first}</th>{cols.map(c => <th key={c[0]} style={{ ...th, paddingLeft: 10 }}>{c[0]}</th>)}</tr></thead>
+        <tbody>{rs.map(r => <tr key={r.k} style={r.hl ? { background: "#F0FAF8" } : null}>{lead && <td style={{ ...td, textAlign: "left", paddingRight: 8, fontWeight: 800, color: TEAL }}>{lead[1](r)}</td>}<td style={{ ...td, textAlign: "left", fontWeight: 700, color: "#10211E", whiteSpace: "normal" }}>{r.k}{r.hl ? " ★" : ""}</td>{cols.map(c => <td key={c[0]} style={{ ...td, paddingLeft: 10, fontWeight: c[2] ? 800 : 500, color: c[2] ? TEAL : "#374151" }}>{c[1](r)}</td>)}</tr>)}</tbody>
       </table>
     </div>
   );
@@ -5109,9 +5109,9 @@ function ReportsView({ data }) {
       </div>
 
       <Card>
-        {head("Lead sources", "Quoted = quotes still waiting for an answer. Win % = won ÷ leads (leads we didn't quote aren't counted). ★ = best win rate (3+ leads). £ won by source is in the bars below.")}
+        {head("Lead sources", "% = share of all leads in this period. Quoted = quotes still waiting for an answer. Win % = won ÷ leads (leads we didn't quote aren't counted). ★ = best win rate (3+ leads). £ won by source is in the bars below.")}
         {!sources.length ? <div style={{ fontSize: 13, color: "#9CA3AF" }}>No enquiries in this period.</div> : <>
-          <Table first="Source" rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Quoted", r => r.open], ["Won", r => r.won], ["Lost", r => r.lost], ["Win %", r => `${r.win}%`, true]]} />
+          <Table first="Source" lead={["%", r => `${pct(r.n, rows.length)}%`]} rows={sources.map(s => ({ ...s, hl: bestSrc && s.k === bestSrc.k }))} cols={[["Leads", r => r.n], ["Quoted", r => r.open], ["Won", r => r.won], ["Lost", r => r.lost], ["Win %", r => `${r.win}%`, true]]} />
           <div style={{ marginTop: 12 }}>{sources.map(s => <div key={s.k} style={{ display: "grid", gridTemplateColumns: "110px 1fr 70px", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}><span style={{ color: "#374151", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.k}</span><Bar v={s.money} max={topMoney} /><span style={{ textAlign: "right", color: "#6A7B77" }}>{gbp0(s.money)}</span></div>)}</div>
           {rows.some(o => o.notQuoted) && <div style={{ fontSize: 12, color: "#6A7B77", marginTop: 8 }}>{sum(rows, o => o.notQuoted)} lead{sum(rows, o => o.notQuoted) !== 1 ? "s" : ""} marked "Didn't quote" — left out of the win %.</div>}
           {sources.some(s => s.k === "Not recorded") && <div style={{ fontSize: 12, color: "#B45309", marginTop: 8 }}>"Not recorded" = enquiries with no Referred by. New enquiries now have to have one.</div>}
