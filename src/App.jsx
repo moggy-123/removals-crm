@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B177";
+const BUILD_NO = "B178";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2107,19 +2107,39 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
     setPasteOpen(false);
   };
 
-  // When an existing customer is picked, prefill "moving from":
-  // their last move's TO address if they've moved before, else their stored address.
+  // When an existing customer is picked, prefill as much as we already know:
+  //  • moved with us before → "moving from" = where we last moved them TO, with that property's
+  //    type, floor and access (and Referred by = Moved Before);
+  //  • enquired before but didn't move → copy that enquiry's from AND to details (re-quote);
+  //  • otherwise → their stored address.
   function selectCustomer(cid) {
     setCustomerId(cid);
     if (!cid) return;
     const cust = (data.customers || []).find(c => c.id === cid);
-    const pastMoves = (data.jobs || [])
-      .filter(jb => jb.customerId === cid && (jb.toAddress1 || jb.toTown || jb.toPostcode))
-      .sort((a, b) => (b.moveDate || b.createdAt || "").localeCompare(a.moveDate || a.createdAt || ""));
-    let a1 = "", a2 = "", town = "", pc = "";
-    if (pastMoves[0]) { a1 = pastMoves[0].toAddress1 || ""; a2 = pastMoves[0].toAddress2 || ""; town = pastMoves[0].toTown || ""; pc = pastMoves[0].toPostcode || ""; }
-    else if (cust) { a1 = cust.address1 || ""; a2 = cust.address2 || ""; town = cust.town || ""; pc = cust.postcode || ""; }
-    setF(p => ({ ...p, fromAddress1: a1, fromAddress2: a2, fromTown: town, fromPostcode: pc }));
+    const byDate = (x, y) => (y.moveDate || y.createdAt || "").localeCompare(x.moveDate || x.createdAt || "");
+    const pastMoves = (data.jobs || []).filter(jb => jb.customerId === cid && jb.status !== "Let Go" && (jb.toAddress1 || jb.toTown || jb.toPostcode)).sort(byDate);
+    const enqs = (data.enquiries || []).filter(x => x.customerId === cid && x.id !== e.id).sort((x, y) => (y.createdAt || y.enquiryDate || "").localeCompare(x.createdAt || x.enquiryDate || ""));
+    const blankTo = { toAddress1: "", toAddress2: "", toTown: "", toPostcode: "", toPropertyType: "", toFloor: "", toAccess: "", toStore: false };
+    if (pastMoves[0]) {
+      const m = pastMoves[0];
+      const me = enqs.find(x => x.id === m.enquiryId) || {};
+      setF(p => ({ ...p, ...blankTo,
+        fromAddress1: m.toAddress1 || "", fromAddress2: m.toAddress2 || "", fromTown: m.toTown || "", fromPostcode: m.toPostcode || "",
+        fromPropertyType: normalizePropertyType(me.toPropertyType), fromBedrooms: "", fromFloor: me.toFloor || "", fromAccess: m.toAccess || me.toAccess || "",
+        referredBy: "Moved Before" }));
+    } else if (enqs[0]) {
+      const q = enqs[0];
+      setF(p => ({ ...p,
+        fromAddress1: q.fromAddress1 || "", fromAddress2: q.fromAddress2 || "", fromTown: q.fromTown || "", fromPostcode: q.fromPostcode || "",
+        fromPropertyType: normalizePropertyType(q.fromPropertyType), fromBedrooms: q.fromBedrooms || "", fromFloor: q.fromFloor || "", fromAccess: q.fromAccess || "",
+        toAddress1: q.toAddress1 || "", toAddress2: q.toAddress2 || "", toTown: q.toTown || "", toPostcode: q.toPostcode || "",
+        toPropertyType: normalizePropertyType(q.toPropertyType), toFloor: q.toFloor || "", toAccess: q.toAccess || "",
+        toStore: !!q.toStore, storeMode: q.storeMode || p.storeMode,
+        extraFrom: Array.isArray(q.extraFrom) ? q.extraFrom : [], extraTo: Array.isArray(q.extraTo) ? q.extraTo : [],
+        referredBy: normalizeReferral(q.referredBy) || p.referredBy }));
+    } else if (cust) {
+      setF(p => ({ ...p, fromAddress1: cust.address1 || "", fromAddress2: cust.address2 || "", fromTown: cust.town || "", fromPostcode: cust.postcode || "" }));
+    }
   }
 
   async function save() {
