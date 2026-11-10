@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { pullFromCloud, pushToCloud, pushOne, deleteRecord as deleteRecordRaw, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
+import { pullFromCloud, pushToCloud, pushOne, pushMany, deleteRecord as deleteRecordRaw, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
@@ -842,6 +842,20 @@ async function pushChangedOnly(data) {
       else newSigs[rec.id] = sig;
     }
   }
+  // Lots to send (e.g. after an import): send them 100 at a time. Any batch that fails is
+  // left for the one-at-a-time uploads below, which report exactly which record is the problem.
+  if (changed.length > 30) {
+    const rest = [];
+    for (const name of TABLES) {
+      const list = changed.filter(x => x.name === name);
+      for (let i = 0; i < list.length; i += 100) {
+        const chunk = list.slice(i, i + 100);
+        try { await pushMany(name, chunk.map(x => x.rec)); chunk.forEach(x => { newSigs[x.rec.id] = x.sig; }); }
+        catch { rest.push(...chunk); }
+      }
+    }
+    changed.length = 0; changed.push(...rest);
+  }
   let failed = 0, lastError = "", failInfo = "";
   const BATCH = 6; // push several at once so many records don't take minutes
   for (let i = 0; i < changed.length; i += BATCH) {
@@ -879,7 +893,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B173";
+const BUILD_NO = "B174";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4684,6 +4698,30 @@ async function exportBackup(data) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Importing from the old Mover system: skip customers already in the app (same mobile, home
+// phone or email) along with their enquiries/moves, and drop any reference number that's
+// already taken by someone else so the database can give them a fresh one.
+function prepareMoverImport(cur, inc) {
+  const dig = v => String(v || "").replace(/\D/g, "").replace(/^44/, "0");
+  const phones = new Set(), emails = new Set(), refs = new Set(), ids = new Set();
+  (cur.customers || []).forEach(c => {
+    ids.add(c.id);
+    if (c.ref != null && c.ref !== "") refs.add(String(c.ref));
+    [c.phone, c.homePhone, ...(c.contacts || []).map(x => x.phone)].map(dig).filter(x => x.length >= 10).forEach(x => phones.add(x));
+    [c.email, ...(c.contacts || []).map(x => x.email)].map(x => String(x || "").trim().toLowerCase()).filter(Boolean).forEach(x => emails.add(x));
+  });
+  const skipped = [], skipIds = new Set(); let refsCleared = 0;
+  const customers = (inc.customers || []).filter(c => {
+    if (ids.has(c.id)) return true; // imported before: just update it
+    const ph = [c.phone, c.homePhone].map(dig).filter(x => x.length >= 10);
+    const em = String(c.email || "").trim().toLowerCase();
+    if (ph.some(x => phones.has(x)) || (em && emails.has(em))) { skipped.push(c.name || "?"); skipIds.add(c.id); return false; }
+    return true;
+  }).map(c => (c.ref != null && refs.has(String(c.ref)) && !ids.has(c.id)) ? (refsCleared++, { ...c, ref: null }) : c);
+  const keep = r => !skipIds.has(r.customerId);
+  return { inc: { ...inc, customers, enquiries: (inc.enquiries || []).filter(keep), jobs: (inc.jobs || []).filter(keep) }, skipped, refsCleared };
+}
+
 // Restore = merge the backup into the current data (backup copy wins by id).
 // Non-destructive: existing records not in the backup are kept.
 async function restoreBackup(currentData, inc) {
@@ -5299,13 +5337,30 @@ function CompanyView({ data, setView, setData }) {
   }
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
-  async function doRestore(inc) {
+  async function doRestore(inc, source) {
     if (!inc || (!inc.customers && !inc.enquiries && !inc.jobs && !inc.staff && !inc.vehicles)) {
       alert("This doesn't look like a Removals CRM backup."); return;
     }
+    const isMover = source === "Mover import";
+    let extra = "";
+    if (isMover) {
+      const prep = prepareMoverImport(data, inc);
+      inc = prep.inc;
+      if (prep.skipped.length) extra += `\n\n${prep.skipped.length} already in the app (same phone or email) will be skipped: ${prep.skipped.slice(0, 12).join(", ")}${prep.skipped.length > 12 ? "…" : ""}`;
+      if (prep.refsCleared) extra += `\n\n${prep.refsCleared} reference number(s) are already used here, so those customers will get new numbers.`;
+    }
     const counts = ["customers", "enquiries", "jobs", "vehicles", "staff"].map(t => `${(inc[t] || []).length} ${t}`).join(", ");
-    if (!confirm(`Restore this backup?\n\nIt contains: ${counts}.\n\nMatching records are added or updated from the backup. Nothing already on the device is deleted.`)) return;
+    if (!confirm(`${isMover ? "Import from Mover?" : "Restore this backup?"}\n\nIt contains: ${counts}.${extra}\n\nMatching records are added or updated. Nothing already on the device is deleted.`)) return;
     setRestoring(true);
+    if (isMover) {
+      // Next new customer number = one after the highest number in the app + the import.
+      const all = [...(data.customers || []), ...(inc.customers || [])].map(c => Number(c.ref)).filter(n => n > 0 && n < 1e6);
+      if (all.length) {
+        const next = Math.max(...all) + 1;
+        try { await setCustomerRefStart(next); try { sessionStorage.setItem("importRefMsg", String(next)); } catch {} }
+        catch (e) { alert(`Imported records are going in, but the next reference number couldn't be set (${(e && e.message) || e}). Set it to ${next} on the Company page.`); }
+      }
+    }
     try { await restoreBackup(data, inc); }
     catch (err) { setRestoring(false); alert("Restore failed: " + ((err && err.message) || err)); }
   }
@@ -5316,14 +5371,14 @@ function CompanyView({ data, setView, setData }) {
     try {
       const text = typeof file.text === "function" ? await file.text() : await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file); });
       const payload = JSON.parse(text);
-      await doRestore(payload && payload.data ? payload.data : payload);
+      await doRestore(payload && payload.data ? payload.data : payload, payload && payload.source);
     } catch (err) { alert("Couldn't read that file: " + ((err && err.message) || err)); }
   }
   async function onRestorePaste() {
     let payload;
     try { payload = JSON.parse(pasteText.trim()); }
     catch { alert("That isn't valid backup text. Open your backup file, Select All, Copy, then paste it here."); return; }
-    await doRestore(payload && payload.data ? payload.data : payload);
+    await doRestore(payload && payload.data ? payload.data : payload, payload && payload.source);
   }
   async function onWipe() {
     const nc = (data.customers || []).length, ne = (data.enquiries || []).length, nj = (data.jobs || []).length;
@@ -8131,6 +8186,7 @@ function MainApp() {
   useEffect(() => {
     let m = null;
     try { m = sessionStorage.getItem("restoreMsg"); if (m) sessionStorage.removeItem("restoreMsg"); } catch {}
+    try { const r = sessionStorage.getItem("importRefMsg"); if (r) { sessionStorage.removeItem("importRefMsg"); if (m) m += `\n\nThe next new customer will be #${r}.`; } } catch {}
     if (m) setTimeout(() => alert(m), 400);
   }, []);
 
