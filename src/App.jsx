@@ -893,7 +893,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B174";
+const BUILD_NO = "B175";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1171,7 +1171,7 @@ function callAboutQuote(e, phone) {
     logComm(e.customerId, { type: "Call", note: "Quote follow-up call" });
     const d = loadData();
     const en = (d.enquiries || []).find(x => x.id === e.id);
-    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, quoteChasedAt: new Date().toISOString(), quoteChaseDate: "", updatedAt: Date.now() }); setDB(JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
+    if (en) { const d2 = upsertLocal(d, "enquiries", { ...en, quoteChasedAt: new Date().toISOString(), quoteChaseDate: "", noChase: false, updatedAt: Date.now() }); setDB(JSON.stringify(d2)); pushChangedOnly(d2).catch(() => {}); }
   } catch {}
   if (phone) window.location.href = `tel:${phone}`;
 }
@@ -1373,7 +1373,7 @@ function Dashboard({ data, setView, setData }) {
             nc.phone ? <Btn key="c" size="sm" style={sm} onClick={() => callNewEnquiry(e, nc.phone)}>📞 Call</Btn> : null,
             <Btn key="b" size="sm" variant="grey" style={sm} onClick={() => openEdit(e)}>📅 Book survey</Btn>] });
           const qc = quoteChase(data, e);
-          if (qc && quoteChaseDue(e) <= todayISO()) items.push({ key: "qc" + e.id, p: 7, sort: quoteChaseDue(e), e, ...AMBERC, label: `Chase quote · ${quoteChaseText(qc).replace(/^Quote /, "")}`, sub: `${route} · ${gbp(e.quoteTotal)}`, acts: [
+          if (qc && !(e.noChase && !e.quoteChaseDate) && quoteChaseDue(e) <= todayISO()) items.push({ key: "qc" + e.id, p: 7, sort: quoteChaseDue(e), e, ...AMBERC, label: `Chase quote · ${quoteChaseText(qc).replace(/^Quote /, "")}`, sub: `${route} · ${gbp(e.quoteTotal)}`, acts: [
             qc.phone ? <Btn key="c" size="sm" style={sm} onClick={() => callAboutQuote(e, qc.phone)}>📞 Chase quote</Btn> : null,
             <Btn key="d" size="sm" variant="grey" style={sm} onClick={() => setChaseFor(e)}>📅 Remind later</Btn>] });
         });
@@ -4039,7 +4039,7 @@ function EnquiryDetail({ data, id, setView }) {
         {(() => { const q = quoteChase(data, e); return q ? (
           <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400E" }}>{quoteChaseText(q)}
-              <div style={{ fontWeight: 600, color: "#B45309", marginTop: 2 }}>Reminder: {fmtDate(quoteChaseDue(e))} <button onClick={() => setShowChaseDate(true)} style={{ background: "none", border: "none", color: TEAL, fontWeight: 800, cursor: "pointer", padding: 0, fontSize: 12.5 }}>Change</button></div>
+              <div style={{ fontWeight: 600, color: "#B45309", marginTop: 2 }}>Reminder: {e.noChase && !e.quoteChaseDate ? "none set" : fmtDate(quoteChaseDue(e))} <button onClick={() => setShowChaseDate(true)} style={{ background: "none", border: "none", color: TEAL, fontWeight: 800, cursor: "pointer", padding: 0, fontSize: 12.5 }}>Change</button></div>
             </div>
             {q.phone ? <ChaseCallBtn data={data} e={e} /> : <span style={{ fontSize: 12, color: "#B7C3C0" }}>No number</span>}
           </div>) : null; })()}
