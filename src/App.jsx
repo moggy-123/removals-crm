@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B178";
+const BUILD_NO = "B179";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1038,6 +1038,10 @@ function moveSeqOf(data, job) {
   return i >= 0 ? i + 1 : 1;
 }
 // Volume to be moved for a job (from its survey), e.g. "850 cu ft". Items marked NOT MOVING are left out.
+// Hanging wardrobe (H/W) boxes in a survey: freehand per-room counts or catalogue "Wardrobe Box" lines.
+function hwBoxes(inv) {
+  return (inv || []).reduce((n, it) => n + ((it && it.qty > 0 && (it.wardrobe || /wardrobe box/i.test(it.name || ""))) ? Number(it.qty) || 0 : 0), 0);
+}
 function jobVolume(data, j) {
   const e = j && (data.enquiries || []).find(x => x.id === j.enquiryId);
   if (!e) return 0;
@@ -2840,6 +2844,12 @@ function InventoryModal({ data, enquiry, onClose }) {
               <span style={{ fontWeight: 700 }}>{aTot.kg} kg</span>
             </div>
           )}
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 13, opacity: .85 }}>H/W boxes required</span>
+            <span style={{ fontWeight: 700 }}>{invMode === "freehand"
+              ? Object.values(freeRooms).reduce((n, r) => n + (Number(r.wardrobe) || 0), 0)
+              : Object.values(lines).reduce((n, v) => n + (v.qty > 0 && /wardrobe box/i.test(v.name || "") ? Number(v.qty) || 0 : 0), 0)}</span>
+          </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, opacity: .85 }}>Recommended</span>
             <span style={{ fontWeight: 700 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads} loads` : ""}</span>
@@ -4009,7 +4019,7 @@ function EnquiryDetail({ data, id, setView }) {
             {newEnqCall(data, e) && <div style={{ fontSize: 13, color: "#2563EB", fontWeight: 700, marginTop: 2 }}>📞 New enquiry — call to book the survey{e.newCalledAt ? ` · last called ${fmtDateShort(e.newCalledAt.slice(0, 10))}` : ""}</div>}
             {e.surveyDate && <div style={{ fontSize: 13, color: surveyOverdue(e) ? "#B91C1C" : TEAL_D, fontWeight: 600, marginTop: 2 }}>📅 {fmtDate(e.surveyDate)}{e.surveyTime ? ` · ${e.surveyTime}` : ""}{surveyOverdue(e) ? " — date passed, not surveyed" : ""}</div>}
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
-              {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³ · ${e.weightKg} kg` : "Not surveyed yet"}
+              {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³${Number(e.weightKg) ? ` · ${e.weightKg} kg` : ""}${hwBoxes(e.inventory) ? ` · ${hwBoxes(e.inventory)} H/W boxes` : ""}` : "Not surveyed yet"}
             </div>
             {e.volumeCuFt > 0 && <div style={{ fontSize: 13, color: TEAL, fontWeight: 600, marginTop: 2 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads}` : ""}</div>}
             {((e.inventory && e.inventory.length) || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "surveyPdf", id: e.id })}><Icon name="quote" size={14} /> Survey &amp; move plan PDF</Btn> : null}
@@ -7978,6 +7988,7 @@ function CrewJobCard({ data, j, st }) {
       <div style={{ fontSize: 14, color: "#10211E", fontWeight: 600 }}>👷 {(st.crew || []).join(", ") || "—"}</div>
       {st.notes && <><H>Notes</H><div style={{ fontSize: 14, color: "#374151", whiteSpace: "pre-wrap" }}>{st.notes}</div></>}
       <H>Inventory</H>
+      {hwBoxes(inv) > 0 && <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 8 }}>👔 {hwBoxes(inv)} H/W boxes required</div>}
       {rooms.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0" }}>No inventory recorded.</div>}
       {rooms.map(([room, items]) => {
         const moving = items.filter(it => it.qty > 0 && !it.dismantleNote), staying = items.filter(it => it.qty < 0), dis = items.filter(it => it.dismantleNote);
