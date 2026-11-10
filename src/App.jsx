@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B179";
+const BUILD_NO = "B180";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2733,7 +2733,17 @@ function InventoryModal({ data, enquiry, onClose }) {
   const disItemsIn = (text, room) => String(text || "").split(/\n|,|;|·/).map(x => x.trim()).filter(x => x && DIS_RE.test(x) && !DIS_NOT.test(x)).map(x => `${x.replace(/^[-•*]\s*/, "")} (${room})`);
   const onDisList = item => dismantleNote.toLowerCase().includes(item.toLowerCase().replace(/\s*\([^)]*\)$/, ""));
   const addDis = items => setDismantleNote(p => [p.trim(), ...items].filter(Boolean).join("\n"));
-  const allDisPending = () => Object.entries(freeRooms).flatMap(([room, r]) => disItemsIn(r.text, room)).filter(it => !onDisList(it));
+  // Who's dismantling: a line ending "– Customer" means the customer does it, otherwise we do.
+  const WHO_RE = /\s*[-–·]\s*(customer|mover)\s*$/i;
+  const disLineIdx = item => { const base = item.toLowerCase().replace(/\s*\([^)]*\)$/, ""); return dismantleNote.split("\n").findIndex(l => l.toLowerCase().includes(base)); };
+  const disWho = item => { const i = disLineIdx(item); const l = i >= 0 ? dismantleNote.split("\n")[i] : ""; return /[-–·]\s*customer\s*$/i.test(l) ? "Customer" : "Mover"; };
+  const toggleDisWho = item => setDismantleNote(p => {
+    const lines = p.split("\n"); const base = item.toLowerCase().replace(/\s*\([^)]*\)$/, "");
+    const i = lines.findIndex(l => l.toLowerCase().includes(base)); if (i < 0) return p;
+    const isCust = /[-–·]\s*customer\s*$/i.test(lines[i]);
+    lines[i] = lines[i].replace(WHO_RE, "") + (isCust ? "" : " – Customer");
+    return lines.join("\n");
+  });
 
   function renderFree(s) {
     const { label, isBedroom, isLounge } = s;
@@ -2760,9 +2770,11 @@ function InventoryModal({ data, enquiry, onClose }) {
               if (!found.length) return null;
               return (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", margin: "0 0 8px" }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77" }}>Dismantle &amp; reassemble?</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77" }}>Dismantle &amp; reassemble? <span style={{ fontWeight: 600, color: "#94A4A0" }}>(tap a ✓ to switch Mover / Customer)</span></span>
                   {found.map(it => onDisList(it)
-                    ? <span key={it} style={{ fontSize: 12, fontWeight: 700, color: "#0F766E", background: "#E8F5F3", borderRadius: 99, padding: "4px 10px" }}>✓ {it.replace(/\s*\([^)]*\)$/, "")}</span>
+                    ? (disWho(it) === "Customer"
+                      ? <button key={it} type="button" onClick={() => toggleDisWho(it)} title="Tap to change who dismantles" style={{ fontSize: 12, fontWeight: 700, color: "#B45309", background: "#FFF7ED", border: "1.5px solid #FDBA74", borderRadius: 99, padding: "4px 10px", cursor: "pointer" }}>✓ {it.replace(/\s*\([^)]*\)$/, "")} · Customer ⇄</button>
+                      : <button key={it} type="button" onClick={() => toggleDisWho(it)} title="Tap to change who dismantles" style={{ fontSize: 12, fontWeight: 700, color: "#0F766E", background: "#E8F5F3", border: "1.5px solid #9FD6CE", borderRadius: 99, padding: "4px 10px", cursor: "pointer" }}>✓ {it.replace(/\s*\([^)]*\)$/, "")} · Mover ⇄</button>)
                     : <button key={it} type="button" onClick={() => addDis([it])} style={{ fontSize: 12, fontWeight: 700, color: TEAL, background: "#fff", border: `1.5px solid ${TEAL}`, borderRadius: 99, padding: "4px 10px", cursor: "pointer" }}>+ {it.replace(/\s*\([^)]*\)$/, "")}</button>)}
                 </div>
               );
@@ -2825,7 +2837,6 @@ function InventoryModal({ data, enquiry, onClose }) {
         <div style={{ marginBottom: 8, border: "1px solid #F3F4F6", borderRadius: 10, padding: "12px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
             <div style={{ fontWeight: 700, color: "#111827" }}>Dismantle / Reassemble</div>
-            {allDisPending().length > 0 && <button type="button" onClick={() => addDis(allDisPending())} style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", background: TEAL, border: "none", borderRadius: 9, padding: "6px 11px", cursor: "pointer" }}>+ Add all ({allDisPending().length})</button>}
           </div>
           <textarea value={dismantleNote} onChange={e => setDismantleNote(e.target.value)} rows={3} placeholder="Items to dismantle and reassemble…" style={{ ...inputStyle, resize: "vertical" }} />
         </div>
