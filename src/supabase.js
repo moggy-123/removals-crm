@@ -113,6 +113,8 @@ const jobFromDb = r => ({
   balancePaid: r.balance_paid,
   status: r.status || "Booked", notes: r.notes || "",
   updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
+  // Job sign-offs (crew + customer signatures). Written only by the crew_sign_off function.
+  signOffs: r.sign_offs && Object.keys(r.sign_offs).length ? r.sign_offs : undefined,
 });
 
 const vehicleToDb = v => ({
