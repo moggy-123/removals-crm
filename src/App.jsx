@@ -879,7 +879,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B171";
+const BUILD_NO = "B172";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -7929,10 +7929,10 @@ function CrewApp() {
     .flatMap(j => jobStages(j).filter(st => st.date === today && (st.crew || []).some(c => String(c).trim().toLowerCase() === me)).map(st => ({ j, st })))
     .sort((a, b) => (a.st.time || "99").localeCompare(b.st.time || "99"));
   return (
-    <div style={{ minHeight: "100vh", background: "#EEF3F2" }}>
+    <div style={{ height: "100%", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", background: "#EEF3F2" }}>
       <ResponsiveStyles device="phone" />
       <UpdateNotice />
-      <header style={{ background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 11 }}>
+      <header style={{ position: "sticky", top: 0, zIndex: 5, background: `linear-gradient(135deg, ${TEAL}, ${TEAL_D})`, padding: "13px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 11 }}>
         <div>
           <div style={{ fontSize: 16.5, fontWeight: 800, color: "#fff", lineHeight: 1.15 }}>Today's jobs</div>
           <div style={{ fontSize: 10, color: "#9DECDF", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em" }}>{fmtDate(today)} ({dow(today)}){CURRENT_USER.staffName ? ` · ${CURRENT_USER.staffName}` : ""}</div>
