@@ -230,6 +230,15 @@ export async function pushMany(table, records) {
   }
 }
 
+// Delete lots of records in a few requests (200 at a time) instead of one request each.
+export async function deleteMany(table, ids) {
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const { error } = await Promise.race([supabase.from(table).delete().in("id", chunk), new Promise((_, rej) => setTimeout(() => rej(new Error("request timed out")), 30000))]);
+    if (error) throw new Error(error.message || JSON.stringify(error));
+  }
+}
+
 export async function deleteRecord(table, id) {
   const { error } = await supabase.from(table).delete().eq("id", id);
   if (error) throw error;
