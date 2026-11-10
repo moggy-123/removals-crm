@@ -165,6 +165,7 @@ const STATUS_META = {
   Won:         { color: "#059669", bg: "#ECFDF5" },
   Lost:        { color: "#DC2626", bg: "#FEF2F2" },
   Provisional: { color: "#CA8A04", bg: "#FEFCE8" },
+  "No date provisional": { color: "#C2410C", bg: "#FFF7ED" },
   Confirmed:   { color: "#2563EB", bg: "#EFF6FF" },
   Booked:      { color: "#2563EB", bg: "#EFF6FF" },
   "In Progress": { color: "#2563EB", bg: "#EFF6FF" },
@@ -893,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B176";
+const BUILD_NO = "B177";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1126,7 +1127,7 @@ function enqStatus(e) {
 function enqBadge(data, e) {
   if (!e) return "";
   const j = (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go");
-  if (j) return (j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : j.status;
+  if (j) return jobBadge(j);
   return enqStatus(e);
 }
 // Sent quote waiting for an answer → remind to ring the customer.
@@ -1447,7 +1448,7 @@ function Dashboard({ data, setView, setData }) {
                       <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}{volText(data, j) ? <b style={{ color: "#10211E" }}> · 📦 {volText(data, j)}</b> : null}</div>
                       <div style={{ fontSize: 12.5, color: "#41514E", marginTop: 3, fontWeight: 600 }}>🚚 {resLine}</div>
                     </div>
-                    <StatusBadge status={j.status} />
+                    <StatusBadge status={jobBadge(j)} />
                   </div>
                 </Card>
               );
@@ -1520,7 +1521,7 @@ function Dashboard({ data, setView, setData }) {
                   <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, j.customerId)}</div>
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{j.fromTown || "—"} → {j.toTown || "—"}</div>
                 </div>
-                <StatusBadge status={j.status} />
+                <StatusBadge status={jobBadge(j)} />
               </div>
             </Card>
           ))}
@@ -1574,7 +1575,7 @@ function Dashboard({ data, setView, setData }) {
                   <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(st.date)} ({dow(st.date)}) · {j.fromTown || "—"} → {j.toTown || "—"}</div>
                   <div style={{ fontSize: 12.5, color: "#41514E", marginTop: 3, fontWeight: 600 }}>🚚 {resLine}</div>
                 </div>
-                <StatusBadge status={j.status} />
+                <StatusBadge status={jobBadge(j)} />
               </div>
             </Card>
             );
@@ -1617,10 +1618,12 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const moveOf = e => (data.jobs || []).find(j => j.enquiryId === e.id);
   const moveDateOf = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || "9999-99"; };
   const baseList = enquiries.filter(e => !moveCompleted(e));
-  const countFor = f => f === "All" ? baseList.length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => enqGroup(e) === f).length;
+  // Booked but no date yet gets its own tile ("No date provisional").
+  const grp = e => { const j = moveOf(e); return j && j.status !== "Let Go" && jobBadge(j) === "No date provisional" ? "No date provisional" : enqGroup(e); };
+  const countFor = f => f === "All" ? baseList.length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => grp(e) === f).length;
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
   const shown = baseList
-    .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : enqGroup(e) === filter)
+    .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : grp(e) === filter)
     .sort((a, b) => filter === "Won"
       ? moveDateOf(a).localeCompare(moveDateOf(b))
       : (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -1632,7 +1635,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
       </div>
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New"), "All"].map(f => {
+        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New").flatMap(x => x === "Won" ? ["Won", "No date provisional"] : [x]), "All"].map(f => {
           const active = filter === f;
           const label = f === "Won" ? "Moves Booked" : f === "All" ? "All enquiries" : f;
           const n = countFor(f);
@@ -3771,7 +3774,7 @@ function MoveManageModal({ data, job, onClose }) {
   }
   return (
     <Modal title={`Move ${moveRef(data, job)}`} onClose={onClose}>
-      <div style={{ marginBottom: 12 }}><StatusBadge status={f.status} /></div>
+      <div style={{ marginBottom: 12 }}><StatusBadge status={jobBadge({ ...job, status: f.status })} /></div>
       <Field label="Price (£)"><Input type="number" inputMode="decimal" value={f.price} onChange={v => set("price", v)} /></Field>
       <Field label="Deposit (£)"><Input type="number" inputMode="decimal" value={f.deposit} onChange={v => set("deposit", v)} /></Field>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E", margin: "2px 0 12px" }}>Balance due: {gbp(balanceDue)}</div>
@@ -4052,7 +4055,7 @@ function EnquiryDetail({ data, id, setView }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ fontWeight: 700, color: "#111827" }}>Move {moveRef(data, linkedJob)}</div>
-                <StatusBadge status={linkedJob.status} />
+                <StatusBadge status={jobBadge(linkedJob)} />
               </div>
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3 }}>
                 {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}
@@ -4200,7 +4203,7 @@ function CustomersList({ data, setView }) {
         const activeMove = cJobs.filter(j => !["Completed", "Let Go"].includes(j.status)).sort((x, y) => (jobMoveDate(x) || "").localeCompare(jobMoveDate(y) || ""))[0];
         // Active move → its status; otherwise the latest enquiry's badge (which shows "Completed" once its move is done)
         const lastDone = cJobs.filter(j => j.status === "Completed").sort((x, y) => (jobMoveDate(y) || "").localeCompare(jobMoveDate(x) || ""))[0];
-        const badge = activeMove ? activeMove.status : latestEnq ? enqBadge(data, latestEnq) : lastDone ? "Completed" : null;
+        const badge = activeMove ? jobBadge(activeMove) : latestEnq ? enqBadge(data, latestEnq) : lastDone ? "Completed" : null;
         // Quote still to build / email (surveyed, no move yet)
         const qe = (data.enquiries || []).filter(e => e.customerId === c.id && !["Lost", "Let Go", "Not quoted", "Won"].includes(e.status) && !cJobs.some(j => j.enquiryId === e.id)
           && (e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted"].includes(e.status))
@@ -4577,7 +4580,7 @@ function CustomerDetail({ data, id, setView }) {
         <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
-            <StatusBadge status={j.status} />
+            <StatusBadge status={jobBadge(j)} />
           </div>
         </Card>
       ))}
@@ -4589,7 +4592,7 @@ function CustomerDetail({ data, id, setView }) {
             <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
-                <StatusBadge status={j.status} />
+                <StatusBadge status={jobBadge(j)} />
               </div>
             </Card>
           ))}
@@ -4634,9 +4637,9 @@ function CustomerDetail({ data, id, setView }) {
 function JobsList({ data, setView }) {
   const [filter, setFilter] = useState("Upcoming");
   const jobs = (data.jobs || [])
-    .filter(j => filter === "All" ? true : filter === "Completed" ? j.status === "Completed" : j.status !== "Completed")
-    .sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || ""));
-  const filters = ["Upcoming", "Completed", "All"];
+    .filter(j => filter === "All" ? true : filter === "Completed" ? j.status === "Completed" : filter === "No date" ? jobBadge(j) === "No date provisional" : j.status !== "Completed")
+    .sort((a, b) => (a.moveDate || "9999").localeCompare(b.moveDate || "9999"));
+  const filters = ["Upcoming", "No date", "Completed", "All"];
   return (
     <div>
       <h2 style={{ margin: "0 0 12px", fontSize: 20, fontWeight: 800, color: "#111827" }}>Moves</h2>
@@ -4652,10 +4655,10 @@ function JobsList({ data, setView }) {
             <div>
               <div style={{ fontSize: 12, fontWeight: 800, color: TEAL_D }}>{moveRef(data, j)}</div>
               <div style={{ fontWeight: 700, color: "#111827", marginTop: 1 }}>{custName(data, j.customerId)}</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {j.fromTown || "—"} → {j.toTown || "—"}</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{j.moveDate ? `${fmtDate(j.moveDate)} (${dow(j.moveDate)})` : "No date yet"} · {j.fromTown || "—"} → {j.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{volText(data, j) ? <b style={{ color: "#41514E" }}>📦 {volText(data, j)} · </b> : null}{j.vehicle || "—"} · {gbp(j.price)}{j.deposit ? ` · dep ${gbp(j.deposit)}${j.depositPaid ? " ✓" : ""}` : ""}</div>
             </div>
-            <StatusBadge status={j.status} />
+            <StatusBadge status={jobBadge(j)} />
           </div>
         </Card>
       ))}
@@ -5763,6 +5766,13 @@ function jobStages(j) {
   if (j.moveDate) return [{ id: "legacy", type: "Move", date: j.moveDate, time: j.startTime || "", vehicleIds: (j.vehicleIds && j.vehicleIds.length) ? j.vehicleIds : (j.vehicleId ? [j.vehicleId] : []), crew: j.crew || [], notes: "" }];
   return [];
 }
+// A provisional move with no dates yet shows as "No date provisional" everywhere.
+const jobUndated = j => !!j && !j.moveDate && !jobStages(j).some(st => st && st.date);
+function jobBadge(j) {
+  if (!j) return "";
+  const st = (j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : j.status;
+  return st === "Provisional" && jobUndated(j) ? "No date provisional" : st;
+}
 // Removal date = earliest day in the move plan (falls back to moveDate if no plan)
 function jobMoveDate(j) {
   if (!j) return "";
@@ -5893,7 +5903,7 @@ function JobDetail({ data, id, setView }) {
           <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D, letterSpacing: ".02em" }}>{moveRef(data, j)}{volText(data, j) ? <span style={{ color: "#41514E" }}> · 📦 {volText(data, j)}</span> : null}</div>
           <h2 style={{ margin: "2px 0 0", fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, j.customerId)}</h2>
         </div>
-        <StatusBadge status={f.status} />
+        <StatusBadge status={jobBadge(f)} />
       </div>
       {customer && (
         <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 12 }}>
@@ -6080,7 +6090,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       {big && (
         <div style={{ fontSize:12, color:"#41514E", marginTop:6, display:"flex", flexWrap:"wrap", alignItems:"center", gap:"2px 10px" }}>
           <span>{resLine}</span>
-          <StatusBadge status={j.status} />
+          <StatusBadge status={jobBadge(j)} />
         </div>
       )}
       {!big && resShort && <div style={{ fontSize:10.5, color:"#94A4A0", marginTop:1, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{resShort}</div>}
