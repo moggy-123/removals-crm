@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B181";
+const BUILD_NO = "B182";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2730,11 +2730,28 @@ function InventoryModal({ data, enquiry, onClose }) {
   // Spot furniture that usually needs dismantling (beds, wardrobes…) in what's been typed.
   const DIS_RE = /\b(bunk ?beds?|cabin ?beds?|beds?|bedframes?|bed frames?|divans?|cots?|wardrobes?|robes?|dining tables?|extending tables?|desks?|bookcases?|shelving units?|trampolines?|treadmills?|cross ?trainers?|multi ?gyms?|home ?gyms?|exercise bikes?|swing sets?|playhouses?|sheds?|greenhouses?|gazebos?)\b/i;
   const DIS_NOT = /\b(bedside|bedding|bedroom|bedspread|wardrobe box|robe hooks?|bed linen|beds? only|garden bed|raised bed|flower bed|dog bed|cat bed|pet bed|bean ?bag)\b/i;
-  const disItemsIn = (text, room) => String(text || "").split(/\n|,|;|·/).map(x => x.trim()).filter(x => x && DIS_RE.test(x) && !DIS_NOT.test(x)).map(x => `${x.replace(/^[-•*]\s*/, "")} (${room})`);
+  // Pick out just the furniture words (e.g. "Chair Double Bed" → "Double Bed"), so lists typed
+  // without commas (like the old Mover ones) still give sensible buttons.
+  const DIS_ADJ = /^(single|double|king|super|queen|small|large|bunk|cabin|corner|triple|fitted|sliding|dining|extending|kitchen|computer|office|corner|wall|tall|2 door|3 door|4 door)$/i;
+  const disItemsIn = (text, room) => {
+    const out = [];
+    const notRe = new RegExp(DIS_NOT.source, "gi");
+    String(text || "").split(/\n|,|;|·/).map(x => x.replace(notRe, " | ").trim()).filter(Boolean).forEach(chunk => {
+      const re = new RegExp(DIS_RE.source, "gi"); let m;
+      while ((m = re.exec(chunk))) {
+        const before = chunk.slice(0, m.index).trim().split(/\s+/).pop() || "";
+        const name = (DIS_ADJ.test(before) ? before + " " : "") + m[0];
+        const label = name.replace(/\b\w/g, c => c.toUpperCase());
+        if (!out.some(o => o.toLowerCase() === `${label} (${room})`.toLowerCase())) out.push(`${label} (${room})`);
+      }
+    });
+    return out;
+  };
   // Only counts as added if that item AND its room are on the list (e.g. "Double bed (Bedroom 1)"),
   // so a bed in one room doesn't show as ticked in every bedroom.
   const onDisList = item => dismantleNote.toLowerCase().split("\n").some(l => l.includes(item.toLowerCase()));
-  const addDis = items => setDismantleNote(p => [p.trim(), ...items].filter(Boolean).join("\n"));
+  // Added from a room button → always says who's doing it ("– Mover" until switched).
+  const addDis = items => setDismantleNote(p => [p.trim(), ...items.map(x => `${x} – Mover`)].filter(Boolean).join("\n"));
   // Who's dismantling: a line ending "– Customer" means the customer does it, otherwise we do.
   const WHO_RE = /\s*[-–·]\s*(customer|mover)\s*$/i;
   const disLineIdx = item => dismantleNote.split("\n").findIndex(l => l.toLowerCase().includes(item.toLowerCase()));
@@ -2743,7 +2760,7 @@ function InventoryModal({ data, enquiry, onClose }) {
     const lines = p.split("\n");
     const i = lines.findIndex(l => l.toLowerCase().includes(item.toLowerCase())); if (i < 0) return p;
     const isCust = /[-–·]\s*customer\s*$/i.test(lines[i]);
-    lines[i] = lines[i].replace(WHO_RE, "") + (isCust ? "" : " – Customer");
+    lines[i] = lines[i].replace(WHO_RE, "") + (isCust ? " – Mover" : " – Customer");
     return lines.join("\n");
   });
 
