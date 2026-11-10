@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { pullFromCloud, pushToCloud, pushOne, pushMany, deleteRecord as deleteRecordRaw, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
+import { pullFromCloud, pushToCloud, pushOne, pushMany, deleteMany, deleteRecord as deleteRecordRaw, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
 
 const DB_KEY = "removals_data";
@@ -893,7 +893,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B175";
+const BUILD_NO = "B176";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4756,11 +4756,21 @@ async function wipeBusinessData(data) {
   const tables = ["jobs", "enquiries", "customers"];
   SAVING_IN_PROGRESS = true;
   showSavingOverlay();
-  const all = [];
-  tables.forEach(t => (data[t] || []).forEach(r => { if (r && r.id) all.push([t, r.id]); }));
+  const all = [], seen = new Set();
+  const add = (t, r) => { if (r && r.id && !seen.has(r.id)) { seen.add(r.id); all.push([t, r.id]); } };
+  tables.forEach(t => (data[t] || []).forEach(r => add(t, r)));
+  // Also anything still in the cloud that this device isn't showing (e.g. a delete that was
+  // interrupted part-way), so a second go always finishes the job.
+  try { const cloud = await pullFromCloud(); tables.forEach(t => ((cloud && cloud[t]) || []).forEach(r => add(t, r))); } catch {}
   all.forEach(([, id]) => addTombstone(id));
   SKIP_DELLOG = true;
-  for (const [t, id] of all) { try { await deleteRecord(t, id); } catch {} }
+  // Delete in bulk (a few requests per table) — one request per record took many minutes.
+  for (const t of tables) {
+    const ids = all.filter(([tt]) => tt === t).map(([, id]) => id);
+    if (!ids.length) continue;
+    try { await deleteMany(t, ids); }
+    catch { for (const id of ids) { try { await deleteRecord(t, id); } catch {} } }
+  }
   SKIP_DELLOG = false;
   await logCloudDeletes(all.map(([, id]) => id));
   queueLog([{ id: uid() + uid(), at: new Date().toISOString(), who: logWho(), customer_id: null, rec_table: "all", rec_id: "", summary: `Deleted all customers, enquiries and jobs (${all.length} records)`, changes: [] }]); await flushLog();
