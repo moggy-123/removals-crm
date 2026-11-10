@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B180";
+const BUILD_NO = "B181";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2731,15 +2731,17 @@ function InventoryModal({ data, enquiry, onClose }) {
   const DIS_RE = /\b(bunk ?beds?|cabin ?beds?|beds?|bedframes?|bed frames?|divans?|cots?|wardrobes?|robes?|dining tables?|extending tables?|desks?|bookcases?|shelving units?|trampolines?|treadmills?|cross ?trainers?|multi ?gyms?|home ?gyms?|exercise bikes?|swing sets?|playhouses?|sheds?|greenhouses?|gazebos?)\b/i;
   const DIS_NOT = /\b(bedside|bedding|bedroom|bedspread|wardrobe box|robe hooks?|bed linen|beds? only|garden bed|raised bed|flower bed|dog bed|cat bed|pet bed|bean ?bag)\b/i;
   const disItemsIn = (text, room) => String(text || "").split(/\n|,|;|·/).map(x => x.trim()).filter(x => x && DIS_RE.test(x) && !DIS_NOT.test(x)).map(x => `${x.replace(/^[-•*]\s*/, "")} (${room})`);
-  const onDisList = item => dismantleNote.toLowerCase().includes(item.toLowerCase().replace(/\s*\([^)]*\)$/, ""));
+  // Only counts as added if that item AND its room are on the list (e.g. "Double bed (Bedroom 1)"),
+  // so a bed in one room doesn't show as ticked in every bedroom.
+  const onDisList = item => dismantleNote.toLowerCase().split("\n").some(l => l.includes(item.toLowerCase()));
   const addDis = items => setDismantleNote(p => [p.trim(), ...items].filter(Boolean).join("\n"));
   // Who's dismantling: a line ending "– Customer" means the customer does it, otherwise we do.
   const WHO_RE = /\s*[-–·]\s*(customer|mover)\s*$/i;
-  const disLineIdx = item => { const base = item.toLowerCase().replace(/\s*\([^)]*\)$/, ""); return dismantleNote.split("\n").findIndex(l => l.toLowerCase().includes(base)); };
+  const disLineIdx = item => dismantleNote.split("\n").findIndex(l => l.toLowerCase().includes(item.toLowerCase()));
   const disWho = item => { const i = disLineIdx(item); const l = i >= 0 ? dismantleNote.split("\n")[i] : ""; return /[-–·]\s*customer\s*$/i.test(l) ? "Customer" : "Mover"; };
   const toggleDisWho = item => setDismantleNote(p => {
-    const lines = p.split("\n"); const base = item.toLowerCase().replace(/\s*\([^)]*\)$/, "");
-    const i = lines.findIndex(l => l.toLowerCase().includes(base)); if (i < 0) return p;
+    const lines = p.split("\n");
+    const i = lines.findIndex(l => l.toLowerCase().includes(item.toLowerCase())); if (i < 0) return p;
     const isCust = /[-–·]\s*customer\s*$/i.test(lines[i]);
     lines[i] = lines[i].replace(WHO_RE, "") + (isCust ? "" : " – Customer");
     return lines.join("\n");
