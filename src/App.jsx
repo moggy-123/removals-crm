@@ -879,7 +879,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B172";
+const BUILD_NO = "B173";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4043,6 +4043,8 @@ function EnquiryDetail({ data, id, setView }) {
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3 }}>
                 {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}
               </div>
+              {(() => { const so = Object.values(linkedJob.signOffs || {}); if (!so.length) return null; const last = so.sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
+                return <div onClick={() => setShowCrew(true)} style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 4, cursor: "pointer" }}>✅ Signed off{so.length > 1 ? ` (${so.length} days)` : ""} · {last.staffName} &amp; {last.custName}{so.some(x => x.notes) ? <span style={{ color: "#B45309" }}> · 📝 note</span> : null}</div>; })()}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
               <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {isReadOnly() ? "View" : "Manage"}</Btn>
@@ -6381,6 +6383,8 @@ function mergeArrays(cloudArr, localArr, deleted, goneElsewhere) {
       // Never lose a reference the database assigned (its updatedAt doesn't change).
       const ref = winner.ref != null ? winner.ref : (x.ref != null ? x.ref : (c.ref != null ? c.ref : null));
       byId[x.id] = (ref != null && ref !== winner.ref) ? { ...winner, ref } : winner;
+      // Job sign-offs only ever get added (by the crew), so keep every one either copy has.
+      if (c.signOffs || x.signOffs) { const so = { ...(x.signOffs || {}), ...(c.signOffs || {}) }; if (Object.keys(so).length !== Object.keys(byId[x.id].signOffs || {}).length) byId[x.id] = { ...byId[x.id], signOffs: so }; }
     } else if (goneElsewhere && goneElsewhere.has(x.id)) {
       addTombstone(x.id); // was in the cloud before, now isn't → deleted on another device
     } else byId[x.id] = x; // never uploaded yet: keep (it's waiting to sync)
@@ -7841,16 +7845,6 @@ function CrewPreviewModal({ data, job, onClose }) {
     </Modal>
   );
 }
-function CrewPdfButton({ data, en, cust }) {
-  const [busy, setBusy] = useState(false);
-  const open = async () => {
-    setBusy(true);
-    try { const { bytes, ref } = await buildSurveyPdf(en, cust, data, "staff"); const f = new File([bytes], `MovePlan-STAFF-${ref || "RJ"}.pdf`, { type: "application/pdf" }); await showPdf(f, f.name); }
-    catch (ex) { alert("Could not open the move plan: " + ((ex && ex.message) || ex)); }
-    setBusy(false);
-  };
-  return <button type="button" data-ro-ok onClick={open} disabled={busy} style={{ width: "100%", margin: "4px 0 10px", padding: "11px 12px", borderRadius: 11, border: "1.5px solid #CFE3DF", background: "#F3FAF8", color: TEAL_D, fontWeight: 800, fontSize: 14.5, cursor: "pointer" }}>{busy ? "Opening…" : "📄 Open full move plan (staff copy)"}</button>;
-}
 const CREW_OPENS_AT = "07:30";
 function crewAddress(parts) { return parts.filter(Boolean).join(", "); }
 function CrewJobCard({ data, j, st }) {
@@ -7890,7 +7884,6 @@ function CrewJobCard({ data, j, st }) {
       {st.notes && <><H>Notes</H><div style={{ fontSize: 14, color: "#374151", whiteSpace: "pre-wrap" }}>{st.notes}</div></>}
       <H>Inventory</H>
       {rooms.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0" }}>No inventory recorded.</div>}
-      {en.id && <CrewPdfButton data={data} en={en} cust={cust} />}
       {rooms.map(([room, items]) => {
         const moving = items.filter(it => it.qty > 0 && !it.dismantleNote), staying = items.filter(it => it.qty < 0), dis = items.filter(it => it.dismantleNote);
         return (
@@ -7905,7 +7898,110 @@ function CrewJobCard({ data, j, st }) {
           </div>
         );
       })}
+      <JobSignOff j={j} st={st} cust={cust} />
     </Card>
+  );
+}
+
+// ── Job sign-off (crew member + customer sign on the day) ───────────────────
+// Saved on the job under signOffs[<day key>]. Crew logins can't edit jobs, so it goes through
+// the crew_sign_off database function. No signal? It's kept on the phone and sent later.
+const SIGNOFF_QUEUE = "removals_signoff_queue";
+const signOffKey = st => String(st.id || `${st.date || ""}-${st.type || "move"}`);
+const readSignQueue = () => { try { return JSON.parse(localStorage.getItem(SIGNOFF_QUEUE) || "[]"); } catch { return []; } };
+const writeSignQueue = q => { try { localStorage.setItem(SIGNOFF_QUEUE, JSON.stringify(q)); } catch {} };
+// Sent ones are remembered on the phone too, so the sign-off still shows before the next sync.
+const SIGNOFF_SENT = "removals_signoff_sent";
+const readSignSent = () => { try { return JSON.parse(localStorage.getItem(SIGNOFF_SENT) || "[]"); } catch { return []; } };
+const rememberSent = item => { try { localStorage.setItem(SIGNOFF_SENT, JSON.stringify([...readSignSent().filter(x => !(x.jobId === item.jobId && x.key === item.key)), item].slice(-30))); } catch {} };
+async function sendSignOff(item) {
+  const { error } = await supabase.rpc("crew_sign_off", { p_job: String(item.jobId), p_stage: item.key, p_data: item.data });
+  if (error && !/already signed/i.test(error.message || "")) throw new Error(error.message || "Couldn't save");
+  rememberSent(item);
+}
+async function flushSignOffs() {
+  const q = readSignQueue(); if (!q.length) return;
+  const left = [];
+  for (const it of q) { try { await sendSignOff(it); } catch { left.push(it); } }
+  writeSignQueue(left);
+}
+function JobSignOff({ j, st, cust }) {
+  const key = signOffKey(st);
+  const [saved, setSaved] = useState(null);
+  const done = (j.signOffs && j.signOffs[key]) || saved || ([...readSignQueue(), ...readSignSent()].find(x => x.jobId === j.id && x.key === key) || {}).data;
+  const [open, setOpen] = useState(false);
+  const [staffName, setStaffName] = useState(CURRENT_USER.staffName || "");
+  const [staffSig, setStaffSig] = useState("");
+  const [custName, setCustName] = useState(cust.name || "");
+  const [custSig, setCustSig] = useState("");
+  const [notes, setNotes] = useState("");
+  const [signing, setSigning] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const crewNames = (st.crew || []).filter(Boolean);
+  const box = { marginTop: 14, paddingTop: 12, borderTop: "1px solid #E5ECEA" };
+  if (done) {
+    const when = done.at ? new Date(done.at) : null;
+    return (
+      <div style={box}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: "#059669", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>✅ Job signed off{when ? ` · ${fmtDate(when.toISOString().slice(0, 10))} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}` : ""}</div>
+        {done.notes ? <div style={{ fontSize: 13, color: "#B45309", background: "#FFFBEB", borderRadius: 8, padding: "6px 9px", marginBottom: 8, whiteSpace: "pre-wrap" }}>📝 {done.notes}</div> : null}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {[["Staff", done.staffName, done.staffSig], ["Customer", done.custName, done.custSig]].map(([l, n, sg]) => (
+            <div key={l}>
+              <div style={{ fontSize: 11.5, color: "#6A7B77", fontWeight: 700 }}>{l}: {n || "-"}</div>
+              {sg ? <img src={sg} alt={`${l} signature`} style={{ width: "100%", maxHeight: 70, objectFit: "contain", border: "1px solid #E5ECEA", borderRadius: 8, background: "#fff" }} /> : null}
+            </div>
+          ))}
+        </div>
+        {msg ? <div style={{ fontSize: 12, color: "#B45309", marginTop: 6 }}>{msg}</div> : null}
+      </div>
+    );
+  }
+  if (isReadOnly()) return null;
+  if (!open) return (
+    <div style={box}>
+      <button type="button" data-ro-ok onClick={() => setOpen(true)} style={{ width: "100%", padding: "13px 12px", borderRadius: 12, border: "none", background: TEAL, color: "#fff", fontWeight: 800, fontSize: 15.5, cursor: "pointer" }}>✍️ Sign off job</button>
+    </div>
+  );
+  const save = async () => {
+    setMsg("");
+    if (!staffName.trim() || !staffSig) { setMsg("The crew member needs to put their name and sign."); return; }
+    if (!custName.trim() || !custSig) { setMsg("The customer needs to put their name and sign."); return; }
+    const item = { jobId: j.id, key, data: { staffName: staffName.trim(), staffSig, custName: custName.trim(), custSig, notes: notes.trim(), at: new Date().toISOString(), date: st.date || "", by: CURRENT_USER.email || "" } };
+    setBusy(true);
+    try { await sendSignOff(item); setSaved(item.data); }
+    catch (ex) {
+      if (/not booked|not allowed|function|does not exist/i.test(ex.message || "")) { setMsg("Couldn't save: " + ex.message); setBusy(false); return; }
+      writeSignQueue([...readSignQueue().filter(x => !(x.jobId === j.id && x.key === key)), item]);
+      setSaved(item.data);
+    }
+    setBusy(false);
+  };
+  const lbl = { fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4 };
+  const inp = { width: "100%", boxSizing: "border-box", padding: "11px 12px", border: "1px solid #D9E2E0", borderRadius: 10, fontSize: 16, marginBottom: 10, background: "#fff", color: "#10211E" };
+  return (
+    <div style={box} data-ro-ok>
+      <div style={{ fontSize: 15, fontWeight: 800, color: "#10211E", marginBottom: 8 }}>✍️ Job sign-off</div>
+      <div style={lbl}>Crew member</div>
+      {crewNames.length > 1 && !CURRENT_USER.staffName
+        ? <select value={staffName} onChange={e => setStaffName(e.target.value)} style={inp}><option value="">Choose…</option>{crewNames.map(n => <option key={n}>{n}</option>)}</select>
+        : <input value={staffName} onChange={e => setStaffName(e.target.value)} placeholder="Name" style={inp} />}
+      <SigField label="Crew member signature" value={staffSig} onOpen={() => setSigning("staff")} />
+      <div style={{ fontSize: 13, color: "#374151", background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", margin: "4px 0 10px" }}>I confirm the move has been completed and my belongings have been delivered in good order, except for anything noted below.</div>
+      <div style={lbl}>Any damage or comments (optional)</div>
+      <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="e.g. scuff on wardrobe door" style={{ ...inp, resize: "vertical" }} />
+      <div style={lbl}>Customer name</div>
+      <input value={custName} onChange={e => setCustName(e.target.value)} placeholder="Name" style={inp} />
+      <SigField label="Customer signature" value={custSig} onOpen={() => setSigning("cust")} />
+      {msg ? <div style={{ fontSize: 13, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "7px 10px", marginBottom: 8 }}>{msg}</div> : null}
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn variant="grey" style={{ flex: 1 }} onClick={() => setOpen(false)}>Cancel</Btn>
+        <Btn style={{ flex: 2 }} disabled={busy} onClick={save}>{busy ? "Saving…" : "Save sign-off"}</Btn>
+      </div>
+      {signing === "staff" && <SignatureModal title={`Crew signature${staffName ? " — " + staffName : ""}`} initial={staffSig} onCancel={() => setSigning(null)} onAccept={v => { setStaffSig(v); setSigning(null); }} />}
+      {signing === "cust" && <SignatureModal title={`Customer signature${custName ? " — " + custName : ""}`} initial={custSig} onCancel={() => setSigning(null)} onAccept={v => { setCustSig(v); setSigning(null); }} />}
+    </div>
   );
 }
 function CrewApp() {
@@ -7913,9 +8009,10 @@ function CrewApp() {
   const [, setSyncStatus] = useState("");
   const [, setTick] = useState(0);
   useEffect(() => {
-    doPullSync(setData, setSyncStatus, { force: true });
-    const i = setInterval(() => { setTick(t => t + 1); doPullSync(setData, setSyncStatus); }, 60000);
-    const f = () => { setTick(t => t + 1); doPullSync(setData, setSyncStatus, { force: true }); };
+    const pull = force => flushSignOffs().catch(() => {}).then(() => doPullSync(setData, setSyncStatus, force ? { force: true } : undefined));
+    pull(true);
+    const i = setInterval(() => { setTick(t => t + 1); pull(false); }, 60000);
+    const f = () => { setTick(t => t + 1); pull(true); };
     window.addEventListener("focus", f);
     document.addEventListener("visibilitychange", f);
     return () => { clearInterval(i); window.removeEventListener("focus", f); document.removeEventListener("visibilitychange", f); };
