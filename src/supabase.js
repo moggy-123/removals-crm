@@ -37,7 +37,7 @@ const customerFromDb = r => ({
 
 // Enquiry fields that have no column of their own. They ride along inside quote_extra._meta so
 // they sync to the cloud and other devices (previously they stayed on one device only).
-const ENQ_META = ["referredBy", "surveyDone", "exchanged", "toStore", "storeMode", "storeQty", "storeOutDate", "quoteChasedAt", "quoteChaseDate", "newCalledAt", "noChase"];
+const ENQ_META = ["referredBy", "surveyDone", "exchanged", "toStore", "storeMode", "storeQty", "storeOutDate", "quoteChasedAt", "quoteChaseDate", "newCalledAt", "noChase", "altOf", "altLabel", "altClosed"];
 const enqMetaOut = e => { const m = {}; ENQ_META.forEach(k => { if (e[k] !== undefined && e[k] !== "" && e[k] !== null && e[k] !== false) m[k] = e[k]; }); return m; };
 const enquiryToDb = e => ({
   id: e.id, customer_id: e.customerId, status: e.status || "New",
