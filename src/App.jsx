@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B185";
+const BUILD_NO = "B186";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1631,13 +1631,14 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const untilISO = period === "custom" ? (custom.to || "") : "";
   const cameIn = e => String(e.enquiryDate || e.createdAt || "").slice(0, 10);
   const inPeriod = e => { const d = cameIn(e); if (!d) return !sinceISO && !untilISO; return (!sinceISO || d >= sinceISO) && (!untilISO || d <= untilISO); };
-  const baseList = enquiries.filter(e => !moveCompleted(e) && inPeriod(e));
+  const periodList = enquiries.filter(inPeriod);
+  const baseList = periodList.filter(e => !moveCompleted(e));
   // Booked but no date yet gets its own tile ("No date provisional").
   const grp = e => { const j = moveOf(e); return j && j.status !== "Let Go" && jobBadge(j) === "No date provisional" ? "No date provisional" : enqGroup(e); };
-  const countFor = f => f === "All" ? baseList.length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => grp(e) === f).length;
+  const countFor = f => f === "All" ? periodList.length : f === "Completed" ? periodList.filter(moveCompleted).length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => grp(e) === f).length;
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
-  const shown = baseList
-    .filter(e => filter === "All" ? true : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : grp(e) === filter)
+  const shown = (filter === "All" || filter === "Completed" ? periodList : baseList)
+    .filter(e => filter === "All" ? true : filter === "Completed" ? moveCompleted(e) : filter === "Open" ? ["New", "Surveyed", "Quoted"].includes(e.status) : grp(e) === filter)
     .sort((a, b) => filter === "Won"
       ? moveDateOf(a).localeCompare(moveDateOf(b))
       : (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -1665,15 +1666,15 @@ function EnquiriesList({ data, setView, initialFilter }) {
       )}
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New").flatMap(x => x === "Won" ? ["Won", "No date provisional"] : [x]), "All"].map(f => {
+        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New").flatMap(x => x === "Won" ? ["Won", "No date provisional", "Completed"] : [x]), "All"].map(f => {
           const active = filter === f;
-          const label = f === "Won" ? "Moves Booked" : f === "All" ? "All enquiries" : f;
+          const label = f === "Won" ? "Moves Booked" : f === "Completed" ? "Moves completed" : f === "All" ? "All enquiries" : f;
           const n = countFor(f);
           const meta = STATUS_META[f] || { color: "#374151", bg: "#F3F4F6" };
           const accent = f === "All" ? "#374151" : (meta.color || "#374151");
           return (
             <button key={f} onClick={() => setFilter(f)} style={{
-              gridColumn: "auto",
+              gridColumn: f === "All" ? "1 / -1" : "auto",
               textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
               background: active ? meta.bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", alignItems: "baseline", gap: 7,
               border: active ? `2px solid ${accent}` : "2px solid #F3F4F6",
