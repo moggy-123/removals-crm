@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B195";
+const BUILD_NO = "B196";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2209,6 +2209,9 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
       data2 = upsertLocal(data2, "customers", customer);
     }
     const rec = {
+      // Keep everything already on the enquiry (quote options link, quote settings, reminders…)
+      // and only overwrite what this form edits — editing used to drop those extra details.
+      ...(e.id ? e : {}),
       id: e.id || uid(), customerId: cid,
       status: reopen ? "New" : (e.status || "New"),
       surveyDone: reopen ? false : !!e.surveyDone,
