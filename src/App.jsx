@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B190";
+const BUILD_NO = "B191";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1239,7 +1239,7 @@ function autoCompletePastMoves(d) {
 // ── Dashboard ───────────────────────────────────────────────────────────────
 // Home screen: "Upcoming surveys" and "Upcoming moves" are hidden for now while the staff
 // get used to the app. Change false → true to bring them back (they're still on the Calendar).
-const SHOW_UPCOMING_ON_HOME = true;
+const SHOW_UPCOMING_ON_HOME = false;
 
 function Dashboard({ data, setView, setData }) {
   const enquiries = data.enquiries || [];
