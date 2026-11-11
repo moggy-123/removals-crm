@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B203";
+const BUILD_NO = "B204";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1077,9 +1077,10 @@ function customerDeleteSummary(d, customerId) {
 }
 // We decided not to quote (too far, too small, not our kind of job…). Doesn't count against win rates.
 async function markNotQuotedFlow(data, en) {
-  const reason = prompt("Didn't quote — reason? (optional, e.g. too far, too small, customer cancelled before survey)");
+  const cur = en.status === "Not quoted" ? en.lostReason : "";
+  const reason = await pickLostReason(NOT_QUOTED_REASONS.includes(cur) ? cur : (cur ? "Other" : ""), { list: NOT_QUOTED_REASONS, title: "Why didn't we quote?" });
   if (reason === null) return;
-  await saveAndReload(upsertLocal(data, "enquiries", { ...en, status: "Not quoted", lostReason: reason.trim() }));
+  await saveAndReload(upsertLocal(data, "enquiries", { ...en, status: "Not quoted", lostReason: reason, updatedAt: Date.now() }));
 }
 // Ask for a reason and mark lost. Cancel = no change.
 async function markLostFlow(data, en) {
@@ -4242,6 +4243,15 @@ function EnquiryDetail({ data, id, setView }) {
         <StatusBadge status={enqBadge(data, e)} />
       </div>
       <AltOptions data={data} e={e} setView={setView} />
+      {e.status === "Not quoted" && !e.altClosed && (
+        <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 12, padding: "10px 12px", marginBottom: 12, fontSize: 13.5, color: "#374151" }}>
+          <b>🚫 We didn't quote</b>{e.lostReason ? `: ${e.lostReason}` : " — no reason given"}
+          {!isReadOnly() && <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Btn size="sm" variant="grey" onClick={() => markNotQuotedFlow(data, e)}>{e.lostReason ? "Change reason" : "Add reason"}</Btn>
+            <Btn size="sm" variant="grey" onClick={() => saveAndReload(upsertLocal(data, "enquiries", { ...e, status: Number(e.quoteTotal) > 0 ? "Quoted" : (e.surveyDone || e.volumeCuFt ? "Surveyed" : "New"), lostReason: "", updatedAt: Date.now() }))}>↺ Undo — back to {Number(e.quoteTotal) > 0 ? "Quoted" : (e.surveyDone || e.volumeCuFt ? "Surveyed" : "New")}</Btn>
+          </div>}
+        </div>
+      )}
       {customer && (
         <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 14 }}>
           {customer.phone && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
@@ -4371,7 +4381,7 @@ function EnquiryDetail({ data, id, setView }) {
       </div>
       {(() => {
         const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
-        const showNq = showLost && !linkedJob && !(Number(e.quoteTotal) > 0);
+        const showNq = showLost && !linkedJob;
         const n = (showFu ? 1 : 0) + (showLost ? 1 : 0) + (showNq ? 1 : 0);
         const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
         if (isReadOnly()) return <Btn variant="grey" style={{ ...eq, marginTop: 8 }} onClick={() => setShowEdit(true)}>👁 View enquiry details</Btn>;
@@ -4855,7 +4865,7 @@ function CustomerDetail({ data, id, setView }) {
             <StatusBadge status={enqBadge(data, e)} />
           </div>
           {e.status === "Lost" && <div style={{ fontSize: 13, color: "#B91C1C", fontWeight: 600, marginTop: 6 }}>Lost reason: {e.lostReason || "none given"}</div>}
-          {e.status === "Not quoted" && <div style={{ fontSize: 13, color: "#6B7280", fontWeight: 600, marginTop: 6 }}>We didn't quote{e.lostReason ? `: ${e.lostReason}` : ""}</div>}
+          {e.status === "Not quoted" && <div style={{ fontSize: 13, color: "#6B7280", fontWeight: 600, marginTop: 6 }}>We didn't quote{e.lostReason ? `: ${e.lostReason}` : " — no reason given"}{!isReadOnly() && !e.altClosed && <> · <span role="button" onClick={() => markNotQuotedFlow(data, e)} style={{ color: TEAL, textDecoration: "underline", cursor: "pointer" }}>{e.lostReason ? "change" : "add reason"}</span></>}</div>}
         </Card>
       ))}
 
@@ -5289,15 +5299,18 @@ function normalizeLost(v) {
   return "Other";
 }
 // Pick a lost reason from a list (replaces the old free-text box). Resolves null on Cancel.
-function pickLostReason(current) {
+const NOT_QUOTED_REASONS = ["Too far / out of area", "Job too small", "Fully booked on their date", "Customer cancelled / not moving", "Customer went quiet", "Duplicate enquiry", "Not our type of work", "Other"];
+function pickLostReason(current, opts = {}) {
+  const LIST = opts.list || LOST_REASONS;
+  const TITLE = opts.title || "Why was it lost?";
   return new Promise(resolve => {
     const wrap = document.createElement("div");
     wrap.style.cssText = "position:fixed;inset:0;z-index:10001;background:rgba(15,46,42,.45);display:flex;align-items:flex-end;justify-content:center;font-family:Inter,system-ui,sans-serif;";
     const box = document.createElement("div");
     box.style.cssText = "background:#fff;width:100%;max-width:460px;border-radius:18px 18px 0 0;padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 16px);box-shadow:0 -6px 30px rgba(0,0,0,.2);";
-    box.innerHTML = '<div style="font-size:17px;font-weight:800;color:#10211E;margin-bottom:4px">Why was it lost?</div><div style="font-size:13px;color:#6A7B77;margin-bottom:12px">This feeds the Reports page.</div>';
+    box.innerHTML = '<div style="font-size:17px;font-weight:800;color:#10211E;margin-bottom:4px">' + TITLE + '</div><div style="font-size:13px;color:#6A7B77;margin-bottom:12px">This feeds the Reports page.</div>';
     const done = v => { wrap.remove(); resolve(v); };
-    LOST_REASONS.forEach(r => {
+    LIST.forEach(r => {
       const b = document.createElement("button");
       b.textContent = r;
       b.style.cssText = `display:block;width:100%;text-align:left;margin-bottom:7px;padding:12px 14px;border-radius:11px;font-size:15px;font-weight:700;cursor:pointer;border:1.5px solid ${r === current ? "#0F766E" : "#E3E9E8"};background:${r === current ? "#E8F5F3" : "#fff"};color:#10211E;`;
@@ -5337,6 +5350,7 @@ function enquiryOutcome(data, e) {
     provisional: !!provisional,
     open: quoted && !won && !["Lost", "Let Go", "Not quoted"].includes(e.status),
     lost: e.status === "Lost", letGo: e.status === "Let Go", notQuoted: e.status === "Not quoted",
+    nqReason: e.status === "Not quoted" ? (String(e.lostReason || "").trim() || "No reason given") : "",
     lostReason: e.status === "Lost" ? normalizeLost(e.lostReason) : "",
     quote: Number(e.quoteTotal) || Number(jobs[0] && jobs[0].price) || 0,
     value,
@@ -5481,6 +5495,9 @@ function ReportsView({ data }) {
   // Lost reasons
   const lostRows = rows.filter(o => o.lost);
   const reasons = group(lostRows, o => o.lostReason).map(([k, arr]) => ({ k, n: arr.length, srcs: group(arr, o => o.source).sort((a, b) => b[1].length - a[1].length).slice(0, 2).map(([s, a]) => `${s} ${a.length}`).join(", ") })).sort((a, b) => b.n - a.n);
+  // Didn't quote reasons
+  const nqRows = rows.filter(o => o.notQuoted);
+  const nqReasons = group(nqRows, o => o.nqReason).map(([k, arr]) => ({ k, n: arr.length })).sort((a, b) => b.n - a.n);
   // Monthly (always last 12 months, filtered by surveyor only)
   const months = Array.from({ length: 12 }, (_, i) => isoAdd(today.slice(0, 7) + "-01", { months: -(11 - i) }).slice(0, 7));
   const monthly = months.map(m => { const arr = all.filter(o => (dateOf(o) || "").slice(0, 7) === m && (!who || o.surveyor === who)); return { m, n: arr.length, won: sum(arr, o => o.won) }; });
@@ -5540,6 +5557,7 @@ function ReportsView({ data }) {
             rows: [...funnel.map(([l, v]) => [l, v, `${pct(v, rows.length)}%`]), ["Lost", lostN, `${pct(lostN, rows.length)}%`], ["Didn't quote", sum(rows, o => o.notQuoted), `${pct(sum(rows, o => o.notQuoted), rows.length)}%`], ["Quoted (waiting)", sum(rows, o => o.open), `${pct(sum(rows, o => o.open), rows.length)}%`]] },
           ...(!who ? [{ title: "Surveyors", head: ["Surveyor", "Surveys", "Quoted", "Won", "Win %", "Avg quote", "£ won"], rows: survs.map(r => [r.k, r.surveyed, r.open, r.won, `${r.win}%`, gbp0(r.avgQuote), gbp0(r.money)]) }] : []),
           { title: "Why jobs are lost", note: `${lostRows.length} lost in this period`, head: ["Reason (mostly from)", "Lost", "%"], firstFrac: 0.66, rows: reasons.map(r => [`${r.k}${r.srcs ? ` (${r.srcs})` : ""}`, r.n, `${pct(r.n, lostRows.length)}%`]), empty: "None lost, or no reasons recorded." },
+          { title: "Why we didn't quote", note: `${nqRows.length} not quoted in this period`, head: ["Reason", "Count", "%"], firstFrac: 0.66, rows: nqReasons.map(r => [r.k, r.n, `${pct(r.n, nqRows.length)}%`]), empty: "None in this period." },
           { title: "Last 12 months", head: ["Month", "Leads", "Won", "Win %"], rows: monthly.map(x => [new Date(x.m + "-01T00:00").toLocaleDateString("en-GB", { month: "long", year: "numeric" }), x.n, x.won, x.n ? `${pct(x.won, x.n)}%` : "-"]) },
           { title: "Areas (top 8 towns moving from)", head: ["Town", "Leads", "Won", "Win %", "£ won"], rows: towns.map(r => [r.k, r.n, r.won, `${r.win}%`, gbp0(r.money)]), empty: "No towns recorded." },
           { title: "Property size", head: ["Size", "Leads", "Won", "Win %", "Avg job"], rows: sizes.map(r => [r.k, r.n, r.won, `${r.win}%`, gbp0(r.avg)]), empty: "No bedroom numbers recorded." },
@@ -5618,6 +5636,19 @@ function ReportsView({ data }) {
             </div>
             <Bar v={r.n} max={Math.max(1, reasons[0].n)} color="#DC2626" />
             <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 2 }}>Mostly from: {r.srcs}</div>
+          </div>
+        ))}
+      </Card>
+
+      <Card>
+        {head("Why we didn't quote", `${nqRows.length} not quoted in this period`)}
+        {!nqReasons.length ? <div style={{ fontSize: 13, color: "#9CA3AF" }}>None in this period.</div> : nqReasons.map(r => (
+          <div key={r.k} style={{ marginBottom: 9 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3, gap: 8 }}>
+              <span style={{ fontWeight: 700, color: "#10211E" }}>{r.k}</span>
+              <span style={{ color: "#6A7B77" }}><b style={{ color: "#10211E" }}>{r.n}</b> · {pct(r.n, nqRows.length)}%</span>
+            </div>
+            <Bar v={r.n} max={Math.max(1, nqReasons[0].n)} color="#6B7280" />
           </div>
         ))}
       </Card>
