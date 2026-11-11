@@ -161,6 +161,7 @@ const STATUS_META = {
   Booked:      { color: "#0891B2", bg: "#ECFEFF" },
   "Let Go":    { color: "#6B7280", bg: "#F3F4F6" },
   "Not quoted": { color: "#6B7280", bg: "#F3F4F6" },
+  "Alt. not chosen": { color: "#6B7280", bg: "#F3F4F6" },
   Quoted:      { color: "#D97706", bg: "#FFFBEB" },
   Won:         { color: "#059669", bg: "#ECFDF5" },
   Lost:        { color: "#DC2626", bg: "#FEF2F2" },
@@ -894,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B191";
+const BUILD_NO = "B192";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1128,8 +1129,23 @@ function enqStatus(e) {
 }
 // Badge for an enquiry anywhere in the app: once it has a move, show the move's status
 // (Provisional / Confirmed / Completed) so it matches the move cards.
+// ── Alternative quotes (e.g. Direct move vs Into store for the same customer) ──
+// Options share a group: the first enquiry is the "root", copies point at it with altOf.
+// Lists and Reports count a group once, using the option that got furthest.
+const altRoot = e => (e && (e.altOf || e.id)) || "";
+const altGroup = (data, e) => (data.enquiries || []).filter(x => altRoot(x) === altRoot(e));
+function altReps(data, list) {
+  const jobEnq = new Set((data.jobs || []).filter(j => j.status !== "Let Go").map(j => j.enquiryId));
+  const rank = x => (x.status === "Won" || jobEnq.has(x.id)) ? 0
+    : (["New", "Surveyed", "Quoted"].includes(x.status) && !x.altClosed) ? (x.altOf ? 2 : 1)
+    : ["Lost", "Let Go"].includes(x.status) ? 3 : 4;
+  const best = {};
+  (list || []).forEach(x => { const k = altRoot(x); if (!best[k] || rank(x) < rank(best[k]) || (rank(x) === rank(best[k]) && !x.altOf)) best[k] = x; });
+  return (list || []).filter(x => best[altRoot(x)] === x);
+}
 function enqBadge(data, e) {
   if (!e) return "";
+  if (e.altClosed && e.status === "Not quoted") return "Alt. not chosen";
   const j = (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go");
   if (j) return jobBadge(j);
   return enqStatus(e);
@@ -1618,7 +1634,7 @@ function SectionTitle({ children }) {
 // ── Enquiries list ──────────────────────────────────────────────────────────
 function EnquiriesList({ data, setView, initialFilter }) {
   const [filter, setFilter] = useState(initialFilter || "Surveyed");
-  const enquiries = data.enquiries || [];
+  const enquiries = altReps(data, data.enquiries || []); // alternative quotes count once
   const filters = ["All", ...ENQUIRY_STATUSES];
   const moveCompleted = e => (data.jobs || []).some(j => j.enquiryId === e.id && j.status === "Completed");
   const moveOf = e => (data.jobs || []).find(j => j.enquiryId === e.id);
@@ -1698,6 +1714,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, e.customerId)}</div>
+              {(() => { const g = altGroup(data, e); return g.length > 1 ? <div style={{ fontSize: 11.5, fontWeight: 800, color: "#7C3AED", marginTop: 2 }}>🔀 {g.length} options{e.altLabel ? ` · showing ${e.altLabel}` : ""}</div> : null; })()}
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
                 {(() => { const j = moveOf(e); const md = j && jobMoveDate(j); return md ? "Move " + fmtDate(md) : (e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"); })()}
@@ -3945,6 +3962,63 @@ function FollowUpModal({ data, record, table, enquiry, onClose }) {
   );
 }
 
+function AltOptions({ data, e, setView }) {
+  const [picking, setPicking] = useState(false);
+  const [other, setOther] = useState("");
+  const group = altGroup(data, e).sort((a, b) => (a.altOf ? 1 : 0) - (b.altOf ? 1 : 0) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  const labelOf = x => x.altLabel || (x.toStore ? "Into store" : "Direct move");
+  const closedAll = group.some(x => x.status === "Won" || (data.jobs || []).some(j => j.enquiryId === x.id && j.status !== "Let Go"));
+  async function create(label) {
+    const root = group.find(x => !x.altOf) || e;
+    const nid = uid();
+    const copy = { ...e, id: nid, altOf: root.id, altLabel: label,
+      toStore: label === "Into store" ? true : label === "Direct move" ? false : !!e.toStore,
+      quoteLines: [], quoteTotal: 0, quoteVat: e.quoteVat, quoteStatus: "Draft", quoteSentDate: "", quoteChasedAt: "", quoteChaseDate: "", noChase: false,
+      status: (e.volumeCuFt || (e.inventory || []).length) ? "Surveyed" : (["Won", "Lost", "Let Go", "Not quoted", "Quoted"].includes(e.status) ? "Surveyed" : e.status),
+      altClosed: false, followUpDate: "", followUpTime: "", followUpNote: "", lostReason: "", createdAt: new Date().toISOString(), updatedAt: Date.now() };
+    let d2 = upsertLocal(data, "enquiries", copy);
+    if (!root.altLabel) d2 = upsertLocal(d2, "enquiries", { ...root, altLabel: labelOf(root) });
+    try { sessionStorage.setItem("removals_view", JSON.stringify({ screen: "enquiryDetail", id: nid })); } catch {}
+    await saveAndReload(d2);
+  }
+  const chip = x => {
+    const cur = x.id === e.id;
+    const j = (data.jobs || []).find(jb => jb.enquiryId === x.id && jb.status !== "Let Go");
+    return (
+      <button key={x.id} type="button" data-ro-ok onClick={() => !cur && setView({ screen: "enquiryDetail", id: x.id })} style={{ textAlign: "left", padding: "8px 11px", borderRadius: 11, cursor: cur ? "default" : "pointer", fontFamily: "inherit",
+        border: cur ? "2px solid #7C3AED" : "1.5px solid #DDD6FE", background: cur ? "#F5F3FF" : "#fff", minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#5B21B6" }}>{labelOf(x)}{cur ? " · viewing" : ""}</div>
+        <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600 }}>{x.volumeCuFt ? `${x.volumeCuFt} cu ft` : "no survey"} · {x.quoteTotal ? gbp(x.quoteTotal) : "no quote"} · {j ? "Booked" : enqBadge(data, x)}</div>
+      </button>
+    );
+  };
+  if (isReadOnly() && group.length < 2) return null;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {group.length > 1 && <div style={{ fontSize: 11.5, fontWeight: 800, color: "#7C3AED", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>🔀 Quote options</div>}
+      {group.length > 1 && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>{group.map(chip)}</div>}
+      {!isReadOnly() && !closedAll && !picking && (
+        <button type="button" onClick={() => setPicking(true)} style={{ width: "100%", padding: "9px 12px", borderRadius: 11, border: "1.5px dashed #C4B5FD", background: "#FAF5FF", color: "#6D28D9", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>＋ Alternative quote</button>
+      )}
+      {picking && (
+        <div style={{ border: "1.5px solid #DDD6FE", background: "#FAF5FF", borderRadius: 12, padding: 12 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#10211E", marginBottom: 4 }}>Copy this enquiry and its inventory as another option:</div>
+          <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 10 }}>Then edit the copy's inventory (e.g. take off clothes and plants not going into store) and build its own quote.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <Btn size="sm" onClick={() => create("Into store")}>📦 Into store</Btn>
+            <Btn size="sm" onClick={() => create("Direct move")}>🚚 Direct move</Btn>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={other} onChange={ev => setOther(ev.target.value)} placeholder="Or name it, e.g. Part load" style={{ flex: 1, minWidth: 0, padding: "9px 11px", borderRadius: 10, border: "1px solid #D9E2E0", fontSize: 15 }} />
+            <Btn size="sm" variant="grey" disabled={!other.trim()} onClick={() => create(other.trim())}>Add</Btn>
+          </div>
+          <div style={{ textAlign: "right", marginTop: 8 }}><Btn size="sm" variant="grey" onClick={() => setPicking(false)}>Cancel</Btn></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EnquiryDetail({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
@@ -4005,6 +4079,10 @@ function EnquiryDetail({ data, id, setView }) {
     };
     let d2 = upsertLocal(data, "jobs", job);
     d2 = upsertLocal(d2, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
+    // The customer picked this option, so the other alternative quotes close themselves.
+    altGroup(data, e).filter(x => x.id !== e.id && !(data.jobs || []).some(j => j.enquiryId === x.id)).forEach(x => {
+      d2 = upsertLocal(d2, "enquiries", { ...x, status: "Not quoted", altClosed: true });
+    });
     showSavingOverlay(); SAVING_IN_PROGRESS = true;
     const stamped = stampData(d2);
     setDB(JSON.stringify(stamped));
@@ -4047,6 +4125,7 @@ function EnquiryDetail({ data, id, setView }) {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{custName(data, e.customerId)}</h2>
         <StatusBadge status={enqBadge(data, e)} />
       </div>
+      <AltOptions data={data} e={e} setView={setView} />
       {customer && (
         <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 14 }}>
           {customer.phone && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
@@ -5177,7 +5256,7 @@ function ReportsView({ data }) {
     custom: [repCustom.from || "", repCustom.to || ""],
   }[period] || ["", ""];
   const dateOf = o => o.surveyDate || o.created;
-  const all = (data.enquiries || []).map(e => enquiryOutcome(data, e));
+  const all = altReps(data, data.enquiries || []).map(e => enquiryOutcome(data, e)); // alternative quotes = one lead
   const surveyors = Array.from(new Set(all.map(o => o.surveyor).filter(Boolean))).sort();
   const inRange = o => { if (!from && !to) return true; const d = dateOf(o); if (!d) return false; return (!from || d >= from) && (!to || d <= to); };
   const rows = all.filter(o => inRange(o) && (!who || o.surveyor === who));
