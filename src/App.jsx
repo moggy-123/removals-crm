@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B189";
+const BUILD_NO = "B190";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1239,7 +1239,7 @@ function autoCompletePastMoves(d) {
 // ── Dashboard ───────────────────────────────────────────────────────────────
 // Home screen: "Upcoming surveys" and "Upcoming moves" are hidden for now while the staff
 // get used to the app. Change false → true to bring them back (they're still on the Calendar).
-const SHOW_UPCOMING_ON_HOME = false;
+const SHOW_UPCOMING_ON_HOME = true;
 
 function Dashboard({ data, setView, setData }) {
   const enquiries = data.enquiries || [];
@@ -1248,6 +1248,8 @@ function Dashboard({ data, setView, setData }) {
   const [tmOpen, toggleTm] = useRemembered("removals_home_today_moves");
   const [tsOpen, toggleTs] = useRemembered("removals_home_today_surveys");
   const [svOpen, toggleSv] = useRemembered("removals_home_servicing", false);
+  const [usOpen, toggleUs] = useRemembered("removals_home_upsurveys", true);
+  const [umOpen, toggleUm] = useRemembered("removals_home_upmoves", true);
   const [editFu, setEditFu] = useState(null);
   const [resched, setResched] = useState(null);
   const [chaseFor, setChaseFor] = useState(null);
@@ -1263,8 +1265,7 @@ function Dashboard({ data, setView, setData }) {
   const upcoming = jobs
     .filter(j => j.status !== "Completed" && j.status !== "Let Go")
     .flatMap(j => jobStages(j).filter(st => st.date && st.date > todayISO()).map(st => ({ j, st })))
-    .sort((a, b) => a.st.date.localeCompare(b.st.date))
-    .slice(0, 6);
+    .sort((a, b) => a.st.date.localeCompare(b.st.date));
   const followUps = [
     ...enquiries.filter(e => e.followUpDate && !["Lost", "Not quoted"].includes(e.status)).map(e => ({ kind: "enquiry", key: "e" + e.id, id: e.id, customerId: e.customerId, date: e.followUpDate, time: e.followUpTime || "", note: e.followUpNote, status: e.status })),
     ...(data.customers || []).filter(c => c.followUpDate).map(c => ({ kind: "customer", key: "c" + c.id, id: c.id, customerId: c.id, date: c.followUpDate, time: c.followUpTime || "", note: c.followUpNote })),
@@ -1290,7 +1291,9 @@ function Dashboard({ data, setView, setData }) {
   const _thisYM = `${_dNow.getFullYear()}-${String(_dNow.getMonth() + 1).padStart(2, "0")}`;
   const _nd = new Date(_dNow.getFullYear(), _dNow.getMonth() + 1, 1);
   const _nextYM = `${_nd.getFullYear()}-${String(_nd.getMonth() + 1).padStart(2, "0")}`;
-  const inWindow = iso => { const ym = (iso || "").slice(0, 7); return ym === _thisYM || ym === _nextYM; };
+  // Home only looks ahead two weeks (today + 14 days).
+  const twoWeeksIso = isoAdd(todayIso, { days: 14 });
+  const inWindow = iso => !!iso && iso >= todayIso && iso <= twoWeeksIso;
   const pastProvisional = jobs.filter(j => j.status === "Provisional").map(j => ({ j, last: jobLatestDate(j) })).filter(x => x.last && x.last < todayIso).sort((a, b) => a.last.localeCompare(b.last));
   const changeDate = j => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id });
   async function removeBooking(j) {
@@ -1481,7 +1484,7 @@ function Dashboard({ data, setView, setData }) {
 
 
       {SHOW_UPCOMING_ON_HOME && (dashShow === "" || dashShow === "surveys") && (() => {
-        const list = upcomingSurveys.filter(e => e.surveyDate !== todayIso && (surveyStage(e) !== "booked" || inWindow(e.surveyDate)));
+        const list = upcomingSurveys.filter(e => e.surveyDate !== todayIso && inWindow(e.surveyDate));
         const openQuote = (ev, e) => { ev.stopPropagation(); try { sessionStorage.setItem("removals_open_quote", e.id); } catch {} setView({ screen: "enquiryDetail", id: e.id }); };
         const STAGE = {
           booked:    { card: { borderColor: "#FBE3B3", background: "#FFFBF2" }, col: "#B45309", note: "" },
@@ -1491,8 +1494,8 @@ function Dashboard({ data, setView, setData }) {
         };
         return (
         <div style={{ marginBottom: 18 }}>
-          <SectionTitle>Upcoming surveys</SectionTitle>
-          {list.length === 0 ? <div style={{ fontSize: 13, color: "#94A4A0" }}>No more surveys this month or next.</div> : list.map(e => { const stage = surveyStage(e); const S = STAGE[stage] || STAGE.booked; const overdue = stage === "overdue"; return (
+          <CollapseBar title="Surveys · next 2 weeks" count={list.length} open={usOpen} onToggle={toggleUs} color={AMBER} emptyText="None booked" />
+          {!usOpen ? null : list.map(e => { const stage = surveyStage(e); const S = STAGE[stage] || STAGE.booked; const overdue = stage === "overdue"; return (
             <Card key={e.id} onClick={() => setView({ screen: "enquiryDetail", id: e.id })} style={S.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
@@ -1532,39 +1535,12 @@ function Dashboard({ data, setView, setData }) {
         </div>
       )}
 
-      {(dashShow === "" || dashShow === "servicing") && (() => {
-        const list = upcomingServicing.filter(({ b }) => inWindow(b.start));
-        return (
-        <>
-          {dashShow === "" && <CollapseBar title="Servicing" count={list.length} open={svOpen} onToggle={toggleSv} color="#475569" emptyText="None this month or next" />}
-          {(dashShow !== "" || svOpen) && <div style={{ marginBottom: 18 }}>
-            {list.length === 0 ? (dashShow !== "" ? <Empty icon="truck" text="No servicing this month or next" /> : null) : list.map(({ v, b }, ix) => (
-              <Card key={ix} onClick={() => setView({ screen: "calendar", calMode: "day", date: b.start })} style={{ borderColor: "#D3DEEA", background: "#F3F6FA" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>{b.type}{b.days > 1 ? ` · ${b.days} days` : ""}</div>
-                    <div style={{ fontWeight: 700, color: "#10211E" }}>{v.name}</div>
-                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(b.start)} ({dow(b.start)}){b.days > 1 ? ` – ${fmtDate(bookingEnd(b))} (${dow(bookingEnd(b))})` : ""}{b.motDate ? ` · MOT ${dow(b.motDate)}` : ""}</div>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>}
-        </>
-        );
-      })()}
-
-      {resched && <RescheduleSurveyModal data={data} enquiry={resched} onClose={() => setResched(null)} />}
-      {chaseFor && <ChaseDateModal data={data} enquiry={chaseFor} onClose={() => setChaseFor(null)} />}
-      {editFu && <FollowUpModal data={data} record={editFu.record} table={editFu.table} onClose={() => setEditFu(null)} />}
-
       {SHOW_UPCOMING_ON_HOME && dashShow !== "surveys" && dashShow !== "servicing" && (() => {
         const list = upcoming.filter(({ st }) => inWindow(st.date));
         return (
         <>
-          <SectionTitle>Upcoming moves</SectionTitle>
-          {list.length === 0 && <Empty icon="truck" text="No moves this month or next" />}
-          {list.map(({ j, st }, ix) => {
+          <CollapseBar title="Moves · next 2 weeks" count={list.length} open={umOpen} onToggle={toggleUm} color={TEAL} emptyText="None booked" />
+          {!umOpen ? null : list.map(({ j, st }, ix) => {
             const provisional = !["Confirmed", "Completed"].includes(j.status);
             const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
             const resLine = provisional
@@ -1587,6 +1563,32 @@ function Dashboard({ data, setView, setData }) {
         </>
         );
       })()}
+      {(dashShow === "" || dashShow === "servicing") && (() => {
+        const list = upcomingServicing.filter(({ b }) => inWindow(b.start) || (b.start <= todayIso && bookingEnd(b) >= todayIso));
+        return (
+        <>
+          {dashShow === "" && <CollapseBar title="Servicing · next 2 weeks" count={list.length} open={svOpen} onToggle={toggleSv} color="#475569" emptyText="None booked" />}
+          {(dashShow !== "" || svOpen) && <div style={{ marginBottom: 18 }}>
+            {list.length === 0 ? (dashShow !== "" ? <Empty icon="truck" text="No servicing in the next 2 weeks" /> : null) : list.map(({ v, b }, ix) => (
+              <Card key={ix} onClick={() => setView({ screen: "calendar", calMode: "day", date: b.start })} style={{ borderColor: "#D3DEEA", background: "#F3F6FA" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>{b.type}{b.days > 1 ? ` · ${b.days} days` : ""}</div>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{v.name}</div>
+                    <div style={{ fontSize: 13, color: "#6A7B77" }}>{fmtDate(b.start)} ({dow(b.start)}){b.days > 1 ? ` – ${fmtDate(bookingEnd(b))} (${dow(bookingEnd(b))})` : ""}{b.motDate ? ` · MOT ${dow(b.motDate)}` : ""}</div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>}
+        </>
+        );
+      })()}
+
+      {resched && <RescheduleSurveyModal data={data} enquiry={resched} onClose={() => setResched(null)} />}
+      {chaseFor && <ChaseDateModal data={data} enquiry={chaseFor} onClose={() => setChaseFor(null)} />}
+      {editFu && <FollowUpModal data={data} record={editFu.record} table={editFu.table} onClose={() => setEditFu(null)} />}
+
     </div>
   );
 }
