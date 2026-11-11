@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B187";
+const BUILD_NO = "B188";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1624,11 +1624,12 @@ function EnquiriesList({ data, setView, initialFilter }) {
   // Period: when the enquiry came in. Remembered on this device.
   const [period, setPeriodRaw] = useState(() => { try { return localStorage.getItem("removals_enq_period") || "all"; } catch { return "all"; } });
   const setPeriod = v => { setPeriodRaw(v); try { localStorage.setItem("removals_enq_period", v); } catch {} };
-  const PERIODS = [["all", "All time"], ["7", "Last week"], ["31", "Last month"], ["92", "Last 3 months"], ["183", "Last 6 months"], ["365", "Last year"], ["custom", "Custom dates…"]];
+  const PERIODS = [["all", "All time"], ["month", "This month"], ["7", "Last week"], ["31", "Last month"], ["92", "Last 3 months"], ["183", "Last 6 months"], ["365", "Last year"], ["custom", "Custom dates…"]];
   const [custom, setCustomRaw] = useState(() => { try { return JSON.parse(localStorage.getItem("removals_enq_custom") || "null") || { from: "", to: "" }; } catch { return { from: "", to: "" }; } });
   const setCustom = v => { setCustomRaw(v); try { localStorage.setItem("removals_enq_custom", JSON.stringify(v)); } catch {} };
-  const sinceISO = period === "all" ? "" : period === "custom" ? (custom.from || "") : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
-  const untilISO = period === "custom" ? (custom.to || "") : "";
+  const thisMonth = todayISO().slice(0, 7);
+  const sinceISO = period === "all" ? "" : period === "custom" ? (custom.from || "") : period === "month" ? thisMonth + "-01" : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
+  const untilISO = period === "custom" ? (custom.to || "") : period === "month" ? thisMonth + "-31" : "";
   // Same date as Reports uses (survey date, or when it came in if there's no survey), so the
   // numbers here and in Reports always agree.
   const cameIn = e => String(e.surveyDate || e.createdAt || e.enquiryDate || "").slice(0, 10);
@@ -5150,7 +5151,7 @@ function enquiryOutcome(data, e) {
 }
 
 function ReportsView({ data }) {
-  const [period, setPeriod] = useState(() => { try { return localStorage.getItem("rm_rep_period") || "12m"; } catch { return "12m"; } });
+  const [period, setPeriod] = useState(() => { try { const v = localStorage.getItem("rm_rep_period") || "12m"; return v === "next" ? "12m" : v; } catch { return "12m"; } });
   const [who, setWho] = useState("");
   // Reports go by the survey date (or the date the enquiry came in, if there's no survey yet).
   const basis = "survey";
@@ -5230,7 +5231,7 @@ function ReportsView({ data }) {
     <div>
       <Card>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-          {[["last", "Last month"], ["1m", "This month"], ["next", "Next month"], ["3m", "3 months"], ["6m", "6 months"], ["12m", "12 months"], ["ytd", "This year"], ["all", "All time"], ["custom", "Custom dates"]].map(([v, l]) => chip(v, l, period, setPeriod))}
+          {[["last", "Last month"], ["1m", "This month"], ["3m", "3 months"], ["6m", "6 months"], ["12m", "12 months"], ["ytd", "This year"], ["all", "All time"], ["custom", "Custom dates"]].map(([v, l]) => chip(v, l, period, setPeriod))}
         </div>
         {period === "custom" && (
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
