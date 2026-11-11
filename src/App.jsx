@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B201";
+const BUILD_NO = "B203";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3614,11 +3614,11 @@ async function openPdfViewer(blob, name) {
   const bar = document.createElement("div");
   bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;background:#0F2E2A;color:#fff;";
   const btn = (label, primary) => { const b = document.createElement("button"); b.textContent = label; b.style.cssText = `border:none;border-radius:10px;padding:9px 13px;font-weight:700;font-size:14px;cursor:pointer;${primary ? "background:#14B8A6;color:#fff;" : "background:rgba(255,255,255,.14);color:#fff;"}`; return b; };
-  const close = btn("✕ Close"), minus = btn("−"), plus = btn("+"), share = btn("Share", true);
+  const close = btn("✕ Close"), minus = btn("−"), plus = btn("+"), print = btn("🖨 Print"), share = btn("Share", true);
   const title = document.createElement("div");
   title.textContent = name.replace(/\.pdf$/i, "");
   title.style.cssText = "flex:1;min-width:0;font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85;";
-  bar.append(close, title, minus, plus, share);
+  bar.append(close, title, minus, plus, print, share);
   const scroller = document.createElement("div");
   scroller.style.cssText = "flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:12px 0 calc(env(safe-area-inset-bottom, 0px) + 20px);";
   const pages = document.createElement("div");
@@ -3632,6 +3632,20 @@ async function openPdfViewer(blob, name) {
   minus.onclick = () => { zoom = Math.max(1, zoom - .5); applyZoom(); };
   plus.onclick = () => { zoom = Math.min(3, zoom + .5); applyZoom(); };
   close.onclick = () => { wrap.remove(); document.body.style.overflow = prevOverflow; };
+  // Print: put the drawn pages into a print-only layer and open the print dialog (AirPrint on iPhone/iPad).
+  let drawing = true;
+  print.onclick = async () => {
+    if (drawing) { print.textContent = "Wait…"; while (drawing && document.body.contains(wrap)) await new Promise(r => setTimeout(r, 200)); print.textContent = "🖨 Print"; }
+    document.getElementById("rm-print")?.remove(); document.getElementById("rm-print-css")?.remove();
+    const holder = document.createElement("div"); holder.id = "rm-print";
+    pages.querySelectorAll("canvas").forEach(c => { const img = document.createElement("img"); img.src = c.toDataURL("image/jpeg", 0.92); holder.appendChild(img); });
+    const css = document.createElement("style"); css.id = "rm-print-css";
+    css.textContent = "#rm-print{display:none}@media print{@page{size:A4;margin:0}html,body{background:#fff!important;height:auto!important;overflow:visible!important}body>*:not(#rm-print){display:none!important}#rm-print{display:block!important}#rm-print img{display:block;width:100%;height:auto;page-break-after:always;break-after:page}#rm-print img:last-child{page-break-after:auto;break-after:auto}}";
+    document.head.appendChild(css); document.body.appendChild(holder);
+    const cleanup = () => { holder.remove(); css.remove(); window.removeEventListener("afterprint", cleanup); };
+    window.addEventListener("afterprint", cleanup);
+    setTimeout(() => { try { window.print(); } catch (_e) {} setTimeout(cleanup, 60000); }, 150);
+  };
   share.onclick = async () => {
     const file = new File([blob], name, { type: "application/pdf" });
     try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; } } catch (_e) { return; }
@@ -3651,6 +3665,7 @@ async function openPdfViewer(blob, name) {
     pages.appendChild(c);
     await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
   }
+  drawing = false;
 }
 // Show a PDF: inside the app on the iPhone Home Screen app, otherwise the device's usual way.
 async function showPdf(src, name = "document.pdf") {
@@ -5333,6 +5348,85 @@ function enquiryOutcome(data, e) {
   };
 }
 
+// ── Printable PDF of the Reports screen ─────────────────────────────────────
+// spec: { title, subtitle, tiles: [[label, value]], sections: [{ title, note, head: [...], rows: [[...]], bold: rowIndex }] }
+function ReportPdfButton({ build }) {
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const spec = build();
+      const bytes = await buildReportPdf(spec);
+      const f = new File([bytes], `RJ Sales report ${todayISO()}.pdf`, { type: "application/pdf" });
+      await showPdf(f, f.name);
+    } catch (ex) { alert("Could not make the report: " + ((ex && ex.message) || ex)); }
+    setBusy(false);
+  };
+  return <button type="button" data-ro-ok onClick={go} disabled={busy} style={{ width: "100%", marginBottom: 14, padding: "12px 14px", borderRadius: 12, border: "1.5px solid #CFE3DF", background: "#fff", color: TEAL_D, fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}>{busy ? "Making the report…" : "🖨️ Printable PDF report"}</button>;
+}
+
+async function buildReportPdf(spec) {
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const W = 595.28, H = 841.89, M = 40;
+  const TEALc = rgb(0.06, 0.46, 0.43), GREY = rgb(0.42, 0.48, 0.47), LINE = rgb(0.86, 0.89, 0.88), BLACK = rgb(0.06, 0.13, 0.12), SHADE = rgb(0.95, 0.97, 0.97);
+  const clean = t => String(t == null ? "" : t).replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, "-").replace(/\u2026/g, "...").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
+  let page, y, pageNo = 0;
+  const newPage = () => {
+    page = pdf.addPage([W, H]); pageNo++; y = H - M;
+    page.drawText("R&J Removals & Storage", { x: M, y: H - 26, size: 8, font, color: GREY });
+    const pn = `Page ${pageNo}`; page.drawText(pn, { x: W - M - font.widthOfTextAtSize(pn, 8), y: H - 26, size: 8, font, color: GREY });
+  };
+  const need = h => { if (y - h < M) newPage(); };
+  const text = (t, x, size, f = font, col = BLACK) => page.drawText(clean(t), { x, y, size, font: f, color: col });
+  const rtext = (t, xr, size, f = font, col = BLACK) => { const c = clean(t); page.drawText(c, { x: xr - f.widthOfTextAtSize(c, size), y, size, font: f, color: col }); };
+  const wrap = (t, size, maxW, f = font) => { const out = []; let line = ""; clean(t).split(/\s+/).forEach(w => { const test = line ? line + " " + w : w; if (f.widthOfTextAtSize(test, size) > maxW && line) { out.push(line); line = w; } else line = test; }); if (line) out.push(line); return out; };
+  newPage();
+  y -= 14;
+  text(spec.title, M, 20, bold, TEALc); y -= 18;
+  text(spec.subtitle, M, 10, font, GREY); y -= 24;
+  // tiles: 3 per row
+  const tw = (W - 2 * M - 20) / 3, th = 46;
+  spec.tiles.forEach(([l, v], i) => {
+    if (i % 3 === 0) { need(th + 10); if (i) y -= th + 10; }
+    const x = M + (i % 3) * (tw + 10);
+    page.drawRectangle({ x, y: y - th + 10, width: tw, height: th, color: SHADE, borderColor: LINE, borderWidth: 0.6 });
+    page.drawText(clean(v), { x: x + 10, y: y - 10, size: 16, font: bold, color: BLACK });
+    page.drawText(clean(l), { x: x + 10, y: y - 26, size: 8.5, font, color: GREY });
+  });
+  y -= th + 18;
+  for (const sec of spec.sections) {
+    const cols = sec.head.length, tableW = W - 2 * M;
+    const firstW = sec.firstFrac ? tableW * sec.firstFrac : Math.min(170, tableW * (cols > 4 ? 0.34 : 0.42)), otherW = (tableW - firstW) / Math.max(1, cols - 1);
+    const xs = sec.head.map((_, i) => i === 0 ? M : M + firstW + otherW * i);
+    need(60);
+    text(sec.title.toUpperCase(), M, 10.5, bold, TEALc); y -= 13;
+    if (sec.note) { for (const ln of wrap(sec.note, 8, tableW)) { need(12); text(ln, M, 8, font, GREY); y -= 10; } }
+    y -= 4;
+    const headRow = () => {
+      page.drawRectangle({ x: M, y: y - 5, width: tableW, height: 16, color: SHADE });
+      sec.head.forEach((h, i) => i === 0 ? text(h, xs[0] + 4, 8, bold, GREY) : rtext(h, xs[i] - 4, 8, bold, GREY));
+      y -= 17;
+    };
+    if (!sec.rows.length) { need(14); text(sec.empty || "Nothing in this period.", M, 9, font, GREY); y -= 22; continue; }
+    headRow();
+    sec.rows.forEach((r, ri) => {
+      if (y - 15 < M) { newPage(); headRow(); }
+      const f = (sec.boldRows || []).includes(ri) ? bold : font;
+      r.forEach((c, i) => {
+        if (i === 0) { let t = clean(c); while (t.length > 3 && f.widthOfTextAtSize(t, 9) > firstW - 8) t = t.slice(0, -2); text(t, xs[0] + 4, 9, f); }
+        else rtext(c, xs[i] - 4, 9, f);
+      });
+      page.drawLine({ start: { x: M, y: y - 4 }, end: { x: M + tableW, y: y - 4 }, thickness: 0.5, color: LINE });
+      y -= 15;
+    });
+    y -= 14;
+  }
+  return await pdf.save();
+}
+
 function ReportsView({ data }) {
   const [period, setPeriod] = useState(() => { try { const v = localStorage.getItem("rm_rep_period") || "12m"; return v === "next" ? "12m" : v; } catch { return "12m"; } });
   const [who, setWho] = useState("");
@@ -5434,6 +5528,24 @@ function ReportsView({ data }) {
           {surveyors.map(s => chip(s, s, who, setWho))}
         </div>
       </Card>
+
+      <ReportPdfButton build={() => ({
+        title: "Sales report",
+        subtitle: `${from || to ? `${from ? fmtUK(from) : "start"} - ${to ? fmtUK(to) : "no end"}` : "All dates"} (by survey date) · ${who || "All surveyors"} · printed ${fmtUK(todayISO())}`,
+        tiles: [["Leads", rows.length], ["Quoted (waiting)", sum(rows, o => o.open)], ["Won", wonN], ["Lost", sum(rows, o => o.lost)], ["Win rate", `${pct(wonN, decided(rows))}%`], ["£ won" + (wonN ? ` (avg ${gbp0(money(rows) / wonN)})` : ""), gbp0(money(rows))]],
+        sections: [
+          { title: "Lead sources", note: "% = share of leads (not counting ones we didn't quote). Quoted = still waiting. Win % = won / leads quoted. * = best win rate (3+ leads).", head: ["Source", "%", "Leads", "Quoted", "Won", "Lost", "Win %", "£ won"],
+            rows: sources.map(r => [r.k + (bestSrc && r.k === bestSrc.k ? " *" : ""), `${pct(r.dq, decided(rows))}%`, r.n, r.open, r.won, r.lost, `${r.win}%`, gbp0(r.money)]) },
+          { title: "Conversion funnel", head: ["Stage", "Count", "% of enquiries"],
+            rows: [...funnel.map(([l, v]) => [l, v, `${pct(v, rows.length)}%`]), ["Lost", lostN, `${pct(lostN, rows.length)}%`], ["Didn't quote", sum(rows, o => o.notQuoted), `${pct(sum(rows, o => o.notQuoted), rows.length)}%`], ["Quoted (waiting)", sum(rows, o => o.open), `${pct(sum(rows, o => o.open), rows.length)}%`]] },
+          ...(!who ? [{ title: "Surveyors", head: ["Surveyor", "Surveys", "Quoted", "Won", "Win %", "Avg quote", "£ won"], rows: survs.map(r => [r.k, r.surveyed, r.open, r.won, `${r.win}%`, gbp0(r.avgQuote), gbp0(r.money)]) }] : []),
+          { title: "Why jobs are lost", note: `${lostRows.length} lost in this period`, head: ["Reason (mostly from)", "Lost", "%"], firstFrac: 0.66, rows: reasons.map(r => [`${r.k}${r.srcs ? ` (${r.srcs})` : ""}`, r.n, `${pct(r.n, lostRows.length)}%`]), empty: "None lost, or no reasons recorded." },
+          { title: "Last 12 months", head: ["Month", "Leads", "Won", "Win %"], rows: monthly.map(x => [new Date(x.m + "-01T00:00").toLocaleDateString("en-GB", { month: "long", year: "numeric" }), x.n, x.won, x.n ? `${pct(x.won, x.n)}%` : "-"]) },
+          { title: "Areas (top 8 towns moving from)", head: ["Town", "Leads", "Won", "Win %", "£ won"], rows: towns.map(r => [r.k, r.n, r.won, `${r.win}%`, gbp0(r.money)]), empty: "No towns recorded." },
+          { title: "Property size", head: ["Size", "Leads", "Won", "Win %", "Avg job"], rows: sizes.map(r => [r.k, r.n, r.won, `${r.win}%`, gbp0(r.avg)]), empty: "No bedroom numbers recorded." },
+          { title: "Price bands", head: ["Quote", "Quoted", "Won", "Win %"], rows: bands.map(r => [r.k, r.n, r.won, `${r.win}%`]) },
+        ],
+      })} />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 10, marginBottom: 14 }}>
         {[["Leads", rows.length], ["Quoted (waiting)", sum(rows, o => o.open)], ["Won", wonN], ["Lost", sum(rows, o => o.lost)], ["Win rate", `${pct(wonN, decided(rows))}%`], ["£ won", gbp0(money(rows)), wonN ? `avg ${gbp0(money(rows) / wonN)}` : ""]].map(([l, v, sub]) => (
