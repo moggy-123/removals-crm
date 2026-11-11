@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B196";
+const BUILD_NO = "B197";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1134,6 +1134,16 @@ function enqStatus(e) {
 // Lists and Reports count a group once, using the option that got furthest.
 const altRoot = e => (e && (e.altOf || e.id)) || "";
 const altGroup = (data, e) => (data.enquiries || []).filter(x => altRoot(x) === altRoot(e));
+// Re-open the other options when the booked one is taken off (customer changed their mind).
+function altReopen(d, e) {
+  altGroup(d, e).filter(x => x.id !== e.id && x.altClosed).forEach(x => {
+    d = upsertLocal(d, "enquiries", { ...x, altClosed: false, status: Number(x.quoteTotal) > 0 ? "Quoted" : (x.volumeCuFt ? "Surveyed" : "New"), updatedAt: Date.now() });
+  });
+  // Keep the option that was booked as the selected one until you pick another.
+  const root = altGroup(d, e).find(x => !x.altOf);
+  if (root && altGroup(d, e).length > 1) d = upsertLocal(d, "enquiries", { ...root, altPick: e.id, updatedAt: Date.now() });
+  return d;
+}
 function altReps(data, list) {
   const jobEnq = new Set((data.jobs || []).filter(j => j.status !== "Let Go").map(j => j.enquiryId));
   const rank = x => (x.status === "Won" || jobEnq.has(x.id)) ? 0
@@ -3879,7 +3889,7 @@ function MoveManageModal({ data, job, onClose }) {
     try { await deleteRecord("jobs", job.id); } catch {}
     let d2 = { ...data, jobs: (data.jobs || []).filter(x => x.id !== job.id) };
     const enq = (d2.enquiries || []).find(x => x.id === job.enquiryId);
-    if (enq) d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Quoted", quoteStatus: "Sent" });
+    if (enq) { d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Quoted", quoteStatus: "Sent" }); d2 = altReopen(d2, enq); }
     const stamped = stampData(d2);
     setDB(JSON.stringify(stamped));
     try { await pushChangedOnly(stamped); } catch {}
@@ -4017,6 +4027,13 @@ function AltOptions({ data, e, setView }) {
     } catch (ex) { setSendErr((ex && ex.message) || "Could not make the quotes."); }
     setSending(false);
   }
+  async function reopen(x) {
+    const root = group.find(y => !y.altOf) || e;
+    let d2 = upsertLocal(data, "enquiries", { ...x, altClosed: false, status: Number(x.quoteTotal) > 0 ? "Quoted" : (x.volumeCuFt ? "Surveyed" : "New"), updatedAt: Date.now() });
+    const r2 = (d2.enquiries || []).find(y => y.id === root.id) || root;
+    d2 = upsertLocal(d2, "enquiries", { ...r2, altPick: x.id, updatedAt: Date.now() });
+    await saveAndReload(d2);
+  }
   async function select(x) {
     const root = group.find(y => !y.altOf) || e;
     await saveAndReload(upsertLocal(data, "enquiries", { ...root, altPick: x.id, updatedAt: Date.now() }));
@@ -4044,6 +4061,7 @@ function AltOptions({ data, e, setView }) {
         <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600 }}>{x.volumeCuFt ? `${x.volumeCuFt} cu ft` : "no survey"} · {x.quoteTotal ? gbp(x.quoteTotal) : "no quote"} · {j ? "Booked" : enqBadge(data, x)}</div>
         {x.id === shownId
           ? <div style={{ fontSize: 11.5, fontWeight: 800, color: "#059669", marginTop: 3 }}>✓ Selected — used on lists &amp; reports</div>
+          : (!closedAll && !isReadOnly() && x.altClosed) ? <span role="button" onClick={ev => { ev.stopPropagation(); reopen(x); }} style={{ display: "inline-block", fontSize: 11.5, fontWeight: 800, color: "#7C3AED", background: "#fff", border: "1.5px solid #C4B5FD", borderRadius: 99, padding: "3px 9px", marginTop: 4 }}>↺ Reopen this one</span>
           : (!closedAll && !isReadOnly() && !x.altClosed) ? <span role="button" onClick={ev => { ev.stopPropagation(); select(x); }} style={{ display: "inline-block", fontSize: 11.5, fontWeight: 800, color: "#fff", background: "#7C3AED", borderRadius: 99, padding: "3px 9px", marginTop: 4 }}>Select this one</span> : null}
       </button>
     );
