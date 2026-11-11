@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B182";
+const BUILD_NO = "B183";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1621,7 +1621,13 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const moveCompleted = e => (data.jobs || []).some(j => j.enquiryId === e.id && j.status === "Completed");
   const moveOf = e => (data.jobs || []).find(j => j.enquiryId === e.id);
   const moveDateOf = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || "9999-99"; };
-  const baseList = enquiries.filter(e => !moveCompleted(e));
+  // Period: when the enquiry came in. Remembered on this device.
+  const [period, setPeriodRaw] = useState(() => { try { return localStorage.getItem("removals_enq_period") || "all"; } catch { return "all"; } });
+  const setPeriod = v => { setPeriodRaw(v); try { localStorage.setItem("removals_enq_period", v); } catch {} };
+  const PERIODS = [["all", "All time"], ["7", "Last week"], ["31", "Last month"], ["92", "Last 3 months"], ["183", "Last 6 months"], ["365", "Last year"]];
+  const sinceISO = period === "all" ? "" : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
+  const cameIn = e => String(e.enquiryDate || e.createdAt || "").slice(0, 10);
+  const baseList = enquiries.filter(e => !moveCompleted(e) && (!sinceISO || !cameIn(e) || cameIn(e) >= sinceISO));
   // Booked but no date yet gets its own tile ("No date provisional").
   const grp = e => { const j = moveOf(e); return j && j.status !== "Let Go" && jobBadge(j) === "No date provisional" ? "No date provisional" : enqGroup(e); };
   const countFor = f => f === "All" ? baseList.length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => grp(e) === f).length;
@@ -1636,6 +1642,12 @@ function EnquiriesList({ data, setView, initialFilter }) {
     <div>
       <div className="rm-page-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#6A7B77" }}>Enquiries from</span>
+        <select value={period} onChange={e => setPeriod(e.target.value)} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, fontWeight: 700, color: "#10211E" }}>
+          {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
       </div>
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
