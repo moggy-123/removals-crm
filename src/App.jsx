@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B192";
+const BUILD_NO = "B194";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1139,8 +1139,11 @@ function altReps(data, list) {
   const rank = x => (x.status === "Won" || jobEnq.has(x.id)) ? 0
     : (["New", "Surveyed", "Quoted"].includes(x.status) && !x.altClosed) ? (x.altOf ? 2 : 1)
     : ["Lost", "Let Go"].includes(x.status) ? 3 : 4;
+  // The option you've selected (altPick on the first enquiry) wins unless another is booked.
+  const picks = {}; (list || []).forEach(x => { if (!x.altOf && x.altPick) picks[x.id] = x.altPick; });
+  const score = x => { const r = rank(x); return r === 0 ? 0 : (picks[altRoot(x)] === x.id && !x.altClosed) ? 0.5 : r; };
   const best = {};
-  (list || []).forEach(x => { const k = altRoot(x); if (!best[k] || rank(x) < rank(best[k]) || (rank(x) === rank(best[k]) && !x.altOf)) best[k] = x; });
+  (list || []).forEach(x => { const k = altRoot(x); if (!best[k] || score(x) < score(best[k]) || (score(x) === score(best[k]) && !x.altOf)) best[k] = x; });
   return (list || []).filter(x => best[altRoot(x)] === x);
 }
 function enqBadge(data, e) {
@@ -1258,7 +1261,7 @@ function autoCompletePastMoves(d) {
 const SHOW_UPCOMING_ON_HOME = false;
 
 function Dashboard({ data, setView, setData }) {
-  const enquiries = data.enquiries || [];
+  const enquiries = altReps(data, data.enquiries || []); // one per customer when there are alternative quotes
   const jobs = data.jobs || [];
   const dashShow = ""; // the Surveys / Moves / Servicing buttons were removed
   const [tmOpen, toggleTm] = useRemembered("removals_home_today_moves");
@@ -3968,6 +3971,46 @@ function AltOptions({ data, e, setView }) {
   const group = altGroup(data, e).sort((a, b) => (a.altOf ? 1 : 0) - (b.altOf ? 1 : 0) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
   const labelOf = x => x.altLabel || (x.toStore ? "Into store" : "Direct move");
   const closedAll = group.some(x => x.status === "Won" || (data.jobs || []).some(j => j.enquiryId === x.id && j.status !== "Let Go"));
+  const shownId = (altReps(data, group)[0] || {}).id;
+  // Email every priced option in one go: both PDFs go into one share (pick Mail on the iPhone),
+  // then each option is marked as emailed.
+  const priced = group.filter(x => Number(x.quoteTotal) > 0 && !x.altClosed);
+  const [sending, setSending] = useState(false);
+  const [sendErr, setSendErr] = useState("");
+  async function emailAll() {
+    const cust = (data.customers || []).find(c => c.id === e.customerId) || {};
+    setSendErr(""); setSending(true);
+    try {
+      const files = [];
+      for (const x of priced) {
+        const { bytes, ref } = await buildQuotePdf(x, cust);
+        files.push(new File([bytes], `Quote ${ref || cust.ref || "RJ"} - ${labelOf(x)}.pdf`.replace(/[\/:*?"<>|]/g, "-"), { type: "application/pdf" }));
+      }
+      const first = String(cust.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").trim().split(/\s+/)[0] || "there";
+      const opts = priced.map(x => `• ${labelOf(x)}: ${gbp(x.quoteTotal)}`).join("\n");
+      const text = `Hi ${first}, please find your removals quotations attached, one for each option:\n${opts}\n\nAny questions just let us know.\n\nR&J Removals & Storage`;
+      let sent = false;
+      if (navigator.canShare && navigator.canShare({ files })) {
+        try { await navigator.share({ files, title: "Removals quotations", text }); sent = true; resetZoomSoon(); }
+        catch (ex) { if (ex && ex.name !== "AbortError") throw ex; }
+      } else {
+        files.forEach(f => showPdf(f, f.name));
+        sent = confirm("The quotes have been saved. Mark them all as emailed?");
+      }
+      if (sent) {
+        let d2 = data;
+        priced.forEach(x => { d2 = upsertLocal(d2, "enquiries", { ...x, quoteStatus: x.quoteStatus === "Accepted" ? "Accepted" : "Sent", quoteSentDate: todayISO(), status: ["Won", "Lost", "Not quoted"].includes(x.status) ? x.status : "Quoted" }); });
+        setSending(false);
+        await saveAndReload(d2);
+        return;
+      }
+    } catch (ex) { setSendErr((ex && ex.message) || "Could not make the quotes."); }
+    setSending(false);
+  }
+  async function select(x) {
+    const root = group.find(y => !y.altOf) || e;
+    await saveAndReload(upsertLocal(data, "enquiries", { ...root, altPick: x.id, updatedAt: Date.now() }));
+  }
   async function create(label) {
     const root = group.find(x => !x.altOf) || e;
     const nid = uid();
@@ -3989,6 +4032,9 @@ function AltOptions({ data, e, setView }) {
         border: cur ? "2px solid #7C3AED" : "1.5px solid #DDD6FE", background: cur ? "#F5F3FF" : "#fff", minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: "#5B21B6" }}>{labelOf(x)}{cur ? " · viewing" : ""}</div>
         <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600 }}>{x.volumeCuFt ? `${x.volumeCuFt} cu ft` : "no survey"} · {x.quoteTotal ? gbp(x.quoteTotal) : "no quote"} · {j ? "Booked" : enqBadge(data, x)}</div>
+        {x.id === shownId
+          ? <div style={{ fontSize: 11.5, fontWeight: 800, color: "#059669", marginTop: 3 }}>✓ Selected — used on lists &amp; reports</div>
+          : (!closedAll && !isReadOnly() && !x.altClosed) ? <span role="button" onClick={ev => { ev.stopPropagation(); select(x); }} style={{ display: "inline-block", fontSize: 11.5, fontWeight: 800, color: "#fff", background: "#7C3AED", borderRadius: 99, padding: "3px 9px", marginTop: 4 }}>Select this one</span> : null}
       </button>
     );
   };
@@ -3997,6 +4043,12 @@ function AltOptions({ data, e, setView }) {
     <div style={{ marginBottom: 12 }}>
       {group.length > 1 && <div style={{ fontSize: 11.5, fontWeight: 800, color: "#7C3AED", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>🔀 Quote options</div>}
       {group.length > 1 && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>{group.map(chip)}</div>}
+      {!isReadOnly() && !closedAll && priced.length > 1 && (
+        <button type="button" disabled={sending} onClick={emailAll} style={{ width: "100%", padding: "10px 12px", borderRadius: 11, border: "none", background: "#F59E0B", color: "#fff", fontWeight: 800, fontSize: 14.5, cursor: "pointer", fontFamily: "inherit", marginBottom: 8 }}>
+          {sending ? "Making the quotes…" : `📧 Email all ${priced.length} quotes${priced.every(x => ["Sent", "Accepted"].includes(x.quoteStatus)) ? " again" : ""}`}
+        </button>
+      )}
+      {sendErr && <div style={{ fontSize: 13, color: "#B91C1C", marginBottom: 8 }}>{sendErr}</div>}
       {!isReadOnly() && !closedAll && !picking && (
         <button type="button" onClick={() => setPicking(true)} style={{ width: "100%", padding: "9px 12px", borderRadius: 11, border: "1.5px dashed #C4B5FD", background: "#FAF5FF", color: "#6D28D9", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>＋ Alternative quote</button>
       )}
@@ -6475,7 +6527,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const inRange = d => d && d >= startIso && d <= endIso;
         const items = [];
         if (showMoves) jobs.forEach(j => jobStages(j).forEach(st => { if (inRange(st.date)) items.push({ type:"move", date:st.date, time:st.time||"", job:j, stage:st }); }));
-        if (showSurveys) (data.enquiries||[]).forEach(en => { if (inRange(en.surveyDate) && !["Lost","Not quoted"].includes(en.status)) items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
+        if (showSurveys) altReps(data, data.enquiries || []).forEach(en => { if (inRange(en.surveyDate) && !["Lost","Not quoted"].includes(en.status)) items.push({ type:"survey", date:en.surveyDate, time:en.surveyTime||"", en }); });
         if (showVeh) (data.vehicles||[]).forEach(v => ((v.maint&&v.maint.bookings)||[]).forEach(b => { const first = bookingDates(b).find(d => d >= startIso); if (first && first <= endIso) items.push({ type:"maint", date: first, time:"00", v, b }); }));
         if (showStaffOff) (data.staff||[]).forEach(s => ((s.away)||[]).forEach(b => { const total = Math.max(1,Number(b.days)||1); if (b.start && isoAdd(b.start,{days:total-1}) >= startIso && b.start <= endIso) { const shown = b.start < startIso ? startIso : b.start; const dayNo = Math.round((new Date(shown+"T00:00") - new Date(b.start+"T00:00"))/86400000) + 1; items.push({ type:"staffoff", date: shown, time:"00", s, b, dayNo, total }); } }));
         items.sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
