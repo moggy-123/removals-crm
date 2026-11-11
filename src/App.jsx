@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B194";
+const BUILD_NO = "B195";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1491,6 +1491,7 @@ function Dashboard({ data, setView, setData }) {
                       <div style={{ fontSize: 10, fontWeight: 800, color: col, textTransform: "uppercase", letterSpacing: ".05em" }}>{done ? "✓ Done" : late ? "⚠️ Time passed" : "Today"}{e.surveyTime ? ` · ${e.surveyTime}` : ""}{e.surveyor ? ` · ${e.surveyor}` : ""}</div>
                       <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                       <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || e.fromPostcode || "—"} → {e.toTown || e.toPostcode || "—"}</div>
+                      <AltNote data={data} e={e} />
                     </div>
                     <StatusBadge status={enqBadge(data, e)} />
                   </div>
@@ -1717,7 +1718,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, e.customerId)}</div>
-              {(() => { const g = altGroup(data, e); return g.length > 1 ? <div style={{ fontSize: 11.5, fontWeight: 800, color: "#7C3AED", marginTop: 2 }}>🔀 {g.length} options{e.altLabel ? ` · showing ${e.altLabel}` : ""}</div> : null; })()}
+              <AltNote data={data} e={e} />
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
                 {(() => { const j = moveOf(e); const md = j && jobMoveDate(j); return md ? "Move " + fmtDate(md) : (e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"); })()}
@@ -3965,6 +3966,12 @@ function FollowUpModal({ data, record, table, enquiry, onClose }) {
   );
 }
 
+// Small "🔀 2 quotes · showing Into store" note for cards when a customer has alternative quotes.
+function AltNote({ data, e, small }) {
+  const g = altGroup(data, e);
+  if (g.length < 2) return null;
+  return <div style={{ fontSize: small ? 10.5 : 12, fontWeight: 800, color: "#7C3AED", marginTop: 2 }}>🔀 {g.length} quotes{e.altLabel ? ` · showing ${e.altLabel}` : ""}</div>;
+}
 function AltOptions({ data, e, setView }) {
   const [picking, setPicking] = useState(false);
   const [other, setOther] = useState("");
@@ -6278,7 +6285,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const today = new Date();
   const hasStaff = st => !!(st.crew && st.crew.length);
   const rawJobsOn = d => { const iso = isoOf(d); const out = []; jobs.forEach(j => jobStages(j).forEach(st => { if (st.date === iso) out.push({ job: j, stage: st }); })); return out.sort((a,b)=>(a.stage.time||"").localeCompare(b.stage.time||"")); };
-  const rawSurveysOn = d => (data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && !["Lost", "Not quoted"].includes(en.status)).sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
+  const rawSurveysOn = d => altReps(data, data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && !["Lost", "Not quoted"].includes(en.status)).sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
   const jobsOn = d => showMoves ? rawJobsOn(d) : [];
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
   const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
@@ -6358,6 +6365,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       <div style={{ fontSize: big?11:9.5, fontWeight:800, color: tc, textTransform:"uppercase", letterSpacing:".05em" }}>{missed ? "⚠️ Missed survey" : done ? "✓ Surveyed" : "Survey"}{en.surveyTime ? ` · ${en.surveyTime}` : ""}</div>
       <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, en.customerId)}</div>
       <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:1, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{en.fromTown || "—"} → {en.toTown || "—"}</div>
+      <AltNote data={data} e={en} small={!big} />
     </div>
     );
   };
