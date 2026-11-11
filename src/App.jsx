@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B205";
+const BUILD_NO = "B206";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -8615,7 +8615,16 @@ function moverSurveyNotes(notes) {
 function tidyMoverNotes() {
   if (isReadOnly() || CURRENT_USER.role === "crew") return null;
   const d = loadData(); let changed = false;
-  const enquiries = (d.enquiries || []).map(e => { const n = moverSurveyNotes(e.notes); if (n === null) return e; changed = true; return { ...e, notes: n, updatedAt: Date.now() }; });
+  const enquiries = (d.enquiries || []).map(e => {
+    let x = e;
+    const n = moverSurveyNotes(x.notes);
+    if (n !== null) x = { ...x, notes: n };
+    // Imported Mover quotes were all chased in Mover already: no chase reminders unless you set one.
+    // (Some devices got these without that flag, so the PC showed 200+ "Chase quote" jobs.)
+    if (String(x.id || "").startsWith("mvr-e-") && !x.noChase && !x.quoteChasedAt && !x.quoteChaseDate && x.quoteStatus === "Sent" && String(x.quoteSentDate || "") < "2026-11-10") x = { ...x, noChase: true };
+    if (x === e) return e;
+    changed = true; return { ...x, updatedAt: Date.now() };
+  });
   return changed ? { ...d, enquiries } : null;
 }
 function MainApp() {
