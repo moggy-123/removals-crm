@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B199";
+const BUILD_NO = "B200";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -8454,6 +8454,20 @@ function ReadOnlyStyles() { return isReadOnly() ? <style>{RO_CSS}</style> : null
 function ReadOnlyBanner() {
   return <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", color: "#4B5563", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 700, marginBottom: 12 }}>👁 Read-only access — you can look at everything but can't change anything.</div>;
 }
+// Imported Mover notes: keep only the survey notes (blank if there were none).
+function moverSurveyNotes(notes) {
+  const t = String(notes || "");
+  if (!t.startsWith("Imported from Mover")) return null; // not an imported note, leave alone
+  const part = t.split(/\n\n/).find(x => /^\s*Mover status:.*?Survey notes:|^\s*Survey notes:/s.test(x)) || "";
+  const m = part.match(/Survey notes:\s*([\s\S]*)$/);
+  return m ? m[1].trim() : "";
+}
+function tidyMoverNotes() {
+  if (isReadOnly() || CURRENT_USER.role === "crew") return null;
+  const d = loadData(); let changed = false;
+  const enquiries = (d.enquiries || []).map(e => { const n = moverSurveyNotes(e.notes); if (n === null) return e; changed = true; return { ...e, notes: n, updatedAt: Date.now() }; });
+  return changed ? { ...d, enquiries } : null;
+}
 function MainApp() {
   const [data, setData] = useState(loadData);
   const [view, setViewState] = useState(() => {
@@ -8464,6 +8478,16 @@ function MainApp() {
   const [catalog, setCatalogState] = useState(() => { const l = loadLocalCatalog(); if (l) applyCatalog(l); return l || buildDefaultCatalog(); });
   const device = useDeviceType();
   const wide = device !== "phone";
+
+  // One-off tidy: imported Mover enquiries keep only their survey notes in the Notes field.
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      const d2 = tidyMoverNotes(); if (!d2) return;
+      const stamped = stampData(d2); setDB(JSON.stringify(stamped)); setData(stamped);
+      try { await pushChangedOnly(stamped); } catch {}
+    }, 6000);
+    return () => clearTimeout(t);
+  }, []);
 
   // Load the item catalogue (cloud vs local, newest wins) and apply it app-wide.
   useEffect(() => {
