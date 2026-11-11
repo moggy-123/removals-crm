@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B184";
+const BUILD_NO = "B185";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5155,6 +5155,8 @@ function ReportsView({ data }) {
   // Reports go by the survey date (or the date the enquiry came in, if there's no survey yet).
   const basis = "survey";
   useEffect(() => { try { localStorage.setItem("rm_rep_period", period); } catch {} }, [period]);
+  const [repCustom, setRepCustomRaw] = useState(() => { try { return JSON.parse(localStorage.getItem("rm_rep_custom") || "null") || { from: "", to: "" }; } catch { return { from: "", to: "" }; } });
+  const setRepCustom = v => { setRepCustomRaw(v); try { localStorage.setItem("rm_rep_custom", JSON.stringify(v)); } catch {} };
   const today = todayISO();
   const monthStart = today.slice(0, 7) + "-01";
   const monthEnd = isoAdd(isoAdd(monthStart, { months: 1 }), { days: -1 });
@@ -5168,6 +5170,7 @@ function ReportsView({ data }) {
     "12m": [isoAdd(today, { months: -12 }), basis === "created" ? today : isoAdd(today, { months: 12 })],
     ytd: [today.slice(0, 4) + "-01-01", today.slice(0, 4) + "-12-31"],
     all: ["", ""],
+    custom: [repCustom.from || "", repCustom.to || ""],
   }[period] || ["", ""];
   const dateOf = o => o.surveyDate || o.created;
   const all = (data.enquiries || []).map(e => enquiryOutcome(data, e));
@@ -5227,10 +5230,20 @@ function ReportsView({ data }) {
     <div>
       <Card>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-          {[["last", "Last month"], ["1m", "This month"], ["next", "Next month"], ["3m", "3 months"], ["6m", "6 months"], ["12m", "12 months"], ["ytd", "This year"], ["all", "All time"]].map(([v, l]) => chip(v, l, period, setPeriod))}
+          {[["last", "Last month"], ["1m", "This month"], ["next", "Next month"], ["3m", "3 months"], ["6m", "6 months"], ["12m", "12 months"], ["ytd", "This year"], ["all", "All time"], ["custom", "Custom dates"]].map(([v, l]) => chip(v, l, period, setPeriod))}
         </div>
+        {period === "custom" && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            {[["from", "From"], ["to", "To"]].map(([k, l]) => (
+              <label key={k} style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 3 }}>{l}</div>
+                <input type="date" value={repCustom[k]} onChange={e => setRepCustom({ ...repCustom, [k]: e.target.value })} style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, color: "#10211E" }} />
+              </label>
+            ))}
+          </div>
+        )}
         <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 10 }}>
-          {from || to ? `${from ? fmtUK(from) : "start"} – ${to ? fmtUK(to) : "today"}` : "All dates"} · by survey date
+          {from || to ? `${from ? fmtUK(from) : "start"} – ${to ? fmtUK(to) : "no end"}` : "All dates"} · by survey date
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {chip("", "All surveyors", who, setWho)}
