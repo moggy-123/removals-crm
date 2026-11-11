@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B197";
+const BUILD_NO = "B198";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3352,7 +3352,25 @@ async function buildQuotePdf(e, c) {
   const toAddr = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join("  ");
   const extraStr = list => (list || []).map(s => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(" "); return a ? a + (s.note ? ` (${s.note})` : "") : ""; }).filter(Boolean);
   const fromFull = [fromAddr, ...extraStr(e.extraFrom)].filter(Boolean).join("   +   ");
-  const toFull = [toAddr, ...extraStr(e.extraTo)].filter(Boolean).join("   +   ");
+  const toAddrFull = [toAddr, ...extraStr(e.extraTo)].filter(Boolean).join("   +   ");
+  // Into store: say so on the quote with roughly how long, then where it goes out of store to.
+  const storeLen = (() => {
+    if (!e.toStore) return "";
+    const q = Number(e.storeQty) || 0;
+    if (e.storeMode === "Fixed date out" && e.storeOutDate) {
+      const start = e.preferredDate || todayISO();
+      const wk = Math.max(1, Math.round((new Date(e.storeOutDate) - new Date(start)) / (7 * 86400000)));
+      return `until ${fmtUK(e.storeOutDate)}, approx. ${wk} week${wk === 1 ? "" : "s"}`;
+    }
+    const m = String(e.storeMode || "Weeks").toLowerCase();
+    if (q && m.startsWith("month")) return `approx. ${q} month${q === 1 ? "" : "s"} (about ${Math.round(q * 4.33)} weeks)`;
+    if (q && m.startsWith("day")) return `approx. ${q} day${q === 1 ? "" : "s"}`;
+    if (q && m.startsWith("year")) return `approx. ${q} year${q === 1 ? "" : "s"}`;
+    if (q) return `approx. ${q} week${q === 1 ? "" : "s"}`;
+    return "length to be confirmed";
+  })();
+  const toFull = toAddrFull;
+  const storeLine = e.toStore ? `Into store - ${storeLen}${toAddrFull ? "  (then delivered out of store to the address below)" : ""}` : "";
   const surveyWhen = e.surveyDate ? fmtUK(e.surveyDate) : "";
   const moveWhen = e.preferredDate ? fmtUK(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
 
@@ -3376,6 +3394,7 @@ async function buildQuotePdf(e, c) {
   L(92, 126, c?.email); L(304, 126, moveWhen); L(472, 126, e.exchanged ? "Yes" : "No");
   const fitSize = (t, maxW, base = 9, min = 6) => { let s = base; const tt = clean(t); while (s > min && font.widthOfTextAtSize(tt, s) > maxW) s -= 0.5; return s; };
   L(92, 144, fromFull, fitSize(fromFull, 468)); L(92, 180, toFull, fitSize(toFull, 468));
+  if (storeLine) L(92, 162, storeLine, fitSize(storeLine, 468), bold);
   // ── MOVING grid: dynamic — one row per quote line, totals directly beneath ──
   {
     const GREY = rgb(0.5, 0.5, 0.5), HEADF = rgb(0.93, 0.93, 0.93), WHITE = rgb(1, 1, 1), BLACK = rgb(0, 0, 0);
