@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B204";
+const BUILD_NO = "B205";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1503,6 +1503,7 @@ function Dashboard({ data, setView, setData }) {
                       <div style={{ fontWeight: 700, color: "#10211E" }}>{custName(data, e.customerId)}</div>
                       <div style={{ fontSize: 13, color: "#6A7B77" }}>{e.fromTown || e.fromPostcode || "—"} → {e.toTown || e.toPostcode || "—"}</div>
                       <AltNote data={data} e={e} />
+                      <ReasonLine e={e} />
                     </div>
                     <StatusBadge status={enqBadge(data, e)} />
                   </div>
@@ -1730,6 +1731,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, color: "#111827" }}>{custName(data, e.customerId)}</div>
               <AltNote data={data} e={e} />
+              <ReasonLine e={e} />
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
                 {(() => { const j = moveOf(e); const md = j && jobMoveDate(j); return md ? "Move " + fmtDate(md) : (e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"); })()}
@@ -4016,6 +4018,13 @@ function FollowUpModal({ data, record, table, enquiry, onClose }) {
   );
 }
 
+// "Why" line for Didn't quote / Lost / Let Go enquiries, shown on cards everywhere.
+function ReasonLine({ e, small }) {
+  if (!e || !["Not quoted", "Lost", "Let Go"].includes(e.status) || e.altClosed) return null;
+  const r = String(e.lostReason || "").trim();
+  const col = e.status === "Lost" ? "#B91C1C" : "#6B7280";
+  return <div style={{ fontSize: small ? 11 : 12.5, fontWeight: 700, color: r ? col : "#9CA3AF", marginTop: 2 }}>{e.status === "Not quoted" ? "🚫 " : e.status === "Lost" ? "✕ " : ""}{r || "No reason given"}</div>;
+}
 // Small "🔀 2 quotes · showing Into store" note for cards when a customer has alternative quotes.
 function AltNote({ data, e, small }) {
   const g = altGroup(data, e);
@@ -4510,6 +4519,7 @@ function CustomersList({ data, setView }) {
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 700, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}{c.company ? ` · ${c.company}` : ""}</div>
                 <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{[c.phone, c.town].filter(Boolean).join(" · ") || "—"}</div>
+                {!activeMove && latestEnq && <ReasonLine e={latestEnq} />}
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                 {badge && <StatusBadge status={badge} />}
@@ -6551,6 +6561,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, en.customerId)}</div>
       <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:1, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{en.fromTown || "—"} → {en.toTown || "—"}</div>
       <AltNote data={data} e={en} small={!big} />
+      <ReasonLine e={en} small={!big} />
     </div>
     );
   };
