@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B200";
+const BUILD_NO = "B201";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3091,10 +3091,6 @@ function QuoteModal({ data, enquiry, onClose }) {
         <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>Containers required</span>
         <input style={{ ...inputStyle, width: 100 }} type="number" value={extra.storageContainers || ""} onChange={ev => setEx("storageContainers", ev.target.value)} placeholder="0" />
       </div>
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 13, color: "#374151", fontWeight: 600, marginBottom: 4 }}>Notes on the quote <span style={{ fontWeight: 500, color: "#94A4A0" }}>(printed in the Notes box — only what you type here)</span></div>
-        <textarea value={extra.notes || ""} onChange={ev => setEx("notes", ev.target.value)} rows={3} placeholder="Anything the customer needs to know…" style={{ ...inputStyle, resize: "vertical" }} />
-      </div>
 
       <div style={{ display: "flex", gap: 10 }}>
         <Btn variant="grey" style={{ flex: 1 }} onClick={saveDraft}>Save draft</Btn>
@@ -3472,8 +3468,8 @@ async function buildQuotePdf(e, c) {
     ln(boxL, 398, boxL, boxBot);
     ln(boxR, 398, boxR, boxBot);
     ln(boxL, boxBot, boxR, boxBot);
-    // Only the quote's own notes go on the PDF — not the office/enquiry notes.
-    const qNotes = String((e.quoteExtra && e.quoteExtra.notes) || "").trim();
+    // The enquiry's Notes field (imported notes are cut down to just the survey notes).
+    const qNotes = [e.notes, e.quoteExtra && e.quoteExtra.notes].map(x => String(x || "").trim()).filter(Boolean).join("\n");
     if (qNotes) {
       const maxW = boxR - 39, lh = 13.5, maxY = boxBot - 6;
       let ny = 426;
