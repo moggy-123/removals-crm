@@ -894,7 +894,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B183";
+const BUILD_NO = "B184";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1624,10 +1624,14 @@ function EnquiriesList({ data, setView, initialFilter }) {
   // Period: when the enquiry came in. Remembered on this device.
   const [period, setPeriodRaw] = useState(() => { try { return localStorage.getItem("removals_enq_period") || "all"; } catch { return "all"; } });
   const setPeriod = v => { setPeriodRaw(v); try { localStorage.setItem("removals_enq_period", v); } catch {} };
-  const PERIODS = [["all", "All time"], ["7", "Last week"], ["31", "Last month"], ["92", "Last 3 months"], ["183", "Last 6 months"], ["365", "Last year"]];
-  const sinceISO = period === "all" ? "" : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
+  const PERIODS = [["all", "All time"], ["7", "Last week"], ["31", "Last month"], ["92", "Last 3 months"], ["183", "Last 6 months"], ["365", "Last year"], ["custom", "Custom dates…"]];
+  const [custom, setCustomRaw] = useState(() => { try { return JSON.parse(localStorage.getItem("removals_enq_custom") || "null") || { from: "", to: "" }; } catch { return { from: "", to: "" }; } });
+  const setCustom = v => { setCustomRaw(v); try { localStorage.setItem("removals_enq_custom", JSON.stringify(v)); } catch {} };
+  const sinceISO = period === "all" ? "" : period === "custom" ? (custom.from || "") : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
+  const untilISO = period === "custom" ? (custom.to || "") : "";
   const cameIn = e => String(e.enquiryDate || e.createdAt || "").slice(0, 10);
-  const baseList = enquiries.filter(e => !moveCompleted(e) && (!sinceISO || !cameIn(e) || cameIn(e) >= sinceISO));
+  const inPeriod = e => { const d = cameIn(e); if (!d) return !sinceISO && !untilISO; return (!sinceISO || d >= sinceISO) && (!untilISO || d <= untilISO); };
+  const baseList = enquiries.filter(e => !moveCompleted(e) && inPeriod(e));
   // Booked but no date yet gets its own tile ("No date provisional").
   const grp = e => { const j = moveOf(e); return j && j.status !== "Let Go" && jobBadge(j) === "No date provisional" ? "No date provisional" : enqGroup(e); };
   const countFor = f => f === "All" ? baseList.length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => grp(e) === f).length;
@@ -1649,6 +1653,16 @@ function EnquiriesList({ data, setView, initialFilter }) {
           {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
       </div>
+      {period === "custom" && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          {[["from", "From"], ["to", "To"]].map(([k, l]) => (
+            <label key={k} style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 3 }}>{l}</div>
+              <input type="date" value={custom[k]} onChange={e => setCustom({ ...custom, [k]: e.target.value })} style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, color: "#10211E" }} />
+            </label>
+          ))}
+        </div>
+      )}
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
         {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New").flatMap(x => x === "Won" ? ["Won", "No date provisional"] : [x]), "All"].map(f => {
