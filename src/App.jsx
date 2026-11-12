@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B216";
+const BUILD_NO = "B217";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4300,6 +4300,7 @@ function EnquiryDetail({ data, id, setView }) {
   const [showPlan, setShowPlan] = useState(false);
   const [showMove, setShowMove] = useState(false);
   const [showCrew, setShowCrew] = useState(false);
+  const [showSignOff, setShowSignOff] = useState(false);
   const [rebook, setRebook] = useState(false);
   const [showResched, setShowResched] = useState(false);
   const [showChaseDate, setShowChaseDate] = useState(false);
@@ -4513,7 +4514,7 @@ function EnquiryDetail({ data, id, setView }) {
                 {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}
               </div>
               {(() => { const so = Object.values(linkedJob.signOffs || {}); if (!so.length) return null; const last = so.sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
-                return <div onClick={() => setShowCrew(true)} style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 4, cursor: "pointer" }}>✅ Signed off{so.length > 1 ? ` (${so.length} days)` : ""} · {last.staffName} &amp; {last.custName}{so.some(x => x.notes) ? <span style={{ color: "#B45309" }}> · 📝 note</span> : null}</div>; })()}
+                return <div onClick={() => setShowSignOff(true)} style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 4, cursor: "pointer" }}>✅ Signed off{so.length > 1 ? ` (${so.length} days)` : ""} · {last.staffName} &amp; {last.custName}{so.some(x => x.notes) ? <span style={{ color: "#B45309" }}> · 📝 note</span> : null}</div>; })()}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
               <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {isReadOnly() ? "View" : "Manage"}</Btn>
@@ -4523,6 +4524,7 @@ function EnquiryDetail({ data, id, setView }) {
         </Card>
       )}
       {showCrew && linkedJob && <CrewPreviewModal data={data} job={linkedJob} onClose={() => setShowCrew(false)} />}
+      {showSignOff && linkedJob && <SignOffRecordModal data={data} job={linkedJob} onClose={() => setShowSignOff(false)} />}
 
       {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
@@ -8629,7 +8631,7 @@ function CrewJobCard({ data, j, st }) {
         );
       })}
       </>}
-      <JobSignOff j={j} st={st} cust={cust} />
+      <JobSignOff j={j} st={st} cust={cust} from={from} to={to} />
     </Card>
   );
 }
@@ -8665,7 +8667,7 @@ function isLastJobDay(j, st) {
   days.forEach(d => { if (String(d.date || "") >= String(last.date || "")) last = d; });
   return signOffKey(last) === signOffKey(st);
 }
-function JobSignOff({ j, st, cust }) {
+function JobSignOff({ j, st, cust, from = "", to = "" }) {
   const key = signOffKey(st);
   const [saved, setSaved] = useState(null);
   const done = (j.signOffs && j.signOffs[key]) || saved || ([...readSignQueue(), ...readSignSent()].find(x => x.jobId === j.id && x.key === key) || {}).data;
@@ -8722,9 +8724,17 @@ function JobSignOff({ j, st, cust }) {
   };
   const lbl = { fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4 };
   const inp = { width: "100%", boxSizing: "border-box", padding: "11px 12px", border: "1px solid #D9E2E0", borderRadius: 10, fontSize: 16, marginBottom: 10, background: "#fff", color: "#10211E" };
+  // Opens on its own screen, so the customer only sees the address and the sign-off —
+  // not the crew, vans, inventory or notes.
   return (
-    <div style={box} data-ro-ok>
-      <div style={{ fontSize: 15, fontWeight: 800, color: "#10211E", marginBottom: 8 }}>✍️ Job sign-off</div>
+    <Modal title="Job sign-off" onClose={() => setOpen(false)}>
+    <div data-ro-ok>
+      <div style={{ background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"}</div>
+        <div style={{ fontSize: 12.5, color: "#6A7B77", fontWeight: 600 }}>{st.date ? fmtDate(st.date) : ""}</div>
+        {from ? <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}><b>From:</b> {from}</div> : null}
+        {to ? <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}><b>To:</b> {to}</div> : null}
+      </div>
       <div style={lbl}>Crew member</div>
       {crewNames.length > 1 && !CURRENT_USER.staffName
         ? <select value={staffName} onChange={e => setStaffName(e.target.value)} style={inp}><option value="">Choose…</option>{crewNames.map(n => <option key={n}>{n}</option>)}</select>
@@ -8744,6 +8754,92 @@ function JobSignOff({ j, st, cust }) {
       {signing === "staff" && <SignatureModal title={`Crew signature${staffName ? " — " + staffName : ""}`} initial={staffSig} onCancel={() => setSigning(null)} onAccept={v => { setStaffSig(v); setSigning(null); }} />}
       {signing === "cust" && <SignatureModal title={`Customer signature${custName ? " — " + custName : ""}`} initial={custSig} onCancel={() => setSigning(null)} onAccept={v => { setCustSig(v); setSigning(null); }} />}
     </div>
+    </Modal>
+  );
+}
+// ── Saved sign-off (office record): just the job address and the sign-off itself ──
+function signOffParts(data, j) {
+  const en = (data.enquiries || []).find(e => e.id === j.enquiryId) || {};
+  const cust = (data.customers || []).find(c => c.id === j.customerId) || {};
+  const from = crewAddress([j.fromAddress1 || en.fromAddress1, j.fromAddress2 || en.fromAddress2, j.fromTown || en.fromTown, j.fromPostcode || en.fromPostcode]);
+  const to = crewAddress([j.toAddress1 || en.toAddress1, j.toAddress2 || en.toAddress2, j.toTown || en.toTown, j.toPostcode || en.toPostcode]);
+  const list = Object.values(j.signOffs || {}).filter(Boolean).sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+  return { cust, from, to, list, ref: moveRef(data, j) };
+}
+const signOffWhen = so => { const d = so.at ? new Date(so.at) : null; return d && !isNaN(d) ? `${fmtUK(d.toISOString().slice(0, 10))} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : (so.date ? fmtUK(so.date) : ""); };
+async function buildSignOffPdf(data, j) {
+  const { cust, from, to, list, ref } = signOffParts(data, j);
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const W = 595.28, H = 841.89, M = 44;
+  const teal = rgb(0.055, 0.486, 0.451), navy = rgb(0.059, 0.18, 0.165), grey = rgb(0.42, 0.46, 0.45), white = rgb(1, 1, 1);
+  const clean = t => String(t == null ? "" : t).replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, "-").replace(/\u2026/g, "...").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
+  const embedSig = async url => { if (!url || url.indexOf("data:image") !== 0) return null; try { const bin = atob(url.split(",")[1]); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return /image\/jpe?g/.test(url) ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes); } catch { return null; } };
+  const wrap = (t, size, f, maxW) => { const words = clean(t).split(/\s+/); const out = []; let ln = ""; for (const w of words) { const test = ln ? ln + " " + w : w; if (f.widthOfTextAtSize(test, size) > maxW && ln) { out.push(ln); ln = w; } else ln = test; } if (ln) out.push(ln); return out; };
+  let page = pdf.addPage([W, H]); let y;
+  const at = (t, x, yy, size, f = font, col = navy) => page.drawText(clean(t), { x, y: yy, size, font: f, color: col });
+  page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
+  at("R&J Removals & Storage", M, H - 34, 16, bold, white);
+  at("Job sign-off", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
+  if (ref) { const w = bold.widthOfTextAtSize(clean(ref), 12); at(ref, W - M - w, H - 40, 12, bold, white); }
+  y = H - 96;
+  at("Customer", M, y, 9.5, bold, grey); at(cust.name || "-", M + 80, y, 9.5); y -= 15;
+  [["From", from], ["To", to]].forEach(([l, a]) => { if (!a) return; at(l, M, y, 9.5, bold, grey); wrap(a, 9.5, font, W - M - (M + 80)).forEach(ln => { at(ln, M + 80, y, 9.5); y -= 13; }); y -= 2; });
+  y -= 10;
+  for (const so of list) {
+    if (y < 260) { page = pdf.addPage([W, H]); y = H - M; }
+    at(`Signed off ${signOffWhen(so)}`, M, y, 11, bold, teal); y -= 8;
+    page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
+    wrap("I confirm the move has been completed and my belongings have been delivered in good order.", 9.5, font, W - 2 * M).forEach(ln => { at(ln, M, y, 9.5); y -= 13; });
+    if (so.notes) { y -= 4; at("Comments", M, y, 9.5, bold, grey); y -= 13; wrap(so.notes, 9.5, font, W - 2 * M).forEach(ln => { at(ln, M, y, 9.5); y -= 13; }); }
+    y -= 10;
+    const boxW = (W - 2 * M - 20) / 2, boxH = 80;
+    const sigs = [["Crew member", so.staffName, await embedSig(so.staffSig)], ["Customer", so.custName, await embedSig(so.custSig)]];
+    sigs.forEach(([l, n, img], i) => {
+      const x = M + i * (boxW + 20);
+      page.drawRectangle({ x, y: y - boxH, width: boxW, height: boxH, borderColor: grey, borderWidth: 0.6 });
+      if (img) { const s0 = Math.min((boxW - 12) / img.width, (boxH - 12) / img.height); page.drawImage(img, { x: x + 6, y: y - boxH + 6, width: img.width * s0, height: img.height * s0 }); }
+      at(`${l}: ${n || "-"}`, x, y - boxH - 13, 9, bold, grey);
+    });
+    y -= boxH + 36;
+  }
+  if (!list.length) at("Not signed off yet.", M, y, 9.5);
+  return await pdf.save();
+}
+function SignOffRecordModal({ data, job, onClose }) {
+  const { cust, from, to, list, ref } = signOffParts(data, job);
+  const [busy, setBusy] = useState(false);
+  const pdfIt = async () => {
+    setBusy(true);
+    try { const bytes = await buildSignOffPdf(data, job); await showPdf(new File([bytes], `SignOff-${String(ref).replace(/[^\w-]+/g, "")}.pdf`, { type: "application/pdf" })); }
+    catch (ex) { alert("Couldn't make the PDF: " + (ex.message || ex)); }
+    setBusy(false);
+  };
+  return (
+    <Modal title="Job sign-off" onClose={onClose}>
+      <div style={{ background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"} <span style={{ fontSize: 12.5, color: "#6A7B77" }}>· {ref}</span></div>
+        {from ? <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}><b>From:</b> {from}</div> : null}
+        {to ? <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}><b>To:</b> {to}</div> : null}
+      </div>
+      {list.map((so, i) => (
+        <div key={i} style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 800, color: "#059669", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>✅ Signed off · {signOffWhen(so)}</div>
+          {so.notes ? <div style={{ fontSize: 13, color: "#374151", background: "#F9FAFB", borderRadius: 8, padding: "6px 9px", marginBottom: 8, whiteSpace: "pre-wrap" }}>📝 {so.notes}</div> : null}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {[["Crew member", so.staffName, so.staffSig], ["Customer", so.custName, so.custSig]].map(([l, n, sg]) => (
+              <div key={l}>
+                <div style={{ fontSize: 11.5, color: "#6A7B77", fontWeight: 700 }}>{l}: {n || "-"}</div>
+                {sg ? <img src={sg} alt={`${l} signature`} style={{ width: "100%", maxHeight: 80, objectFit: "contain", border: "1px solid #E5ECEA", borderRadius: 8, background: "#fff" }} /> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <Btn variant="grey" style={{ width: "100%" }} disabled={busy} onClick={pdfIt}>{busy ? "Making PDF…" : "📄 PDF (if the customer asks for a copy)"}</Btn>
+    </Modal>
   );
 }
 function CrewApp() {
