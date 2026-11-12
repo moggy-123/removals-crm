@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B208";
+const BUILD_NO = "B209";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4000,8 +4000,17 @@ function MoveManageModal({ data, job, onClose }) {
       )}
       <Btn style={{ width: "100%", marginBottom: 10 }} onClick={() => {
         if (changing) {
-          const bad = days.map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
-          if (bad.length && !confirm(`Day ${bad.join(", ")} has no crew or no vehicle now. Save anyway?`)) return;
+          // Warn (but allow) when a day has fewer staff or vans than planned — sometimes you have to make do.
+          const short = days.map((d, i) => {
+            const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+            const nc = (d.crew || []).length, nv = (d.vehicleIds || []).length;
+            const ss = Math.max(0, ps - nc), vs = Math.max(0, pv - nv);
+            const bits = [];
+            if (!nc) bits.push("no crew"); else if (ss) bits.push(`${ss} staff short (${nc} of ${ps})`);
+            if (!nv) bits.push("no vehicle"); else if (vs) bits.push(`${vs} vehicle${vs !== 1 ? "s" : ""} short (${nv} of ${pv})`);
+            return bits.length ? `${d.type || "Day " + (i + 1)}${d.date ? " " + fmtDate(d.date) : ""}: ${bits.join(", ")}` : null;
+          }).filter(Boolean);
+          if (short.length && !confirm(`⚠ Fewer than planned:\n\n${short.join("\n")}\n\nSave anyway?`)) return;
         }
         persist(changing || assign ? { stages: days } : undefined);
       }}><Icon name="check" size={16} /> Save</Btn>
