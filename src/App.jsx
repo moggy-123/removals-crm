@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B213";
+const BUILD_NO = "B214";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1042,6 +1042,55 @@ function moveSeqOf(data, job) {
 // Hanging wardrobe (H/W) boxes in a survey: freehand per-room counts or catalogue "Wardrobe Box" lines.
 function hwBoxes(inv) {
   return (inv || []).reduce((n, it) => n + ((it && it.qty > 0 && (it.wardrobe || /wardrobe box/i.test(it.name || ""))) ? Number(it.qty) || 0 : 0), 0);
+}
+// ── Furniture covers (equipment required) ──
+// Worked out from the survey (detailed list OR freehand text): sofas, armchairs and mattresses.
+// Corner sofa = 1 × 2 seater + 1 × 3 seater cover. 3 piece suite = 3 seater + 2 armchairs.
+// A sofa with no size given gets a 3 seater cover (the bigger one always fits).
+const COVER_TYPES = ["3 Seater Sofa", "2 Seater Sofa", "Armchair", "King Mattress", "Double Mattress", "Single Mattress"];
+const COVER_CATALOG = { "cons-sofa": { "2 Seater Sofa": 1 } };
+const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+const COVER_RE = /\b(?:(\d+|one|two|three|four|five|six)\s*(?:x|×)\s*|(\d+|one|two|three|four|five|six)\s+(?=[a-z]))?((?:3|three)[\s-]*(?:piece|pce|pc)[\s-]*suites?|(?:large\s+|small\s+)?corner[\s-]*(?:sofa|settee|couch|suite|unit)s?(?:\s*\/\s*sectional)?|sectional(?:\s*(?:sofa|settee|couch))?s?|(?:[34]|three|four)[\s-]*seat(?:er|ed)?(?:\s*(?:sofa|settee|couch)(?:es|s)?)?(?![\s-]*(?:dining|kitchen|garden|patio|table|bench))|(?:2|two)[\s-]*seat(?:er|ed)?(?:\s*(?:sofa|settee|couch)(?:es|s)?)?(?![\s-]*(?:dining|kitchen|garden|patio|table|bench))|(?<!(?:garden|rattan|patio|outdoor|conservatory)\s)(?:sofa[\s-]*beds?|sofas?|settees?|couch(?:es)?)|arm[\s-]*chairs?|easy[\s-]*chairs?|recliners?(?:\s*chairs?)?|wing[\s-]*(?:back[\s-]*)?chairs?|(?:super[\s-]*)?king[\s-]*(?:size[d]?\s*)?mattress(?:es)?|(?:small[\s-]*)?double[\s-]*mattress(?:es)?|single[\s-]*mattress(?:es)?|cot[\s-]*mattress(?:es)?|mattress(?:es)?(?![\s-]*(?:topper|protector|cover)))\b(?:\s*(?:x|×)\s*(\d+))?/gi;
+function coversInText(text, mult = 1, add) {
+  String(text || "").split(/\n|,|;|·|\+|&|\band\b/i).forEach(chunk => {
+    const re = new RegExp(COVER_RE.source, "gi"); let m;
+    while ((m = re.exec(chunk))) {
+      const q0 = m[1] || m[2] || m[4];
+      const q = (q0 ? (NUM_WORDS[q0.toLowerCase()] || parseInt(q0, 10) || 1) : 1) * mult;
+      const w = m[3].toLowerCase();
+      if (/piece|pce|pc/.test(w) && /suite/.test(w)) { add("3 Seater Sofa", q); add("Armchair", q * 2); }
+      else if (/corner|sectional/.test(w)) { add("2 Seater Sofa", q); add("3 Seater Sofa", q); }
+      else if (/^(2|two)[\s-]*seat/.test(w)) add("2 Seater Sofa", q);
+      else if (/seat|sofa|settee|couch/.test(w)) add("3 Seater Sofa", q);
+      else if (/chair|recliner/.test(w)) add("Armchair", q);
+      else if (/king/.test(w)) add("King Mattress", q);
+      else if (/single|cot/.test(w)) add("Single Mattress", q);
+      else add("Double Mattress", q); // double, small double, or size not given
+    }
+  });
+}
+function coversRequired(inv) {
+  const tot = {};
+  const add = (k, q) => { if (q > 0) tot[k] = (tot[k] || 0) + q; };
+  (inv || []).forEach(it => {
+    if (!it || it.wardrobe || it.dismantleNote || !(Number(it.qty) > 0)) return;
+    const qty = Number(it.qty) || 1;
+    const fixed = it.catalogId && COVER_CATALOG[it.catalogId];
+    if (fixed) Object.entries(fixed).forEach(([k, n]) => add(k, n * qty));
+    else coversInText(it.freehand ? (it.raw ?? it.name) : it.name, it.freehand ? 1 : qty, add);
+  });
+  return COVER_TYPES.filter(k => tot[k]).map(k => ({ name: k + " Cover", qty: tot[k] }));
+}
+const coversText = list => (list || []).map(c => `${c.qty} × ${c.name}`).join(", ");
+function CoversBox({ inv }) {
+  const list = coversRequired(inv);
+  if (!list.length) return null;
+  return (
+    <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 8 }}>
+      🛋 Equipment required
+      {list.map(c => <div key={c.name} style={{ fontSize: 13.5, fontWeight: 700, color: "#374151", paddingLeft: 8 }}>{c.qty} × {c.name}</div>)}
+    </div>
+  );
 }
 function jobVolume(data, j) {
   const e = j && (data.enquiries || []).find(x => x.id === j.enquiryId);
@@ -2947,6 +2996,17 @@ function InventoryModal({ data, enquiry, onClose }) {
               ? Object.values(freeRooms).reduce((n, r) => n + (Number(r.wardrobe) || 0), 0)
               : Object.values(lines).reduce((n, v) => n + (v.qty > 0 && /wardrobe box/i.test(v.name || "") ? Number(v.qty) || 0 : 0), 0)}</span>
           </div>
+          {(() => {
+            const cv = coversRequired(invMode === "freehand"
+              ? Object.values(freeRooms).map(r => ({ freehand: true, raw: r.text, qty: 1 }))
+              : Object.values(lines));
+            return cv.length ? (
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+                <span style={{ fontSize: 13, opacity: .85, flexShrink: 0 }}>Covers required</span>
+                <span style={{ fontWeight: 700, textAlign: "right", fontSize: 13 }}>{cv.map(c => <div key={c.name}>{c.qty} × {c.name.replace(/ Cover$/, "")}</div>)}</span>
+              </div>
+            ) : null;
+          })()}
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, opacity: .85 }}>Recommended</span>
             <span style={{ fontWeight: 700 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads} loads` : ""}</span>
@@ -3800,6 +3860,15 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
     at(`Total volume: ${cuft} cu ft  (${m3} m3)`, M, y - 6, 10, bold, teal); y -= 22;
   }
 
+  const covers = coversRequired(inv);
+  const hw = hwBoxes(inv);
+  if ((forStaff || forOffice) && (covers.length || hw)) {
+    heading("Equipment required");
+    if (hw) { ensure(13); at(`${hw} x Hanging Wardrobe Box`, M + 10, y, 9.5, font, navy); y -= 13; }
+    covers.forEach(cv => { ensure(13); at(`${cv.qty} x ${cv.name}`, M + 10, y, 9.5, font, navy); y -= 13; });
+    y -= 6;
+  }
+
   heading("Acknowledgement");
   wrap("I confirm that the inventory and move plan shown above are correct to the best of my knowledge. Please advise R&J Removals & Storage of any additions or changes before the move date.", M, 9.5, font, W - 2 * M).forEach(ln => { ensure(13); at(ln, M, y, 9.5, font, navy); y -= 13; });
   y -= 24; ensure(40);
@@ -4349,6 +4418,7 @@ function EnquiryDetail({ data, id, setView }) {
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
               {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³${Number(e.weightKg) ? ` · ${e.weightKg} kg` : ""}${hwBoxes(e.inventory) ? ` · ${hwBoxes(e.inventory)} H/W boxes` : ""}` : "Not surveyed yet"}
             </div>
+            {coversRequired(e.inventory).length > 0 && <div style={{ fontSize: 12.5, color: "#374151", marginTop: 2 }}>🛋 {coversText(coversRequired(e.inventory))}</div>}
             {e.volumeCuFt > 0 && <div style={{ fontSize: 13, color: TEAL, fontWeight: 600, marginTop: 2 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads}` : ""}</div>}
             {((e.inventory && e.inventory.length) || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "surveyPdf", id: e.id })}><Icon name="quote" size={14} /> Survey &amp; move plan PDF</Btn> : null}
           </div>
@@ -8511,12 +8581,14 @@ function CrewJobCard({ data, j, st }) {
         <H>Packing</H>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 6 }}>🛏 {bedrooms ? `${bedrooms} bedroom${bedrooms === "1" || bedrooms === 1 ? "" : "s"}` : "Bedrooms not recorded"}{en.fromPropertyType ? ` · ${en.fromPropertyType}` : ""}</div>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 6 }}>👔 {hwBoxes(inv)} H/W boxes required</div>
+        <CoversBox inv={inv} />
         <H>Dismantling</H>
         {disList.length === 0 ? <div style={{ fontSize: 13, color: "#94A4A0" }}>Nothing to dismantle.</div>
           : disList.map((t, i) => <div key={i} style={{ fontSize: 13.5, color: TEAL_D, fontWeight: 700, whiteSpace: "pre-wrap", marginBottom: 2 }}>🔧 {t}</div>)}
       </> : <>
       <H>Inventory</H>
       {hwBoxes(inv) > 0 && <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 8 }}>👔 {hwBoxes(inv)} H/W boxes required</div>}
+      <CoversBox inv={inv} />
       {rooms.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0" }}>No inventory recorded.</div>}
       {rooms.map(([room, items]) => {
         const moving = items.filter(it => it.qty > 0 && !it.dismantleNote), staying = items.filter(it => it.qty < 0), dis = items.filter(it => it.dismantleNote);
