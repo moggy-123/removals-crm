@@ -513,17 +513,52 @@ async function flushLog() {
     localStorage.setItem(LOG_QUEUE_KEY, JSON.stringify(left));
   } catch { /* try again later */ } finally { LOG_FLUSHING = false; }
 }
-async function loadLog(customerId) {
+// Customers whose name, ref, phone, email or postcode match the search words.
+function logCustomerIds(q) {
+  const words = String(q || "").toLowerCase().replace(/^#/, "").split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  let d = {}; try { d = loadData(); } catch {}
+  const enqText = {};
+  (d.enquiries || []).forEach(e => { enqText[e.customerId] = (enqText[e.customerId] || "") + " " + [e.fromAddress1, e.fromTown, e.fromPostcode, e.toAddress1, e.toTown, e.toPostcode].filter(Boolean).join(" "); });
+  return (d.customers || []).filter(c => {
+    const t = [c.ref, c.name, c.company, c.phone, c.homePhone, c.email, c.address1, c.town, c.postcode, enqText[c.id]].filter(Boolean).join(" ").toLowerCase();
+    return words.every(w => t.includes(w));
+  }).map(c => c.id).slice(0, 150);
+}
+// Does a log entry match the look-up? (used for entries still waiting on this device)
+function logMatches(r, f, custIds) {
+  if (f.who && r.who !== f.who) return false;
+  if (f.from && String(r.at).slice(0, 10) < f.from) return false;
+  if (f.to && String(r.at).slice(0, 10) > f.to) return false;
+  const q = String(f.q || "").trim().toLowerCase();
+  if (!q) return true;
+  if (r.customer_id && custIds.includes(r.customer_id)) return true;
+  const t = [r.summary, r.who, JSON.stringify(r.changes || [])].join(" ").toLowerCase();
+  return q.split(/\s+/).every(w => t.includes(w));
+}
+async function loadLog(customerId, f = {}) {
   let rows = [], err = "";
+  const q = String(f.q || "").trim();
+  const custIds = q ? logCustomerIds(q) : [];
   try {
-    let qy = supabase.from("activity_log").select("*").order("at", { ascending: false }).limit(customerId ? 300 : 200);
+    const filtered = !!(q || f.who || f.from || f.to);
+    let qy = supabase.from("activity_log").select("*").order("at", { ascending: false }).limit(filtered ? 500 : (customerId ? 300 : 200));
     if (customerId) qy = qy.eq("customer_id", customerId);
+    if (f.who) qy = qy.eq("who", f.who);
+    if (f.from) qy = qy.gte("at", f.from + "T00:00:00");
+    if (f.to) qy = qy.lte("at", f.to + "T23:59:59.999");
+    if (q) {
+      const safe = q.replace(/[%,()*\\"']/g, " ").trim();
+      const ors = safe ? [`summary.ilike.%${safe}%`, `who.ilike.%${safe}%`] : [];
+      if (custIds.length) ors.push(`customer_id.in.(${custIds.join(",")})`);
+      if (ors.length) qy = qy.or(ors.join(","));
+    }
     const { data, error } = await qy;
     if (error) err = /activity_log|relation|does not exist|schema cache/i.test(error.message || "") ? "setup" : (error.message || "error"); else rows = data || [];
   } catch (e) { err = "offline"; }
-  let q = []; try { q = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]"); } catch {}
+  let queued = []; try { queued = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]"); } catch {}
   const have = new Set(rows.map(r => r.id));
-  const pending = q.filter(x => !have.has(x.id) && (!customerId || x.customer_id === customerId)).map(x => ({ ...x, pending: true }));
+  const pending = queued.filter(x => !have.has(x.id) && (!customerId || x.customer_id === customerId) && logMatches(x, f, custIds)).map(x => ({ ...x, pending: true }));
   return { rows: [...pending, ...rows].sort((a, b) => String(b.at).localeCompare(String(a.at))), err };
 }
 // Admin: see deletions by day and undo a batch (e.g. records removed by mistake).
@@ -577,8 +612,26 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
   const [open, setOpen] = useState(startOpen);
   const [state, setState] = useState({ rows: null, err: "" });
   const [expanded, setExpanded] = useState({});
-  useEffect(() => { if (open && !state.rows) loadLog(customerId).then(setState); /* eslint-disable-next-line */ }, [open]);
+  // Look-up: words (customer name, ref, postcode, what changed), who, and a date range.
+  const [f, setF] = useState({ q: "", who: "", from: "", to: "" });
+  const [whoList, setWhoList] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const filtered = !!(f.q.trim() || f.who || f.from || f.to);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    const t = setTimeout(async () => {
+      setBusy(true);
+      const res = await loadLog(customerId, f);
+      if (!live) return;
+      setState(res); setBusy(false);
+      if (!filtered) setWhoList(Array.from(new Set(res.rows.map(r => r.who).filter(Boolean))).sort());
+    }, f.q ? 450 : 0);
+    return () => { live = false; clearTimeout(t); };
+    /* eslint-disable-next-line */
+  }, [open, f.q, f.who, f.from, f.to]);
   const rows = state.rows || [];
+  const fIn = { height: 40, border: "1px solid #DDE6E4", borderRadius: 9, padding: "0 10px", fontFamily: "inherit", fontSize: 14, background: "#fff", color: "#10211E", minWidth: 0, boxSizing: "border-box" };
   const refOf = (() => { const m = {}; try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {} return id => m[id]; })();
   return (
     <Card>
@@ -588,10 +641,25 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
       </div>
       {open && (
         <div style={{ marginTop: 10 }}>
+          <div data-ro-ok style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+            <input data-ro-ok type="search" value={f.q} onChange={ev => setF({ ...f, q: ev.target.value })} placeholder={customerId ? "Look up a change (e.g. price, survey date)" : "Look up: name, ref, postcode, or what changed"} style={{ ...fIn, width: "100%" }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 8 }}>
+              <select data-ro-ok value={f.who} onChange={ev => setF({ ...f, who: ev.target.value })} style={fIn} aria-label="Who">
+                <option value="">Anyone</option>
+                {Array.from(new Set([...whoList, f.who].filter(Boolean))).map(w => <option key={w} value={w}>{w}</option>)}
+              </select>
+              <input data-ro-ok type="date" value={f.from} onChange={ev => setF({ ...f, from: ev.target.value })} style={fIn} aria-label="From date" />
+              <input data-ro-ok type="date" value={f.to} onChange={ev => setF({ ...f, to: ev.target.value })} style={fIn} aria-label="To date" />
+            </div>
+            {filtered && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "#6A7B77" }}>
+              <span>{busy ? "Searching…" : `${rows.length}${rows.length >= 500 ? "+" : ""} change${rows.length !== 1 ? "s" : ""} found`}</span>
+              <button type="button" data-ro-ok onClick={() => setF({ q: "", who: "", from: "", to: "" })} style={{ background: "none", border: "none", color: TEAL, fontWeight: 800, fontSize: 12.5, cursor: "pointer", padding: 0 }}>Clear</button>
+            </div>}
+          </div>
           {!state.rows && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Loading…</div>}
           {state.err === "setup" && <div style={{ fontSize: 12.5, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>The history table isn't set up in the database yet (run add-history.sql). Changes are being kept on this device until it is.</div>}
           {state.err === "offline" && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>No signal — showing changes made on this device only.</div>}
-          {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>No changes recorded yet.</div>}
+          {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>{filtered ? "Nothing matches that look-up." : "No changes recorded yet."}</div>}
           {rows.map(r => {
             const ch = Array.isArray(r.changes) ? r.changes : [];
             const isOpen = expanded[r.id] || ch.length <= 3;
@@ -603,8 +671,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
                   {r.pending ? <span style={{ fontWeight: 600, color: "#B45309", fontSize: 11.5 }}> · not uploaded yet</span> : null}
                 </div>
                 <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: ch.length ? 4 : 0 }}>
-                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? <b style={{ color: TEAL }}>#{c.ref}</b> : null; })()}
-                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? " · " : ""; })()}
+                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c ? <><b style={{ color: TEAL }}>{c.ref ? `#${c.ref} ` : ""}{c.name || ""}</b> · </> : null; })()}
                   {ch.length ? (r.summary || "").replace(/:.*$/, "") : r.summary}
                 </div>
                 {(isOpen ? ch : ch.slice(0, 3)).map((c, i) => (
@@ -895,7 +962,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B219";
+const BUILD_NO = "B220";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
