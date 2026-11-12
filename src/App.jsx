@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B212";
+const BUILD_NO = "B213";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -8476,6 +8476,13 @@ function CrewJobCard({ data, j, st }) {
   const inv = sortInventoryByRoom(Array.isArray(en.inventory) ? en.inventory : []);
   const rooms = []; const idx = {};
   inv.forEach(it => { const r = it.room || "Other"; if (!(r in idx)) { idx[r] = rooms.length; rooms.push([r, []]); } rooms[idx[r]][1].push(it); });
+  // Packing days (Full Pack, 7 Hour Pack, Part Pack…) don't need the full inventory.
+  const packDay = /pack/i.test(st.type || "") && !/unpack/i.test(st.type || "");
+  const bedrooms = en.fromBedrooms || (() => { const n = new Set(inv.map(it => it.room).filter(r => /bedroom|^bed\s*\d/i.test(r || ""))).size; return n || ""; })();
+  const disList = [
+    ...inv.filter(it => it.dismantleNote).flatMap(it => String(it.raw || it.name || "").split(/\n/).map(x => x.trim()).filter(Boolean)),
+    ...inv.filter(it => !it.dismantleNote && it.qty > 0 && it.dismantle).map(it => `${it.qty > 1 ? it.qty + " × " : ""}${it.name} (${it.room}) – ${it.dismantle}`),
+  ];
   const H = ({ children }) => <div style={{ fontSize: 11, fontWeight: 800, color: "#94A4A0", textTransform: "uppercase", letterSpacing: ".06em", margin: "12px 0 4px" }}>{children}</div>;
   const Addr = ({ label, addr, access }) => addr ? (
     <div style={{ marginBottom: 6 }}>
@@ -8499,6 +8506,15 @@ function CrewJobCard({ data, j, st }) {
       <div style={{ fontSize: 14, color: "#10211E", fontWeight: 600 }}>🚚 {vans.join(", ") || "Van TBC"}</div>
       <div style={{ fontSize: 14, color: "#10211E", fontWeight: 600 }}>👷 {(st.crew || []).join(", ") || "—"}</div>
       {st.notes && <><H>Notes</H><div style={{ fontSize: 14, color: "#374151", whiteSpace: "pre-wrap" }}>{st.notes}</div></>}
+      {packDay ? <>
+        {/* Packing day: no full inventory — just what the packers need. */}
+        <H>Packing</H>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 6 }}>🛏 {bedrooms ? `${bedrooms} bedroom${bedrooms === "1" || bedrooms === 1 ? "" : "s"}` : "Bedrooms not recorded"}{en.fromPropertyType ? ` · ${en.fromPropertyType}` : ""}</div>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 6 }}>👔 {hwBoxes(inv)} H/W boxes required</div>
+        <H>Dismantling</H>
+        {disList.length === 0 ? <div style={{ fontSize: 13, color: "#94A4A0" }}>Nothing to dismantle.</div>
+          : disList.map((t, i) => <div key={i} style={{ fontSize: 13.5, color: TEAL_D, fontWeight: 700, whiteSpace: "pre-wrap", marginBottom: 2 }}>🔧 {t}</div>)}
+      </> : <>
       <H>Inventory</H>
       {hwBoxes(inv) > 0 && <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 8 }}>👔 {hwBoxes(inv)} H/W boxes required</div>}
       {rooms.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0" }}>No inventory recorded.</div>}
@@ -8516,6 +8532,7 @@ function CrewJobCard({ data, j, st }) {
           </div>
         );
       })}
+      </>}
       <JobSignOff j={j} st={st} cust={cust} />
     </Card>
   );
