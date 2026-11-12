@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B206";
+const BUILD_NO = "B207";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -7267,21 +7267,28 @@ function SigField({ label, value, onOpen }) {
   );
 }
 
+// Amount picker for storage items: 1–50, keeping any odd number already saved.
+function QtySelect({ value, onChange, style }) {
+  const v = Math.max(1, parseInt(value, 10) || 1);
+  const opts = Array.from({ length: 50 }, (_, i) => i + 1); if (!opts.includes(v)) opts.push(v);
+  return <select value={v} onChange={e => onChange(Number(e.target.value))} style={{ ...style, textAlign: "center", appearance: "none", WebkitAppearance: "none", cursor: "pointer", fontWeight: 700 }}>{opts.map(n => <option key={n} value={n}>{n}</option>)}</select>;
+}
+
 function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJobId }) {
   const device = useDeviceType();
   const phone = device === "phone";
   const editCust = editRecId ? (data.customers || []).find(c => (c.storageInv || []).some(r => r.id === editRecId)) : null;
   const editRec = editCust ? (editCust.storageInv || []).find(r => r.id === editRecId) : null;
-  const loadConts = rec => { const cs = (rec.containers || []).map(c => ({ id: uid(), number: c.number || "", items: (c.items || []).map(it => ({ id: uid(), name: it.name || "", qty: it.qty || 1, conditions: Array.isArray(it.conditions) ? it.conditions : (it.condition ? [it.condition] : []), positions: Array.isArray(it.positions) ? it.positions : (it.position ? [it.position] : []), packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })); return cs.length ? cs : [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: "" }] }]; };
+  const loadConts = rec => { const cs = (rec.containers || []).map(c => ({ id: uid(), number: c.number || "", items: (c.items || []).map(it => ({ id: uid(), name: it.name || "", qty: it.qty || 1, conditions: Array.isArray(it.conditions) ? it.conditions : (it.condition ? [it.condition] : []), positions: Array.isArray(it.positions) ? it.positions : (it.position ? [it.position] : []), packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })); return cs.length ? cs : [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] }]; };
   const DRAFT_KEY = editRecId ? "storageIntakeDraft_" + editRecId : "storageIntakeDraft";
-  const saved = (() => { try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; } })();
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || sessionStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; } })();
   const src = saved || (editRec ? { customerId: editCust.id, date: editRec.date, location: editRec.location, crew: editRec.crew, containers: loadConts(editRec), custSig: editRec.custSig, empSig: editRec.empSig, empName: editRec.empName } : null);
   const [customerId, setCustomerId] = useState(src?.customerId ?? (presetCustomerId || ""));
   const [jobId, setJobId] = useState((editRec && editRec.jobId) || presetJobId || "");
   const [date, setDate] = useState(src?.date ?? todayISO());
   const [location, setLocation] = useState(src?.location ?? (getStorageLocs()[0] || "Wild & Lye"));
   const [crew, setCrew] = useState(src?.crew ?? []);
-  const [containers, setContainers] = useState(src?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: "" }] }]);
+  const [containers, setContainers] = useState(src?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] }]);
   const [custSig, setCustSig] = useState(src?.custSig ?? "");
   const [empSig, setEmpSig] = useState(src?.empSig ?? "");
   const [empName, setEmpName] = useState(src?.empName ?? "");
@@ -7294,9 +7301,9 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   const setLoose = (id, k, v) => setLooseList(p => p.map(li => li.id === id ? { ...li, [k]: v } : li));
   const removeLoose = id => setLooseList(p => p.filter(li => li.id !== id));
   useEffect(() => {
-    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ customerId, date, location, crew, containers, custSig, empSig, empName, looseList })); } catch {}
-  }, [customerId, date, location, crew, containers, custSig, empSig, empName]);
-  const clearDraft = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch {} };
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ customerId, date, location, crew, containers, custSig, empSig, empName, looseList })); } catch {}
+  }, [customerId, date, location, crew, containers, custSig, empSig, empName, looseList]);
+  const clearDraft = () => { try { sessionStorage.removeItem(DRAFT_KEY); localStorage.removeItem(DRAFT_KEY); } catch {} };
   const leave = () => { clearDraft(); setView({ screen: "storage" }); };
   // Pull the "Into store" day (date + crew) from the customer's move plan, if there is one.
   const findStoreDay = (cid, sjId) => {
@@ -7327,14 +7334,36 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   const [signing, setSigning] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [completing, setCompleting] = useState(false);
+  const [readyToSave, setReadyToSave] = useState(false);
+  useEffect(() => { if (readyToSave) { setReadyToSave(false); setCompleting(false); saveIntake("complete"); } /* eslint-disable-next-line */ }, [readyToSave]);
+  function startComplete() {
+    setErr("");
+    if (!customerId) { setErr("Please select a customer."); return; }
+    const hasItems = containers.some(c => (c.items || []).some(it => (it.name || "").trim())) || looseList.some(li => (li.name || "").trim());
+    if (!hasItems) { setErr("Add the items first."); return; }
+    let who = empName;
+    if (!who && crew.length === 1) { who = crew[0]; setEmpName(who); }
+    if (!who) { setErr("Pick who completed it under Sign off (choose the crew first), then tap Complete again."); return; }
+    setCompleting(true);
+    if (!custSig) setSigning("cust");
+    else if (!empSig) setSigning("emp");
+    else setReadyToSave(true);
+  }
 
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
   const setContainerNo = (ci, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, number: v } : c));
-  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: "" }] }]);
+  const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] }]);
   const removeContainer = ci => setContainers(cs => cs.length > 1 ? cs.filter((_, i) => i !== ci) : cs);
-  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, conditions: [], positions: [], packedBy: "", dismantle: "" }] } : c));
+  const addItem = ci => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: [...c.items, { id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] } : c));
   const setItem = (ci, ii, field, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: v } : it) } : c));
-  const addTag = (ci, ii, field, val) => { if (!val) return; setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: Array.from(new Set([...(it[field] || []), val])) } : it) } : c)); };
+  const addTag = (ci, ii, field, val) => { if (!val) return; setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => {
+    if (j !== ii) return it;
+    let list = Array.from(new Set([...(it[field] || []), val]));
+    // Condition: "OK" is the default — picking a damage note replaces it, picking OK clears the rest.
+    if (field === "conditions") list = val === "OK" ? ["OK"] : list.filter(x => x !== "OK");
+    return { ...it, [field]: list };
+  }) } : c)); };
   const removeTag = (ci, ii, field, val) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: (it[field] || []).filter(x => x !== val) } : it) } : c));
   const removeItem = (ci, ii) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.filter((_, j) => j !== ii) } : c));
   const toggleCrew = name => setCrew(cr => cr.includes(name) ? cr.filter(z => z !== name) : [...cr, name]);
@@ -7362,21 +7391,30 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
     setBusy(false);
   }
 
-  async function saveIntake() {
+  // mode "draft" = save progress (no signatures needed); "complete" = signed and final.
+  async function saveIntake(mode = "complete") {
     setErr("");
     if (!customerId) { setErr("Please select a customer."); return; }
     const cust = (data.customers || []).find(x => x.id === customerId);
     if (!cust) { setErr("Customer not found."); return; }
+    const draft = mode === "draft";
     const cleanContainers = containers.map(c => ({ number: c.number, items: (c.items || []).filter(it => (it.name || "").trim()).map(it => ({ name: it.name.trim(), qty: Number(it.qty) || 1, conditions: it.conditions || [], positions: it.positions || [], packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })).filter(c => (c.number || "").trim() || c.items.length);
     const cleanLoose = looseList.map(li => ({ name: (li.name || "").trim(), qty: Math.max(1, Number(li.qty) || 1) })).filter(li => li.name);
-    if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
-    if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
-    setBusy("save");
+    if (!draft) {
+      if (!cleanContainers.length) { setErr("Add at least one container with items."); return; }
+      if (!empName) { setErr("Select who completed the inventory (a crew member)."); return; }
+      if (!custSig || !empSig) { setErr("Both signatures are needed to complete it."); return; }
+    }
+    setBusy(draft ? "draft" : "save");
     const rec = { id: editRec ? editRec.id : uid(), jobId: jobId || (editRec && editRec.jobId) || "", date, location, crew, containers: cleanContainers, custSig, empSig, empName, looseList: cleanLoose, looseItems: cleanLoose.length > 0, pdfUrl: (editRec && editRec.pdfUrl) || "", pdf: (editRec && editRec.pdf) || "", createdAt: (editRec && editRec.createdAt) || new Date().toISOString() };
     // Keep the ORIGINAL inventory exactly as first signed (damage/condition notes included).
     // Edits never overwrite it: they become the "current" sheet, and the original stays on file.
     const snap = r => ({ date: r.date, location: r.location, crew: r.crew || [], containers: r.containers || [], looseList: r.looseList || [], looseItems: !!r.looseItems, custSig: r.custSig || "", empSig: r.empSig || "", empName: r.empName || "", savedAt: r.createdAt || new Date().toISOString() });
-    if (editRec) {
+    rec.draft = draft;
+    if (draft) {
+      // Work in progress: nothing is locked yet, no original copy or PDF until it's completed.
+      delete rec.original; rec.originalPdfUrl = "";
+    } else if (editRec && !editRec.draft) {
       rec.original = editRec.original || snap(editRec);
       rec.originalPdfUrl = editRec.originalPdfUrl || editRec.pdfUrl || "";
       rec.amendedAt = new Date().toISOString();
@@ -7385,7 +7423,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
       rec.original = snap(rec);
     }
     // Also store a PDF copy of the original in the cloud (best effort — the saved copy above is the safety net).
-    if (!rec.originalPdfUrl) {
+    if (!draft && !rec.originalPdfUrl) {
       const to = ms => new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms));
       try {
         const { bytes } = await Promise.race([buildStorageIntakePdf({ ...rec.original, id: rec.id }, cust, data), to(12000)]);
@@ -7404,8 +7442,8 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       <button onClick={leave} style={{ display: "inline-flex", alignItems: "center", background: "#fff", border: "1.5px solid #D3DDDB", borderRadius: 11, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Back</button>
-      <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{editRec ? "Edit storage inventory" : "New storage inventory"}</h2>
-      {editRec && <div style={{ fontSize: 12.5, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 8, padding: "8px 11px", marginBottom: 12 }}>The original signed inventory{editRec.original && editRec.original.savedAt ? ` from ${fmtUK(String(editRec.original.savedAt).slice(0, 10))}` : ""}, with its damage and condition notes, is kept on file. Your changes save as an amended copy.</div>}
+      <h2 style={{ margin: "0 0 14px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{editRec ? (editRec.draft ? "Continue storage inventory" : "Edit storage inventory") : "New storage inventory"}</h2>
+      {editRec && !editRec.draft && <div style={{ fontSize: 12.5, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 8, padding: "8px 11px", marginBottom: 12 }}>The original signed inventory{editRec.original && editRec.original.savedAt ? ` from ${fmtUK(String(editRec.original.savedAt).slice(0, 10))}` : ""}, with its damage and condition notes, is kept on file. Your changes save as an amended copy.</div>}
 
       <Card>
         <Field label="Customer">
@@ -7444,7 +7482,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
             return (
               <div key={it.id} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid #F0F4F3" }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <input value={it.qty} inputMode="numeric" onChange={e => setItem(ci, ii, "qty", e.target.value)} style={{ ...inp, width: 46, textAlign: "center", padding: "9px 2px", flexShrink: 0 }} />
+                  <QtySelect value={it.qty} onChange={v => setItem(ci, ii, "qty", v)} style={{ ...inp, width: 62, padding: "9px 4px", flexShrink: 0 }} />
                   <input value={it.name} placeholder="Item (e.g. Blue box, dining table)" onChange={e => setItem(ci, ii, "name", e.target.value)} style={{ ...inp, flex: 1 }} />
                   <button onClick={() => removeItem(ci, ii)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 20, cursor: "pointer", padding: "0 2px", flexShrink: 0 }}>×</button>
                 </div>
@@ -7511,7 +7549,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
         <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>Items not in a container — add each so they can be collected individually later.</div>
         {looseList.map(li => (
           <div key={li.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-            <div style={{ width: 58 }}><input type="number" inputMode="numeric" value={li.qty} onChange={e => setLoose(li.id, "qty", Math.max(1, parseInt(e.target.value, 10) || 1))} style={{ ...inp, textAlign: "center", padding: "9px 4px" }} /></div>
+            <div style={{ width: 66 }}><QtySelect value={li.qty} onChange={v => setLoose(li.id, "qty", v)} style={{ ...inp, padding: "9px 4px" }} /></div>
             <div style={{ flex: 1 }}><input value={li.name} placeholder="e.g. Bike, sofa, bench" onChange={e => setLoose(li.id, "name", e.target.value)} style={inp} /></div>
             <button onClick={() => removeLoose(li.id)} style={{ background: "none", border: "none", color: "#C0605A", fontSize: 18, fontWeight: 700, cursor: "pointer", lineHeight: 1 }}>×</button>
           </div>
@@ -7544,15 +7582,17 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
         <SigField label="Employee signature" value={empSig} onOpen={() => setSigning("emp")} />
       </Card>
 
-      {signing === "cust" && <SignatureModal title="Customer signature" initial={custSig} onCancel={() => setSigning(null)} onAccept={v => { setCustSig(v); setSigning(null); }} />}
-      {signing === "emp" && <SignatureModal title={`Employee signature${empName ? " — " + empName : ""}`} initial={empSig} onCancel={() => setSigning(null)} onAccept={v => { setEmpSig(v); setSigning(null); }} />}
+      {signing === "cust" && <SignatureModal title="Customer signature" initial={custSig} onCancel={() => { setSigning(null); setCompleting(false); }} onAccept={v => { setCustSig(v); setSigning(completing && !empSig ? "emp" : null); if (completing && empSig) setReadyToSave(true); }} />}
+      {signing === "emp" && <SignatureModal title={`Employee signature${empName ? " — " + empName : ""}`} initial={empSig} onCancel={() => { setSigning(null); setCompleting(false); }} onAccept={v => { setEmpSig(v); setSigning(null); if (completing) setReadyToSave(true); }} />}
 
       {err && <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         <Btn variant="grey" onClick={leave}>Cancel</Btn>
         <Btn variant="grey" disabled={busy} onClick={makeIntakePdf}>{busy === "pdf" ? "…" : "PDF"}</Btn>
-        <Btn style={{ flex: 1 }} disabled={busy} onClick={saveIntake}>{busy === "save" ? "Saving…" : "Save inventory"}</Btn>
+        <Btn variant="grey" style={{ flex: 1 }} disabled={busy} onClick={() => saveIntake("draft")}>{busy === "draft" ? "Saving…" : "💾 Save progress"}</Btn>
       </div>
+      <Btn style={{ width: "100%", marginTop: 10, padding: "14px 12px", fontSize: 16 }} disabled={busy} onClick={startComplete}>{busy === "save" ? "Saving…" : "✅ Complete — get signatures"}</Btn>
+      <div style={{ fontSize: 12, color: "#94A4A0", textAlign: "center", marginTop: 6 }}>Save progress keeps it to finish later. Complete asks the customer and crew member to sign, then locks in the original.</div>
     </div>
   );
 }
@@ -7954,11 +7994,12 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
                 <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer", flex: 1 }}>
                   <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
                   <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
-                  {rec.amendedAt && <div style={{ fontSize: 12, color: "#B45309", fontWeight: 700 }}>Amended {fmtUK(String(rec.amendedAt).slice(0, 10))} · original kept</div>}
+                  {rec.draft && <div style={{ fontSize: 12, color: "#7C3AED", fontWeight: 800 }}>✏️ In progress — not signed yet</div>}
+                  {rec.amendedAt && !rec.draft && <div style={{ fontSize: 12, color: "#B45309", fontWeight: 700 }}>Amended {fmtUK(String(rec.amendedAt).slice(0, 10))} · original kept</div>}
                 </div>
                 <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
-                  <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>
-                  <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
+                  {!rec.draft && <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>}
+                  <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: rec.draft ? "#7C3AED" : TEAL, fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>{rec.draft ? "Continue" : "Edit"}</span>
                   <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : rec.amendedAt ? "Current" : "PDF"}</span>
                   {rec.amendedAt && <span onClick={async () => { if (sheetBusy) return; setSheetBusy(true); await openInventoryPdf(rec, c, data, "original"); setSheetBusy(false); }} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Original</span>}
                 </div>
