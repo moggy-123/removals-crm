@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B210";
+const BUILD_NO = "B211";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3871,6 +3871,32 @@ function SurveyPdfView({ data, id, setView }) {
   );
 }
 
+// Days with fewer staff / vans than planned, or than were booked on before this change.
+function shortDays(days, before) {
+  return (days || []).map((d, i) => {
+    const prev = (before || []).find(b => b.id === d.id) || {};
+    const ps = Math.max(Number(d.staffCount) || 0, (prev.crew || []).length);
+    const pv = Math.max(Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0), (prev.vehicleIds || []).length);
+    const nc = (d.crew || []).length, nv = (d.vehicleIds || []).length;
+    const ss = Math.max(0, ps - nc), vs = Math.max(0, pv - nv);
+    const bits = [];
+    if (!nc) bits.push("no crew"); else if (ss) bits.push(`${ss} staff short (${nc} of ${ps})`);
+    if (!nv) bits.push("no vehicle"); else if (vs) bits.push(`${vs} vehicle${vs !== 1 ? "s" : ""} short (${nv} of ${pv})`);
+    return bits.length ? `${d.type || "Day " + (i + 1)}${d.date ? " " + fmtDate(d.date) : ""}: ${bits.join(", ")}` : null;
+  }).filter(Boolean);
+}
+function ShortBanner({ list, onBack, onSave }) {
+  return (
+    <div style={{ background: "#FFF7ED", border: "2px solid #F59E0B", borderRadius: 12, padding: "12px 13px", marginBottom: 10 }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: "#9A3412", marginBottom: 6 }}>⚠ Fewer staff / vehicles than planned</div>
+      {list.map(t => <div key={t} style={{ fontSize: 13.5, color: "#7C2D12", fontWeight: 600, marginBottom: 3 }}>• {t}</div>)}
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <Btn variant="grey" style={{ flex: 1 }} onClick={onBack}>Go back</Btn>
+        <Btn style={{ flex: 1, background: "#D97706" }} onClick={onSave}>Save anyway</Btn>
+      </div>
+    </div>
+  );
+}
 function MoveManageModal({ data, job, onClose }) {
   const [f, setF] = useState({ price: job.price ?? "", deposit: job.deposit ?? "", depositPaid: !!job.depositPaid, balancePaid: !!job.balancePaid, status: job.status || "Provisional" });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -3999,28 +4025,11 @@ function MoveManageModal({ data, job, onClose }) {
           <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={reinstateMove}>Reinstate move</Btn>
         </>
       )}
-      {shortWarn && (
-        <div style={{ background: "#FFF7ED", border: "2px solid #F59E0B", borderRadius: 12, padding: "12px 13px", marginBottom: 10 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "#9A3412", marginBottom: 6 }}>⚠ Fewer staff / vehicles than planned</div>
-          {shortWarn.map(t => <div key={t} style={{ fontSize: 13.5, color: "#7C2D12", fontWeight: 600, marginBottom: 3 }}>• {t}</div>)}
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <Btn variant="grey" style={{ flex: 1 }} onClick={() => setShortWarn(null)}>Go back</Btn>
-            <Btn style={{ flex: 1, background: "#D97706" }} onClick={() => persist({ stages: days })}>Save anyway</Btn>
-          </div>
-        </div>
-      )}
+      {shortWarn && <ShortBanner list={shortWarn} onBack={() => setShortWarn(null)} onSave={() => persist({ stages: days })} />}
       <Btn style={{ width: "100%", marginBottom: 10 }} onClick={() => {
         if (changing) {
-          // Warn (but allow) when a day has fewer staff or vans than planned — sometimes you have to make do.
-          const short = days.map((d, i) => {
-            const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
-            const nc = (d.crew || []).length, nv = (d.vehicleIds || []).length;
-            const ss = Math.max(0, ps - nc), vs = Math.max(0, pv - nv);
-            const bits = [];
-            if (!nc) bits.push("no crew"); else if (ss) bits.push(`${ss} staff short (${nc} of ${ps})`);
-            if (!nv) bits.push("no vehicle"); else if (vs) bits.push(`${vs} vehicle${vs !== 1 ? "s" : ""} short (${nv} of ${pv})`);
-            return bits.length ? `${d.type || "Day " + (i + 1)}${d.date ? " " + fmtDate(d.date) : ""}: ${bits.join(", ")}` : null;
-          }).filter(Boolean);
+          // Warn (but allow) when a day has fewer staff or vans than planned/booked — sometimes you have to make do.
+          const short = shortDays(days, jobStages(job));
           if (short.length && !shortWarn) { setShortWarn(short); return; }
         }
         persist(changing || assign ? { stages: days } : undefined);
@@ -6329,7 +6338,15 @@ function JobDetail({ data, id, setView }) {
     if (out.length) { alert(`These vehicles are booked out for servicing/MOT and can't be on this move:\n\n${out.join("\n")}\n\nRemove them or change the maintenance date.`); return true; }
     return false;
   }
-  async function save() { if (maintClash()) return; await saveAndReload(upsertLocal(data, "jobs", buildRec())); }
+  const [shortWarn, setShortWarn] = useState(null);
+  async function save(force) {
+    if (maintClash()) return;
+    if (!force && j && ["Confirmed", "Booked", "In Progress"].includes(f.status)) {
+      const short = shortDays(f.stages || [], jobStages(j));
+      if (short.length) { setShortWarn(short); return; }
+    }
+    await saveAndReload(upsertLocal(data, "jobs", buildRec()));
+  }
   async function completeMove() { await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: "Completed", balancePaid: true }))); }
   async function letGo() {
     if (!confirm("Let this move go?\n\nIt'll be kept for your records but removed from the calendar, availability and upcoming moves. You can reinstate it later.")) return;
@@ -6455,9 +6472,10 @@ function JobDetail({ data, id, setView }) {
 
       <Field label="Move notes"><Textarea value={f.notes} onChange={v => set("notes", v)} /></Field>
 
+      {shortWarn && <ShortBanner list={shortWarn} onBack={() => setShortWarn(null)} onSave={() => { setShortWarn(null); save(true); }} />}
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         {canDelete() && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
-        <Btn style={{ flex: 1 }} onClick={save}><Icon name="check" size={16} /> Save move</Btn>
+        <Btn style={{ flex: 1 }} onClick={() => save()}><Icon name="check" size={16} /> Save move</Btn>
       </div>
       {f.status === "Provisional" && (
         <Btn variant="primary" style={{ width: "100%", marginTop: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}>
