@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B209";
+const BUILD_NO = "B210";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3878,6 +3878,7 @@ function MoveManageModal({ data, job, onClose }) {
   const balanceDue = price - (Number(f.deposit) || 0);
   const [assign, setAssign] = useState(false);
   const [changing, setChanging] = useState(false); // change crew / vans on a confirmed move (sickness, van off road…)
+  const [shortWarn, setShortWarn] = useState(null); // list of short days, shown as a banner before saving
   const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", staffCount: st.staffCount || "", vehTypes: st.vehTypes || {}, crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "" })));
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
@@ -3888,8 +3889,8 @@ function MoveManageModal({ data, job, onClose }) {
     if (date) (data.staff || []).forEach(s => { if (staffOffOn(s, date)) crew.add(s.name); });
     return { veh, crew };
   };
-  const toggleCrew = (i, name) => setDays(d => d.map((x, ix) => ix === i ? { ...x, crew: x.crew.includes(name) ? x.crew.filter(c => c !== name) : [...x.crew, name] } : x));
-  const toggleVeh = (i, vid) => setDays(d => d.map((x, ix) => ix === i ? { ...x, vehicleIds: x.vehicleIds.includes(vid) ? x.vehicleIds.filter(v => v !== vid) : [...x.vehicleIds, vid] } : x));
+  const toggleCrew = (i, name) => { setShortWarn(null); setDays(d => d.map((x, ix) => ix === i ? { ...x, crew: x.crew.includes(name) ? x.crew.filter(c => c !== name) : [...x.crew, name] } : x)); };
+  const toggleVeh = (i, vid) => { setShortWarn(null); setDays(d => d.map((x, ix) => ix === i ? { ...x, vehicleIds: x.vehicleIds.includes(vid) ? x.vehicleIds.filter(v => v !== vid) : [...x.vehicleIds, vid] } : x)); };
   async function persist(extra) {
     await saveAndReload(upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: f.status, ...extra }));
     onClose();
@@ -3998,6 +3999,16 @@ function MoveManageModal({ data, job, onClose }) {
           <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={reinstateMove}>Reinstate move</Btn>
         </>
       )}
+      {shortWarn && (
+        <div style={{ background: "#FFF7ED", border: "2px solid #F59E0B", borderRadius: 12, padding: "12px 13px", marginBottom: 10 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "#9A3412", marginBottom: 6 }}>⚠ Fewer staff / vehicles than planned</div>
+          {shortWarn.map(t => <div key={t} style={{ fontSize: 13.5, color: "#7C2D12", fontWeight: 600, marginBottom: 3 }}>• {t}</div>)}
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <Btn variant="grey" style={{ flex: 1 }} onClick={() => setShortWarn(null)}>Go back</Btn>
+            <Btn style={{ flex: 1, background: "#D97706" }} onClick={() => persist({ stages: days })}>Save anyway</Btn>
+          </div>
+        </div>
+      )}
       <Btn style={{ width: "100%", marginBottom: 10 }} onClick={() => {
         if (changing) {
           // Warn (but allow) when a day has fewer staff or vans than planned — sometimes you have to make do.
@@ -4010,7 +4021,7 @@ function MoveManageModal({ data, job, onClose }) {
             if (!nv) bits.push("no vehicle"); else if (vs) bits.push(`${vs} vehicle${vs !== 1 ? "s" : ""} short (${nv} of ${pv})`);
             return bits.length ? `${d.type || "Day " + (i + 1)}${d.date ? " " + fmtDate(d.date) : ""}: ${bits.join(", ")}` : null;
           }).filter(Boolean);
-          if (short.length && !confirm(`⚠ Fewer than planned:\n\n${short.join("\n")}\n\nSave anyway?`)) return;
+          if (short.length && !shortWarn) { setShortWarn(short); return; }
         }
         persist(changing || assign ? { stages: days } : undefined);
       }}><Icon name="check" size={16} /> Save</Btn>
