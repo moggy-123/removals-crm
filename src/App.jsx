@@ -513,17 +513,44 @@ async function flushLog() {
     localStorage.setItem(LOG_QUEUE_KEY, JSON.stringify(left));
   } catch { /* try again later */ } finally { LOG_FLUSHING = false; }
 }
-async function loadLog(customerId) {
+// Customers whose name, ref, phone, email, address or postcode match the search words.
+function logCustomerIds(q) {
+  const words = String(q || "").toLowerCase().replace(/^#/, "").split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  let d = {}; try { d = loadData(); } catch {}
+  const enqText = {};
+  (d.enquiries || []).forEach(e => { enqText[e.customerId] = (enqText[e.customerId] || "") + " " + [e.fromAddress1, e.fromTown, e.fromPostcode, e.toAddress1, e.toTown, e.toPostcode].filter(Boolean).join(" "); });
+  return (d.customers || []).filter(c => {
+    const t = [c.ref, c.name, c.company, c.phone, c.homePhone, c.email, c.address1, c.town, c.postcode, enqText[c.id]].filter(Boolean).join(" ").toLowerCase();
+    return words.every(w => t.includes(w));
+  }).map(c => c.id).slice(0, 150);
+}
+function logMatches(r, q, custIds) {
+  q = String(q || "").trim().toLowerCase();
+  if (!q) return true;
+  if (r.customer_id && custIds.includes(r.customer_id)) return true;
+  const t = [r.summary, r.who, JSON.stringify(r.changes || [])].join(" ").toLowerCase();
+  return q.split(/\s+/).every(w => t.includes(w));
+}
+async function loadLog(customerId, search = "") {
   let rows = [], err = "";
+  const q = String(search || "").trim();
+  const custIds = q ? logCustomerIds(q) : [];
   try {
-    let qy = supabase.from("activity_log").select("*").order("at", { ascending: false }).limit(customerId ? 300 : 200);
+    let qy = supabase.from("activity_log").select("*").order("at", { ascending: false }).limit(q ? 500 : (customerId ? 300 : 200));
     if (customerId) qy = qy.eq("customer_id", customerId);
+    if (q) {
+      const safe = q.replace(/[%,()*\\"']/g, " ").trim();
+      const ors = safe ? [`summary.ilike.%${safe}%`, `who.ilike.%${safe}%`] : [];
+      if (custIds.length) ors.push(`customer_id.in.(${custIds.join(",")})`);
+      if (ors.length) qy = qy.or(ors.join(","));
+    }
     const { data, error } = await qy;
     if (error) err = /activity_log|relation|does not exist|schema cache/i.test(error.message || "") ? "setup" : (error.message || "error"); else rows = data || [];
   } catch (e) { err = "offline"; }
-  let q = []; try { q = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]"); } catch {}
+  let queued = []; try { queued = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]"); } catch {}
   const have = new Set(rows.map(r => r.id));
-  const pending = q.filter(x => !have.has(x.id) && (!customerId || x.customer_id === customerId)).map(x => ({ ...x, pending: true }));
+  const pending = queued.filter(x => !have.has(x.id) && (!customerId || x.customer_id === customerId) && logMatches(x, q, custIds)).map(x => ({ ...x, pending: true }));
   return { rows: [...pending, ...rows].sort((a, b) => String(b.at).localeCompare(String(a.at))), err };
 }
 // Admin: see deletions by day and undo a batch (e.g. records removed by mistake).
@@ -577,7 +604,19 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
   const [open, setOpen] = useState(startOpen);
   const [state, setState] = useState({ rows: null, err: "" });
   const [expanded, setExpanded] = useState({});
-  useEffect(() => { if (open && !state.rows) loadLog(customerId).then(setState); /* eslint-disable-next-line */ }, [open]);
+  const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    const t = setTimeout(async () => {
+      setBusy(true);
+      const res = await loadLog(customerId, search);
+      if (live) { setState(res); setBusy(false); }
+    }, search ? 450 : 0);
+    return () => { live = false; clearTimeout(t); };
+    /* eslint-disable-next-line */
+  }, [open, search]);
   const rows = state.rows || [];
   const refOf = (() => { const m = {}; try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {} return id => m[id]; })();
   return (
@@ -588,10 +627,12 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
       </div>
       {open && (
         <div style={{ marginTop: 10 }}>
+          <input data-ro-ok type="search" value={search} onChange={ev => setSearch(ev.target.value)} placeholder="Search: name, ref, postcode, or what changed" style={{ width: "100%", height: 42, border: "1px solid #DDE6E4", borderRadius: 10, padding: "0 12px", fontFamily: "inherit", fontSize: 15, boxSizing: "border-box", marginBottom: 6 }} />
+          {search.trim() && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>{busy ? "Searching…" : `${rows.length}${rows.length >= 500 ? "+" : ""} change${rows.length !== 1 ? "s" : ""} found`}</div>}
           {!state.rows && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Loading…</div>}
           {state.err === "setup" && <div style={{ fontSize: 12.5, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>The history table isn't set up in the database yet (run add-history.sql). Changes are being kept on this device until it is.</div>}
           {state.err === "offline" && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>No signal — showing changes made on this device only.</div>}
-          {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>No changes recorded yet.</div>}
+          {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>{search.trim() ? "Nothing matches that search." : "No changes recorded yet."}</div>}
           {rows.map(r => {
             const ch = Array.isArray(r.changes) ? r.changes : [];
             const isOpen = expanded[r.id] || ch.length <= 3;
@@ -895,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B221";
+const BUILD_NO = "B222";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
