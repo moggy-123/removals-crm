@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B207";
+const BUILD_NO = "B208";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3877,6 +3877,7 @@ function MoveManageModal({ data, job, onClose }) {
   const price = Number(f.price) || 0;
   const balanceDue = price - (Number(f.deposit) || 0);
   const [assign, setAssign] = useState(false);
+  const [changing, setChanging] = useState(false); // change crew / vans on a confirmed move (sickness, van off road…)
   const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", staffCount: st.staffCount || "", vehTypes: st.vehTypes || {}, crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "" })));
   const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
@@ -3893,6 +3894,14 @@ function MoveManageModal({ data, job, onClose }) {
     await saveAndReload(upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: f.status, ...extra }));
     onClose();
   }
+  // Anyone/anything assigned who's now off (holiday, sick, van off road) on that day.
+  const clashes = days.flatMap(d => {
+    if (!d.date) return [];
+    const out = [];
+    (d.crew || []).forEach(n => { const st = (data.staff || []).find(x => x.name === n); if (st && staffOffOn(st, d.date)) out.push(`${n} is off on ${fmtDate(d.date)}`); });
+    (d.vehicleIds || []).forEach(vid => { const v = (data.vehicles || []).find(x => x.id === vid); if (v && vehOutOn(v, d.date)) out.push(`${[v.name, v.reg].filter(Boolean).join(" ")} is off the road on ${fmtDate(d.date)}`); });
+    return out;
+  });
   const confirmMove = () => {
     if (!assign) { setAssign(true); return; }
     const bad = days.map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
@@ -3944,9 +3953,15 @@ function MoveManageModal({ data, job, onClose }) {
       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 8 }}><input type="checkbox" checked={f.depositPaid} onChange={ev => set("depositPaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Deposit paid</label>
       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 16 }}><input type="checkbox" checked={f.balancePaid} onChange={ev => set("balancePaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Balance paid</label>
 
-      {assign && f.status === "Provisional" && (
+      {f.status === "Confirmed" && !changing && (
+        <div style={{ marginBottom: 12 }}>
+          {clashes.length > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: "#B91C1C", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 9, padding: "9px 12px", marginBottom: 8 }}>⚠ {clashes.join(" · ")} — change them below.</div>}
+          <Btn variant="grey" style={{ width: "100%" }} onClick={() => setChanging(true)}>👷 Change crew / vehicles</Btn>
+        </div>
+      )}
+      {((assign && f.status === "Provisional") || (changing && f.status === "Confirmed")) && (
         <div style={{ marginBottom: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>Assign named staff and a vehicle to each day, then press Confirm again.</div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>{changing ? "Change who's on each day: tap a name or van to take it off, tap another to put it on, then press Save." : "Assign named staff and a vehicle to each day, then press Confirm again."}</div>
           {days.map((d, i) => {
             const plannedStaff = Number(d.staffCount) || 0;
             const plannedVeh = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -3983,7 +3998,13 @@ function MoveManageModal({ data, job, onClose }) {
           <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={reinstateMove}>Reinstate move</Btn>
         </>
       )}
-      <Btn style={{ width: "100%", marginBottom: 10 }} onClick={() => persist()}><Icon name="check" size={16} /> Save</Btn>
+      <Btn style={{ width: "100%", marginBottom: 10 }} onClick={() => {
+        if (changing) {
+          const bad = days.map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+          if (bad.length && !confirm(`Day ${bad.join(", ")} has no crew or no vehicle now. Save anyway?`)) return;
+        }
+        persist(changing || assign ? { stages: days } : undefined);
+      }}><Icon name="check" size={16} /> Save</Btn>
       <Btn variant="danger" style={{ width: "100%" }} onClick={removeMove}><Icon name="trash" size={14} /> Remove move — back to Quoted</Btn>
     </Modal>
   );
