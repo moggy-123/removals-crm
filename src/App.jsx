@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B215";
+const BUILD_NO = "B216";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -8656,6 +8656,15 @@ async function flushSignOffs() {
   for (const it of q) { try { await sendSignOff(it); } catch { left.push(it); } }
   writeSignQueue(left);
 }
+const isPackDay = st => /pack/i.test((st && st.type) || "") && !/unpack/i.test((st && st.type) || "");
+// Is this the job's last day? (latest date; same date → the later one in the list)
+function isLastJobDay(j, st) {
+  const days = jobStages(j).filter(Boolean);
+  if (days.length < 2) return true;
+  let last = days[0];
+  days.forEach(d => { if (String(d.date || "") >= String(last.date || "")) last = d; });
+  return signOffKey(last) === signOffKey(st);
+}
 function JobSignOff({ j, st, cust }) {
   const key = signOffKey(st);
   const [saved, setSaved] = useState(null);
@@ -8690,6 +8699,8 @@ function JobSignOff({ j, st, cust }) {
     );
   }
   if (isReadOnly()) return null;
+  // Signed off once, on the last day of the job only (never on a packing day).
+  if (isPackDay(st) || !isLastJobDay(j, st)) return null;
   if (!open) return (
     <div style={box}>
       <button type="button" data-ro-ok onClick={() => setOpen(true)} style={{ width: "100%", padding: "13px 12px", borderRadius: 12, border: "none", background: TEAL, color: "#fff", fontWeight: 800, fontSize: 15.5, cursor: "pointer" }}>✍️ Sign off job</button>
@@ -8719,9 +8730,9 @@ function JobSignOff({ j, st, cust }) {
         ? <select value={staffName} onChange={e => setStaffName(e.target.value)} style={inp}><option value="">Choose…</option>{crewNames.map(n => <option key={n}>{n}</option>)}</select>
         : <input value={staffName} onChange={e => setStaffName(e.target.value)} placeholder="Name" style={inp} />}
       <SigField label="Crew member signature" value={staffSig} onOpen={() => setSigning("staff")} />
-      <div style={{ fontSize: 13, color: "#374151", background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", margin: "4px 0 10px" }}>I confirm the move has been completed and my belongings have been delivered in good order, except for anything noted below.</div>
-      <div style={lbl}>Any damage or comments (optional)</div>
-      <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="e.g. scuff on wardrobe door" style={{ ...inp, resize: "vertical" }} />
+      <div style={{ fontSize: 13, color: "#374151", background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", margin: "4px 0 10px" }}>I confirm the move has been completed and my belongings have been delivered in good order.</div>
+      <div style={lbl}>Comments (optional)</div>
+      <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Any comments…" style={{ ...inp, resize: "vertical" }} />
       <div style={lbl}>Customer name</div>
       <input value={custName} onChange={e => setCustName(e.target.value)} placeholder="Name" style={inp} />
       <SigField label="Customer signature" value={custSig} onOpen={() => setSigning("cust")} />
