@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B218";
+const BUILD_NO = "B219";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -9367,6 +9367,10 @@ function MainApp() {
     if (fmLayout && sectionKey === "enquiries" && detailId) {
       return <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "18px 20px 40px" }}>{isReadOnly() && <ReadOnlyBanner />}<EnquiryDetail data={data} id={detailId} setView={setView} fm /></div>;
     }
+    // FileMaker layout: the enquiries list uses the whole screen too (no empty pane beside it).
+    if (fmLayout && sectionKey === "enquiries") {
+      return <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "18px 20px 40px" }}><div style={{ maxWidth: 900, margin: "0 auto" }}><List data={data} setView={setView} initialFilter={view.filter} /></div></div>;
+    }
     if (wide) {
       return (
         <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0 }}>
@@ -9418,7 +9422,11 @@ function MainApp() {
             <div style={{ fontSize: 10.5, fontWeight: 800, color: "#94A4A0", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 5 }}>Customer screen layout</div>
             <div data-ro-ok style={{ display: "flex", background: "#EEF3F2", borderRadius: 10, padding: 3, gap: 3 }}>
               {[["classic", "Classic"], ["filemaker", "FileMaker"]].map(([k, l]) => (
-                <button key={k} type="button" data-ro-ok onClick={() => { setLayoutPref(k); setLayout(k); }} style={{ flex: 1, height: 36, border: "none", borderRadius: 8, fontFamily: "inherit", fontSize: 13, fontWeight: layout === k ? 800 : 600, cursor: "pointer", background: layout === k ? "#fff" : "transparent", color: layout === k ? TEAL : "#6A7B77", boxShadow: layout === k ? "0 1px 3px rgba(16,33,30,.15)" : "none" }}>{l}</button>
+                <button key={k} type="button" data-ro-ok onClick={() => {
+                  setLayoutPref(k); setLayout(k);
+                  // Show the change straight away: FileMaker opens the enquiries screen.
+                  if (k === "filemaker" && sectionFor(view.screen) !== "enquiries") setView({ screen: "enquiries" });
+                }} style={{ flex: 1, height: 36, border: "none", borderRadius: 8, fontFamily: "inherit", fontSize: 13, fontWeight: layout === k ? 800 : 600, cursor: "pointer", background: layout === k ? "#fff" : "transparent", color: layout === k ? TEAL : "#6A7B77", boxShadow: layout === k ? "0 1px 3px rgba(16,33,30,.15)" : "none" }}>{l}</button>
               ))}
             </div>
           </div>
