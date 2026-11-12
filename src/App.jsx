@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B211";
+const BUILD_NO = "B212";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3131,8 +3131,8 @@ function MovePlanModal({ data, enquiry, onClose }) {
     if (n > 0) m[vt] = n; else delete m[vt];
     return { ...x, vehTypes: m };
   }));
-  const toggleVehId = (i, vid) => setDays(d => d.map((x, ix) => ix === i ? { ...x, vehicleIds: (x.vehicleIds || []).includes(vid) ? x.vehicleIds.filter(z => z !== vid) : [...(x.vehicleIds || []), vid] } : x));
-  const toggleCrew = (i, name) => setDays(d => d.map((x, ix) => ix === i ? { ...x, crew: (x.crew || []).includes(name) ? x.crew.filter(z => z !== name) : [...(x.crew || []), name] } : x));
+  const toggleVehId = (i, vid) => { setShortWarn(null); return setDays(d => d.map((x, ix) => ix === i ? { ...x, vehicleIds: (x.vehicleIds || []).includes(vid) ? x.vehicleIds.filter(z => z !== vid) : [...(x.vehicleIds || []), vid] } : x)); };
+  const toggleCrew = (i, name) => { setShortWarn(null); return setDays(d => d.map((x, ix) => ix === i ? { ...x, crew: (x.crew || []).includes(name) ? x.crew.filter(z => z !== name) : [...(x.crew || []), name] } : x)); };
   function bookedOn(date, exceptIdx) {
     const veh = new Set(), crew = new Set();
     if (!date) return { veh, crew };
@@ -3141,10 +3141,13 @@ function MovePlanModal({ data, enquiry, onClose }) {
     if (date) (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); }); if (date) (data.staff || []).forEach(s => { if (staffOffOn(s, date)) crew.add(s.name); });
     return { veh, crew };
   }
-  async function save() {
-    if (linkedJob && ["Confirmed", "Completed"].includes(linkedJob.status)) {
-      const badDays = days.map((d, i) => (!(d.crew && d.crew.length) || !(d.vehicleIds && d.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
-      if (badDays.length) { alert(`This job is confirmed, so please assign at least one staff member and one vehicle to every day before saving. Still needed on day ${badDays.join(", ")}.`); return; }
+  const [shortWarn, setShortWarn] = useState(null);
+  async function save(force) {
+    if (force !== true && linkedJob && ["Confirmed", "Completed"].includes(linkedJob.status)) {
+      // Fewer staff / vans than planned or than were booked before: warn, but let them make do.
+      const before = (linkedJob.stages || []).map((st, i) => ({ ...st, id: "d" + i }));
+      const short = shortDays(days.map((d, i) => ({ ...d, id: "d" + i })), before);
+      if (short.length) { setShortWarn(short); return; }
     }
     // Safety net: no vehicle that's booked out for maintenance can be on a move that day.
     const clashes = [];
@@ -3234,7 +3237,8 @@ function MovePlanModal({ data, enquiry, onClose }) {
       ))}
       {linkedJob && <div style={{ fontSize: 12, color: "#0F766E", background: "#F0FDFA", border: "1px solid #CCFBF1", borderRadius: 9, padding: "8px 11px", marginBottom: 12 }}>This move is on the calendar. Saving updates its days, staff and vehicles.</div>}
       <Btn variant="grey" size="sm" onClick={addDay} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>
-      <Btn style={{ width: "100%" }} onClick={save}><Icon name="check" size={16} /> {linkedJob ? "Save & update move" : "Save plan"}</Btn>
+      {shortWarn && <ShortBanner list={shortWarn} onBack={() => setShortWarn(null)} onSave={() => { setShortWarn(null); save(true); }} />}
+      <Btn style={{ width: "100%" }} onClick={() => save()}><Icon name="check" size={16} /> {linkedJob ? "Save & update move" : "Save plan"}</Btn>
       {!linkedJob && (enquiry.stages || []).length > 0 && (
         <Btn variant="danger" style={{ width: "100%", marginTop: 8 }} onClick={async () => {
           if (!confirm("Delete the whole move plan?" + (enquiry.status === "Quoted" ? " The enquiry will go back to Surveyed." : ""))) return;
