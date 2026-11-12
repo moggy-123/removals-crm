@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B214";
+const BUILD_NO = "B215";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1051,10 +1051,33 @@ const COVER_TYPES = ["3 Seater Sofa", "2 Seater Sofa", "Armchair", "King Mattres
 const COVER_CATALOG = { "cons-sofa": { "2 Seater Sofa": 1 } };
 const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
 const COVER_RE = /\b(?:(\d+|one|two|three|four|five|six)\s*(?:x|×)\s*|(\d+|one|two|three|four|five|six)\s+(?=[a-z]))?((?:3|three)[\s-]*(?:piece|pce|pc)[\s-]*suites?|(?:large\s+|small\s+)?corner[\s-]*(?:sofa|settee|couch|suite|unit)s?(?:\s*\/\s*sectional)?|sectional(?:\s*(?:sofa|settee|couch))?s?|(?:[34]|three|four)[\s-]*seat(?:er|ed)?(?:\s*(?:sofa|settee|couch)(?:es|s)?)?(?![\s-]*(?:dining|kitchen|garden|patio|table|bench))|(?:2|two)[\s-]*seat(?:er|ed)?(?:\s*(?:sofa|settee|couch)(?:es|s)?)?(?![\s-]*(?:dining|kitchen|garden|patio|table|bench))|(?<!(?:garden|rattan|patio|outdoor|conservatory)\s)(?:sofa[\s-]*beds?|sofas?|settees?|couch(?:es)?)|arm[\s-]*chairs?|easy[\s-]*chairs?|recliners?(?:\s*chairs?)?|wing[\s-]*(?:back[\s-]*)?chairs?|(?:super[\s-]*)?king[\s-]*(?:size[d]?\s*)?mattress(?:es)?|(?:small[\s-]*)?double[\s-]*mattress(?:es)?|single[\s-]*mattress(?:es)?|cot[\s-]*mattress(?:es)?|mattress(?:es)?(?![\s-]*(?:topper|protector|cover)))\b(?:\s*(?:x|×)\s*(\d+))?/gi;
-function coversInText(text, mult = 1, add) {
-  String(text || "").split(/\n|,|;|·|\+|&|\band\b/i).forEach(chunk => {
+// Freehand only: a bed includes its mattress (we don't write mattresses separately), so each bed
+// gets a mattress cover. Bunk bed = 2 singles; cabin / high / mid sleeper / cot bed = single;
+// a bed with no size given = double. Sofa beds, dog beds, day beds, air beds etc. are ignored.
+const BED_RE = /\b(?:(\d+|one|two|three|four|five|six)\s*(?:x|×)\s*|(\d+|one|two|three|four|five|six)\s+(?=[a-z]))?(?<!(?:sofa|dog|cat|pet|garden|flower|raised|day|camp|air|futon|water|plant|seed)[\s-]?)((?:(?:super[\s-]*)?king(?:[\s-]*size[d]?)?|(?:small[\s-]*)?double|single|bunk|cabin|cot|guest|divan|kids?|childs?|children'?s)?[\s-]*(?:beds?|divans?)|high[\s-]*sleepers?|mid[\s-]*sleepers?)\b(?:\s*(?:x|×)\s*(\d+))?/gi;
+function bedsInText(chunk, add) {
+  const re = new RegExp(BED_RE.source, "gi"); let m, found = false;
+  while ((m = re.exec(chunk))) {
+    const w = m[3].toLowerCase().trim();
+    if (!w) continue;
+    found = true;
+    const q0 = m[1] || m[2] || m[4];
+    const q = q0 ? (NUM_WORDS[q0.toLowerCase()] || parseInt(q0, 10) || 1) : 1;
+    if (/bunk/.test(w)) add("Single Mattress", q * 2);
+    else if (/king/.test(w)) add("King Mattress", q);
+    else if (/single|cabin|cot|sleeper|kid|child/.test(w)) add("Single Mattress", q);
+    else add("Double Mattress", q);
+  }
+  return found;
+}
+function coversInText(text, mult = 1, add, withBeds = false) {
+  String(text || "").split(/\n|,|;|·/).forEach(line => {
+    // "Double bed & mattress" → one cover, not two.
+    const hasBed = withBeds && bedsInText(line, add);
+    line.split(/\+|&|\band\b|\bwith\b/i).forEach(chunk => {
     const re = new RegExp(COVER_RE.source, "gi"); let m;
     while ((m = re.exec(chunk))) {
+      if (hasBed && /mattress/i.test(m[3])) continue;
       const q0 = m[1] || m[2] || m[4];
       const q = (q0 ? (NUM_WORDS[q0.toLowerCase()] || parseInt(q0, 10) || 1) : 1) * mult;
       const w = m[3].toLowerCase();
@@ -1067,6 +1090,7 @@ function coversInText(text, mult = 1, add) {
       else if (/single|cot/.test(w)) add("Single Mattress", q);
       else add("Double Mattress", q); // double, small double, or size not given
     }
+    });
   });
 }
 function coversRequired(inv) {
@@ -1077,7 +1101,7 @@ function coversRequired(inv) {
     const qty = Number(it.qty) || 1;
     const fixed = it.catalogId && COVER_CATALOG[it.catalogId];
     if (fixed) Object.entries(fixed).forEach(([k, n]) => add(k, n * qty));
-    else coversInText(it.freehand ? (it.raw ?? it.name) : it.name, it.freehand ? 1 : qty, add);
+    else coversInText(it.freehand ? (it.raw ?? it.name) : it.name, it.freehand ? 1 : qty, add, !!it.freehand);
   });
   return COVER_TYPES.filter(k => tot[k]).map(k => ({ name: k + " Cover", qty: tot[k] }));
 }
