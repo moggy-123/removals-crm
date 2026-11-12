@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B217";
+const BUILD_NO = "B218";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1752,6 +1752,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
     .sort((a, b) => filter === "Won"
       ? moveDateOf(a).localeCompare(moveDateOf(b))
       : (b.createdAt || "").localeCompare(a.createdAt || ""));
+  try { sessionStorage.setItem("removals_enq_order", JSON.stringify(shown.map(e => e.id))); } catch {}
 
   return (
     <div>
@@ -4292,7 +4293,251 @@ function AltOptions({ data, e, setView }) {
   );
 }
 
-function EnquiryDetail({ data, id, setView }) {
+// ── FileMaker-style customer record (iPad, "FileMaker" layout) ──────────────
+// Same data and buttons as the classic screen, laid out like the old FileMaker
+// record: customer + addresses on top, tabs underneath. Switch back any time
+// with "Layout" at the bottom of the side menu.
+const LAYOUT_KEY = "removals_layout";
+const getLayout = () => { try { return localStorage.getItem(LAYOUT_KEY) === "filemaker" ? "filemaker" : "classic"; } catch { return "classic"; } };
+const setLayoutPref = v => { try { localStorage.setItem(LAYOUT_KEY, v); } catch {} };
+const fmStamp = v => { if (!v) return ""; const d = typeof v === "number" ? new Date(v) : new Date(v); return isNaN(d) ? "" : fmtUK(d.toISOString().slice(0, 10)); };
+const FM_LINE = "#D9E2E0";
+function FmField({ label, children, lw = 112, onClick }) {
+  return (
+    <div onClick={onClick} style={{ display: "flex", alignItems: "stretch", minHeight: 44, border: `1px solid ${FM_LINE}`, borderRadius: 10, background: "#fff", overflow: "hidden", fontSize: 14.5, cursor: onClick ? "pointer" : "default" }}>
+      <span style={{ width: lw, flexShrink: 0, background: "#F3F7F6", borderRight: `1px solid ${FM_LINE}`, display: "flex", alignItems: "center", padding: "0 12px", color: "#55665F", fontSize: 13, fontWeight: 700 }}>{label}</span>
+      <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", padding: "8px 12px", color: "#10211E", fontWeight: 600, overflowWrap: "anywhere" }}>{children || <span style={{ color: "#94A4A0", fontWeight: 500 }}>—</span>}</span>
+    </div>
+  );
+}
+function FmBox({ children, ph }) {
+  return <div style={{ minHeight: 44, border: `1px solid ${FM_LINE}`, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", padding: "8px 12px", fontSize: 15, fontWeight: ph ? 500 : 600, color: ph ? "#94A4A0" : "#10211E", boxSizing: "border-box" }}>{children}</div>;
+}
+function FmSeg({ items, value, onChange, big }) {
+  return (
+    <div role="tablist" style={{ display: "flex", background: "#E4ECEA", borderRadius: 12, padding: 4, gap: 4 }}>
+      {items.map(([k, l]) => {
+        const on = k === value;
+        return <button key={k} type="button" role="tab" aria-selected={on} data-ro-ok onClick={() => onChange(k)} style={{ flex: 1, minWidth: 0, height: big ? 44 : 38, border: "none", borderRadius: 9, background: on ? "#fff" : "transparent", boxShadow: on ? "0 1px 3px rgba(16,33,30,.15)" : "none", color: on ? TEAL : "#55665F", fontFamily: "inherit", fontSize: big ? 14.5 : 13, fontWeight: on ? 800 : 600, cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", padding: "0 6px" }}>{l}</button>;
+      })}
+    </div>
+  );
+}
+function EnquiryFileMaker({ data, e, customer, linkedJob, setView, quoteDone, act }) {
+  const c = customer || {};
+  const [side, setSide] = useState("from");
+  const [tab, setTabRaw] = useState(() => { try { return localStorage.getItem("removals_fm_tab") || "survey"; } catch { return "survey"; } });
+  const setTab = t => { setTabRaw(t); try { localStorage.setItem("removals_fm_tab", t); } catch {} };
+  const ro = isReadOnly();
+  // Previous / Next follow the order of the enquiries list you came from.
+  let order = [];
+  try { order = JSON.parse(sessionStorage.getItem("removals_enq_order") || "[]"); } catch {}
+  if (!order.includes(e.id)) order = (data.enquiries || []).slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).map(x => x.id);
+  const pos = order.indexOf(e.id);
+  const go = id => id && setView({ screen: "enquiryDetail", id });
+  const nm = (c.company ? `${c.name} (${c.company})` : c.name) || "Unknown";
+  const fromLines = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode];
+  const toLines = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode];
+  const addr = a => a.filter(Boolean).join(", ");
+  const maps = q => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`, "_blank");
+  const distance = () => window.open(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(addr(fromLines))}&destination=${encodeURIComponent(addr(toLines))}`, "_blank");
+  const hdrBtn = { height: 44, padding: "0 14px", borderRadius: 10, border: "none", background: "rgba(255,255,255,.12)", color: "#fff", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer" };
+  const sb = { padding: "10px 12px", whiteSpace: "nowrap" };
+  const surveyed = !!(e.surveyDone || ["Surveyed", "Quoted", "Won"].includes(e.status));
+  const hasInv = !!(e.inventory && e.inventory.length);
+  const covers = coversRequired(e.inventory);
+  const hw = hwBoxes(e.inventory);
+  const sideLines = side === "from" ? fromLines : toLines;
+  const extra = side === "from" ? (e.extraFrom || []) : (e.extraTo || []);
+  const q = quoteChase(data, e);
+  const H2 = ({ children }) => <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: ".05em", textTransform: "uppercase", color: "#10211E", margin: "4px 0 2px" }}>{children}</div>;
+  const grid2 = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0, minHeight: "100%" }}>
+      {/* Header: name, ref, status, Previous / Next */}
+      <div style={{ background: NAVY, color: "#fff", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10, borderRadius: 14 }}>
+        <button type="button" data-ro-ok onClick={() => setView({ screen: "enquiries" })} style={hdrBtn} aria-label="Back to list">‹ List</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#A7D3CC" }}>{c.ref ? `Ref ${c.ref}` : "No ref"}{pos >= 0 ? ` · ${pos + 1} of ${order.length}` : ""}</div>
+          <div style={{ fontSize: 21, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nm}</div>
+        </div>
+        <StatusBadge status={enqBadge(data, e)} />
+        <button type="button" data-ro-ok disabled={pos <= 0} onClick={() => go(order[pos - 1])} style={{ ...hdrBtn, opacity: pos <= 0 ? .4 : 1 }}>‹ Previous</button>
+        <button type="button" data-ro-ok disabled={pos < 0 || pos >= order.length - 1} onClick={() => go(order[pos + 1])} style={{ ...hdrBtn, opacity: pos < 0 || pos >= order.length - 1 ? .4 : 1 }}>Next ›</button>
+      </div>
+
+      {/* Top buttons, like FileMaker's */}
+      <div style={{ marginTop: 12 }}>
+        <FmSeg big value="customer" onChange={k => {
+          if (k === "quote") act.setShowQuote(true);
+          else if (k === "spec") { if (hasInv || (e.stages && e.stages.length)) setView({ screen: "surveyPdf", id: e.id }); else act.setShowInv(true); }
+          else if (k === "all") setView({ screen: "enquiries", filter: "All" });
+          else if (k === "home") setView({ screen: "dashboard" });
+        }} items={[["customer", "Customer"], ["quote", "Quotation"], ["spec", "Spec sheet"], ["all", "Show all"], ["home", "Home"]]} />
+      </div>
+      <AltOptions data={data} e={e} setView={setView} />
+
+      {/* Customer (left) + addresses (right) */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.25fr)", gap: 14, marginTop: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <FmField label="Ref">{c.ref}</FmField>
+          <FmBox>{nm}</FmBox>
+          <FmField label="Mobile" onClick={c.phone ? () => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; } : undefined}>{c.phone ? <span style={{ color: TEAL }}>📞 {c.phone}</span> : ""}</FmField>
+          <FmField label="Home phone" onClick={c.homePhone ? () => { window.location.href = `tel:${c.homePhone}`; } : undefined}>{c.homePhone ? <span style={{ color: TEAL }}>📞 {c.homePhone}</span> : ""}</FmField>
+          <FmField label="Email" onClick={c.email ? () => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; } : undefined}>{c.email ? <span style={{ color: TEAL }}>{c.email}</span> : ""}</FmField>
+          {customer && <MessageButton size="md" variant="primary" style={{ width: "100%" }} customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />}
+        </div>
+        <div style={{ background: "#fff", border: `1px solid ${FM_LINE}`, borderRadius: 14, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          <FmSeg value={side} onChange={setSide} items={[["from", "From"], ["to", "To"], ["store", "Store"]]} />
+          {side === "store" ? (
+            <FmBox ph={!storeSummary(e)}>{storeSummary(e) || "Not going into store"}</FmBox>
+          ) : (
+            <>
+              <FmBox ph={!sideLines[0]}>{sideLines[0] || "Address 1"}</FmBox>
+              <FmBox ph={!sideLines[1]}>{sideLines[1] || "Address 2"}</FmBox>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr)", gap: 8 }}>
+                <FmBox ph={!sideLines[2]}>{sideLines[2] || "Town"}</FmBox>
+                <FmBox ph={!sideLines[3]}>{sideLines[3] || "Postcode"}</FmBox>
+              </div>
+              {extra.map((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); return a ? <div key={i} style={{ fontSize: 13, color: "#374151" }}>+ {side === "from" ? "Pickup" : "Delivery"} {i + 2}: {a}{s.note ? ` (${s.note})` : ""}</div> : null; })}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn size="sm" style={sb} disabled={!addr(fromLines) || !addr(toLines)} onClick={distance}>Check distance</Btn>
+                <Btn size="sm" variant="grey" style={sb} onClick={() => setTab("access")}>Access</Btn>
+                <Btn size="sm" variant="grey" style={sb} disabled={!addr(sideLines)} onClick={() => maps(addr(sideLines))}>Map</Btn>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Lower tabs */}
+      <div style={{ marginTop: 14 }}>
+        <FmSeg value={tab} onChange={setTab} items={[["survey", "Survey info"], ["notes", "Notes"], ["move", "Move info"], ["access", "Access"]]} />
+      </div>
+      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+        {tab === "survey" && <>
+          <div style={grid2}>
+            <FmField label="Surveyor">{e.surveyor}</FmField>
+            <FmField label="Referred by">{e.referredBy}</FmField>
+            <FmField label="Status">{enqBadge(data, e)}</FmField>
+            <FmField label="Move date">{e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : (e.moveMonth ? fmtMonth(e.moveMonth) + " (month)" : "TBC")}</FmField>
+            <FmField label="Survey date">{e.surveyDate ? <span style={{ color: surveyOverdue(e) ? "#B91C1C" : undefined }}>{fmtDate(e.surveyDate)}{surveyOverdue(e) ? " — not surveyed" : ""}</span> : ""}</FmField>
+            <FmField label="Survey time">{e.surveyTime}</FmField>
+            <FmField label="Quote">{e.quoteTotal ? `${gbp(e.quoteTotal)} · ${e.quoteStatus || ""}` : ""}</FmField>
+            <FmField label="Quote sent">{e.quoteSentDate ? fmtDate(e.quoteSentDate) : ""}</FmField>
+            <FmField label="Volume">{e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³` : "Not surveyed yet"}</FmField>
+            <FmField label="Call back" onClick={!ro ? act.setFollowUp : undefined}>{e.followUpDate ? `${fmtDate(e.followUpDate)}${e.followUpTime ? " " + e.followUpTime : ""}` : ""}</FmField>
+          </div>
+          {e.followUpNote ? <div style={{ fontSize: 13.5, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "8px 12px" }}><b>Call back note:</b> {e.followUpNote}</div> : null}
+          {q ? <div style={{ padding: "10px 12px", borderRadius: 10, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400E" }}>{quoteChaseText(q)}<div style={{ fontWeight: 600, color: "#B45309", marginTop: 2 }}>Reminder: {e.noChase && !e.quoteChaseDate ? "none set" : fmtDate(quoteChaseDue(e))} <button onClick={() => act.setShowChaseDate(true)} style={{ background: "none", border: "none", color: TEAL, fontWeight: 800, cursor: "pointer", padding: 0, fontSize: 12.5 }}>Change</button></div></div>
+            {q.phone ? <ChaseCallBtn data={data} e={e} /> : null}
+          </div> : null}
+          <div style={{ border: `1px solid ${FM_LINE}`, borderRadius: 12, background: "#fff", overflow: "hidden" }}>
+            <div style={{ padding: "9px 12px", background: "#F3F7F6", borderBottom: `1px solid ${FM_LINE}`, fontSize: 13, fontWeight: 700, color: "#55665F" }}>Notes</div>
+            <div style={{ minHeight: 70, padding: "10px 12px", fontSize: 14, color: e.notes ? "#10211E" : "#94A4A0", whiteSpace: "pre-wrap" }}>{e.notes || "No notes"}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(!ro || hasInv) && <Btn size="sm" style={sb} onClick={() => act.setShowInv(true)}><Icon name="box" size={14} /> {ro ? "View survey" : e.volumeCuFt ? "Edit survey" : "Start survey"}</Btn>}
+            {!ro && e.surveyDate && <Btn size="sm" variant={surveyed ? "grey" : "primary"} style={sb} onClick={async () => { const done = !surveyed; await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{surveyed ? "✓ Surveyed" : "Mark surveyed"}</Btn>}
+            {!ro && surveyOverdue(e) && <Btn size="sm" variant="danger" style={sb} onClick={() => act.setShowResched(true)}>📅 Reschedule</Btn>}
+            <NewEnqCallBtn data={data} e={e} small />
+            {(!ro || e.quoteTotal) && <Btn size="sm" variant="amber" style={sb} onClick={() => act.setShowQuote(true)}><Icon name="quote" size={14} /> {ro ? "View quote" : e.quoteTotal ? "Edit quote" : "Build quote"}</Btn>}
+            {e.quoteTotal ? <Btn size="sm" variant="grey" style={sb} onClick={() => setView({ screen: "quotePdf", id: e.id })}>Quote PDF</Btn> : null}
+          </div>
+          <div style={{ display: "flex", gap: 16, fontSize: 12.5, color: "#55665F", padding: "2px 2px 0" }}>
+            {e.createdAt ? <span>Created <b style={{ color: "#10211E" }}>{fmStamp(e.createdAt)}</b></span> : null}
+            {e.updatedAt ? <span>Modified <b style={{ color: "#10211E" }}>{fmStamp(e.updatedAt)}</b></span> : null}
+          </div>
+        </>}
+
+        {tab === "notes" && <>
+          <div style={{ border: `1px solid ${FM_LINE}`, borderRadius: 12, background: "#fff", overflow: "hidden" }}>
+            <div style={{ padding: "9px 12px", background: "#F3F7F6", borderBottom: `1px solid ${FM_LINE}`, fontSize: 13, fontWeight: 700, color: "#55665F" }}>Enquiry notes</div>
+            <div style={{ minHeight: 120, padding: "10px 12px", fontSize: 14.5, color: e.notes ? "#10211E" : "#94A4A0", whiteSpace: "pre-wrap" }}>{e.notes || "No notes"}</div>
+          </div>
+          {c.notes ? <div style={{ border: `1px solid ${FM_LINE}`, borderRadius: 12, background: "#fff", overflow: "hidden" }}>
+            <div style={{ padding: "9px 12px", background: "#F3F7F6", borderBottom: `1px solid ${FM_LINE}`, fontSize: 13, fontWeight: 700, color: "#55665F" }}>Customer notes</div>
+            <div style={{ padding: "10px 12px", fontSize: 14.5, color: "#10211E", whiteSpace: "pre-wrap" }}>{c.notes}</div>
+          </div> : null}
+          {customer && <OtherContacts customer={customer} onLog={en => logComm(customer.id, en)} />}
+          {!ro && <Btn size="sm" style={{ ...sb, alignSelf: "flex-start" }} onClick={() => act.setShowEdit(true)}><Icon name="edit" size={14} /> Edit notes</Btn>}
+        </>}
+
+        {tab === "move" && <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+            {[["Volume", e.volumeCuFt ? `${e.volumeCuFt} cu ft` : "—"],
+              ["Price", linkedJob ? gbp(linkedJob.price) : (e.quoteTotal ? gbp(e.quoteTotal) : "—")],
+              ["Deposit", linkedJob && linkedJob.deposit ? `${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : "—"],
+              ["Balance", linkedJob ? `${gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}${linkedJob.balancePaid ? " ✓" : ""}` : "—"]].map(([l, v]) => (
+              <div key={l} style={{ background: "#fff", border: `1px solid ${FM_LINE}`, borderRadius: 12, padding: "10px 12px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#55665F" }}>{l}</div>
+                <div style={{ fontSize: 16.5, fontWeight: 800, color: "#10211E" }}>{v}</div>
+              </div>))}
+          </div>
+          <div style={{ background: "#fff", border: `1px solid ${FM_LINE}`, borderRadius: 12, padding: "10px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <H2>{linkedJob ? `Move ${moveRef(data, linkedJob)}` : "Move plan"}</H2>
+              {linkedJob ? <StatusBadge status={jobBadge(linkedJob)} /> : null}
+            </div>
+            {(linkedJob ? jobStages(linkedJob) : (e.stages || [])).length === 0
+              ? <div style={{ fontSize: 13.5, color: "#55665F", marginTop: 4 }}>No days planned yet</div>
+              : (linkedJob ? jobStages(linkedJob) : e.stages).map((d, i) => {
+                const vn = (d.vehicleIds || []).map(id => (((data.vehicles || []).find(v => v.id === id)) || {}).name).filter(Boolean).join(", ");
+                return <div key={d.id || i} style={{ fontSize: 13.5, color: "#374151", padding: "6px 0", borderTop: i ? `1px solid ${FM_LINE}` : "none" }}>
+                  <b style={{ color: "#10211E" }}>{d.type || "Day"}</b> · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}{d.time ? ` ${d.time}` : ""}
+                  {vn ? ` · ${vn}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
+                  {(d.crew && d.crew.length) ? ` · ${d.crew.join(", ")}` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
+                </div>; })}
+            {linkedJob && (() => { const so = Object.values(linkedJob.signOffs || {}); if (!so.length) return null; const last = so.sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
+              return <div onClick={() => act.setShowSignOff(true)} style={{ fontSize: 13, color: "#059669", fontWeight: 700, marginTop: 6, cursor: "pointer" }}>✅ Signed off · {last.staffName} &amp; {last.custName}{so.some(x => x.notes) ? <span style={{ color: "#B45309" }}> · 📝 note</span> : null}</div>; })()}
+          </div>
+          {(hw || covers.length) ? <div style={{ background: "#fff", border: `1px solid ${FM_LINE}`, borderRadius: 12, padding: "10px 12px" }}>
+            <H2>Equipment required</H2>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+              {hw ? <span style={{ padding: "5px 10px", borderRadius: 99, background: "#F1F5F4", fontSize: 13, fontWeight: 600 }}>{hw} × H/W boxes</span> : null}
+              {covers.map(cv => <span key={cv.name} style={{ padding: "5px 10px", borderRadius: 99, background: "#F1F5F4", fontSize: 13, fontWeight: 600 }}>{cv.qty} × {cv.name}</span>)}
+            </div>
+          </div> : null}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(!ro || (e.stages && e.stages.length)) && <Btn size="sm" variant="grey" style={sb} onClick={() => act.setShowPlan(true)}><Icon name="calendar" size={14} /> {ro ? "View plan" : (e.stages && e.stages.length) ? "Edit plan" : "Add plan"}</Btn>}
+            {(hasInv || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={sb} onClick={() => setView({ screen: "surveyPdf", id: e.id })}>Survey PDF</Btn> : null}
+            {e.quoteTotal ? <Btn size="sm" variant="grey" style={sb} onClick={() => setView({ screen: "quotePdf", id: e.id })}>Quote PDF</Btn> : null}
+            {linkedJob && <Btn size="sm" variant="grey" style={sb} onClick={() => act.setShowCrew(true)}>👷 Crew view</Btn>}
+            {linkedJob && <Btn size="sm" style={sb} onClick={() => act.setShowMove(true)}><Icon name="check" size={14} /> {ro ? "View move" : "Manage move"}</Btn>}
+            {!ro && !linkedJob && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn size="sm" style={sb} onClick={act.markWon}><Icon name="check" size={14} /> Create provisional move</Btn>}
+          </div>
+        </>}
+
+        {tab === "access" && <>
+          <div style={grid2}>
+            <FmField label="From property">{[e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.fromFloor].filter(Boolean).join(" · ")}</FmField>
+            <FmField label="To property">{[e.toPropertyType, e.toFloor].filter(Boolean).join(" · ")}</FmField>
+          </div>
+          {[["From access", e.fromAccess], ["To access", e.toAccess]].map(([l, v]) => (
+            <div key={l} style={{ border: `1px solid ${FM_LINE}`, borderRadius: 12, background: "#fff", overflow: "hidden" }}>
+              <div style={{ padding: "9px 12px", background: "#F3F7F6", borderBottom: `1px solid ${FM_LINE}`, fontSize: 13, fontWeight: 700, color: "#55665F" }}>{l}</div>
+              <div style={{ minHeight: 50, padding: "10px 12px", fontSize: 14.5, color: v ? "#10211E" : "#94A4A0", whiteSpace: "pre-wrap" }}>{v || "Nothing noted"}</div>
+            </div>))}
+          {!ro && <Btn size="sm" style={{ ...sb, alignSelf: "flex-start" }} onClick={() => act.setShowEdit(true)}><Icon name="edit" size={14} /> Edit access</Btn>}
+        </>}
+      </div>
+
+      {/* Bottom bar: the usual actions */}
+      <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${FM_LINE}`, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {ro ? <Btn variant="grey" style={sb} onClick={() => act.setShowEdit(true)}>👁 View enquiry details</Btn> : <>
+          <Btn style={sb} onClick={() => act.setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
+          {!linkedJob && <Btn variant="grey" style={sb} onClick={act.setFollowUp}>⏰ Call back</Btn>}
+          {!["Won", "Lost", "Not quoted"].includes(e.status) && <Btn variant="grey" style={{ ...sb, color: "#B91C1C" }} onClick={act.markLost}>✕ Mark Lost</Btn>}
+          {!["Won", "Lost", "Not quoted"].includes(e.status) && !linkedJob && <Btn variant="grey" style={{ ...sb, color: "#4B5563" }} onClick={() => markNotQuotedFlow(data, e)}>🚫 Didn't quote</Btn>}
+          {canDelete() && <Btn variant="danger" style={{ ...sb, marginLeft: "auto" }} onClick={act.del}><Icon name="trash" size={15} /> Delete</Btn>}
+        </>}
+      </div>
+    </div>
+  );
+}
+function EnquiryDetail({ data, id, setView, fm = false }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
   const [showInv, setShowInv] = useState(false);
@@ -4392,6 +4637,28 @@ function EnquiryDetail({ data, id, setView }) {
     : !planDone ? "Next: add the move plan — the quote appears once it's done."
     : !quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) ? "Next: build the quote — you can then create the provisional move."
     : "";
+
+  const modals = (
+    <>
+      {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
+      {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
+      {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
+      {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
+      {showChaseDate && <ChaseDateModal data={data} enquiry={e} onClose={() => setShowChaseDate(false)} />}
+      {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
+      {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
+      {showMove && linkedJob && <MoveManageModal data={data} job={linkedJob} onClose={() => setShowMove(false)} />}
+      {showCrew && linkedJob && <CrewPreviewModal data={data} job={linkedJob} onClose={() => setShowCrew(false)} />}
+      {showSignOff && linkedJob && <SignOffRecordModal data={data} job={linkedJob} onClose={() => setShowSignOff(false)} />}
+    </>
+  );
+  if (fm) return (
+    <>
+      <EnquiryFileMaker data={data} e={e} customer={customer} linkedJob={linkedJob} setView={setView} quoteDone={quoteDone}
+        act={{ setShowEdit, setShowInv, setShowQuote, setShowPlan, setShowMove, setShowCrew, setShowSignOff, setShowResched, setShowChaseDate, setFollowUp, markWon, markLost, del }} />
+      {modals}
+    </>
+  );
 
   return (
     <div>
@@ -4523,9 +4790,6 @@ function EnquiryDetail({ data, id, setView }) {
           </div>
         </Card>
       )}
-      {showCrew && linkedJob && <CrewPreviewModal data={data} job={linkedJob} onClose={() => setShowCrew(false)} />}
-      {showSignOff && linkedJob && <SignOffRecordModal data={data} job={linkedJob} onClose={() => setShowSignOff(false)} />}
-
       {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
       {e.followUpDate && (
@@ -4559,14 +4823,7 @@ function EnquiryDetail({ data, id, setView }) {
         </>;
       })()}
 
-      {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
-      {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
-      {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
-      {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
-      {showChaseDate && <ChaseDateModal data={data} enquiry={e} onClose={() => setShowChaseDate(false)} />}
-      {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
-      {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
-      {showMove && linkedJob && <MoveManageModal data={data} job={linkedJob} onClose={() => setShowMove(false)} />}
+      {modals}
     </div>
   );
 }
@@ -8961,6 +9218,8 @@ function MainApp() {
   const [catalog, setCatalogState] = useState(() => { const l = loadLocalCatalog(); if (l) applyCatalog(l); return l || buildDefaultCatalog(); });
   const device = useDeviceType();
   const wide = device !== "phone";
+  const [layout, setLayout] = useState(getLayout);
+  const fmLayout = wide && layout === "filemaker";
 
   // One-off tidy: imported Mover enquiries keep only their survey notes in the Notes field.
   useEffect(() => {
@@ -9104,6 +9363,10 @@ function MainApp() {
     if (!sec) return null;
     const { List, Detail } = sec;
     const detailId = view.screen === sec.detail ? view.id : null;
+    // FileMaker layout: an open enquiry fills the whole screen (no list beside it).
+    if (fmLayout && sectionKey === "enquiries" && detailId) {
+      return <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "18px 20px 40px" }}>{isReadOnly() && <ReadOnlyBanner />}<EnquiryDetail data={data} id={detailId} setView={setView} fm /></div>;
+    }
     if (wide) {
       return (
         <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0 }}>
@@ -9151,7 +9414,15 @@ function MainApp() {
               );
             })}
           </nav>
-          <div style={{ marginTop: "auto", padding: "14px 18px", borderTop: "1px solid #E9EEED", display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: "#6A7B77", fontWeight: 600 }}>
+          <div style={{ marginTop: "auto", padding: "12px 14px 0" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: "#94A4A0", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 5 }}>Customer screen layout</div>
+            <div data-ro-ok style={{ display: "flex", background: "#EEF3F2", borderRadius: 10, padding: 3, gap: 3 }}>
+              {[["classic", "Classic"], ["filemaker", "FileMaker"]].map(([k, l]) => (
+                <button key={k} type="button" data-ro-ok onClick={() => { setLayoutPref(k); setLayout(k); }} style={{ flex: 1, height: 36, border: "none", borderRadius: 8, fontFamily: "inherit", fontSize: 13, fontWeight: layout === k ? 800 : 600, cursor: "pointer", background: layout === k ? "#fff" : "transparent", color: layout === k ? TEAL : "#6A7B77", boxShadow: layout === k ? "0 1px 3px rgba(16,33,30,.15)" : "none" }}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ marginTop: 10, padding: "14px 18px", borderTop: "1px solid #E9EEED", display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: "#6A7B77", fontWeight: 600 }}>
             <SyncDot /> {syncStatus === "synced" ? "All changes synced" : syncStatus === "syncing" ? "Syncing…" : "Offline — saved on device"}
           </div>
         </aside>
