@@ -158,7 +158,6 @@ const STATUS_META = {
   "Survey booked": { color: "#7C3AED", bg: "#F5F3FF" },
   "Survey missed": { color: "#DC2626", bg: "#FEF2F2" },
   Surveyed:    { color: "#0891B2", bg: "#ECFEFF" },
-  Booked:      { color: "#0891B2", bg: "#ECFEFF" },
   "Let Go":    { color: "#6B7280", bg: "#F3F4F6" },
   "Not quoted": { color: "#6B7280", bg: "#F3F4F6" },
   "Alt. not chosen": { color: "#6B7280", bg: "#F3F4F6" },
@@ -183,7 +182,7 @@ const canDelete = () => isAdmin();
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
-function todayISO() { return new Date().toISOString().split("T")[0]; }
+function todayISO() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; } // local date (UK), not UTC
 function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -936,7 +935,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B240";
+const BUILD_NO = "B241";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4713,6 +4712,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   }, [id]);
   const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name || "Vehicle";
   const customer = (data.customers || []).find(c => c.id === e?.customerId);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
   if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
   const linkedJob = (data.jobs || []).find(j => j.enquiryId === e.id);
 
@@ -4769,7 +4769,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
     window.location.reload();
   }
   async function markLost() { await markLostFlow(data, e, setView); }
-  const [followUpOpen, setFollowUpOpen] = useState(false);
   const setFollowUp = () => setFollowUpOpen(true);
   async function del() {
     if (!confirm("Delete this enquiry? This cannot be undone.")) return;
@@ -6802,9 +6801,13 @@ function PickChips({ options, selectedIds, takenIds, onToggle, empty, takenReaso
 }
 
 function JobDetail({ data, id, setView }) {
+  // Hooks must run the same way every time, so the "not found" check sits outside the screen itself.
   const j = (data.jobs || []).find(x => x.id === id);
-  const customer = (data.customers || []).find(c => c.id === j?.customerId);
   if (!j) return <div style={{ padding: 20 }}>Move not found.</div>;
+  return <JobDetailScreen key={id} data={data} j={j} setView={setView} />;
+}
+function JobDetailScreen({ data, j, setView }) {
+  const customer = (data.customers || []).find(c => c.id === j?.customerId);
   const [f, setF] = useState({
     stages: jobStages(j).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", vehicleIds: st.vehicleIds || [], crew: st.crew || [], notes: st.notes || "" })),
     price: j.price || 0, deposit: j.deposit || 0,
