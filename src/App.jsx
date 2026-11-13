@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B229";
+const BUILD_NO = "B230";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1486,57 +1486,41 @@ function Dashboard({ data, setView, setData }) {
   return (
     <div>
       {(() => {
-        // This month's results, by survey date or by move date (choice remembered on this device).
+        // Two simple results for this month:
+        //  • Quotes booked — of this month's surveys, how many have been booked (and the % / £).
+        //  • Moves booked  — moves with a move date this month (count and £).
         const ym = todayISO().slice(0, 7);
-        const moveDay = e => { const j = (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go"); return (j && jobMoveDate(j)) || e.preferredDate || ""; };
-        const monthList = enquiries.filter(e => String(homeBy === "move" ? moveDay(e) : (e.surveyDate || "")).slice(0, 7) === ym);
-        const n = monthList.length;
-        // Where each enquiry stands now (a booked one shows its move's status).
-        const bucket = e => {
-          const b = enqBadge(data, e);
-          if (b === "Completed") return "Confirmed";
-          if (b === "Confirmed" || b === "Provisional" || b === "No date provisional") return b;
-          if (["Quoted", "Lost", "Not quoted"].includes(e.status)) return e.status;
-          return "";
-        };
-        const groups = {};
-        monthList.forEach(e => { const k = bucket(e); if (!k) return; (groups[k] = groups[k] || []).push(e); });
-        const money = e => { const j = (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go"); return Number(j ? j.price : e.quoteTotal) || 0; };
-        const pct = k => n ? `${Math.round((k / n) * 100)}%` : "—";
-        const go = f => { try { localStorage.setItem("removals_enq_period", "month"); localStorage.setItem("removals_enq_dateby", homeBy); } catch {} setView({ screen: "enquiries", filter: f }); };
-        const Tile = ({ k, label, color, f, noMoney }) => {
-          const list = groups[k] || [], c = list.length;
-          return (
-            <div onClick={() => go(f)} style={{ minWidth: 0, background: "#fff", borderRadius: 10, padding: "8px 12px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: "2px solid #F3F4F6", cursor: "pointer" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-                <span style={{ fontSize: 19, fontWeight: 800, color, lineHeight: 1.3 }}>{c}</span>
-                <span style={{ fontSize: 12.5, color: "#6B7280", fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
-                <span style={{ fontSize: 12.5, fontWeight: 800, color: c ? color : "#C4CDCB" }}>{pct(c)}</span>
-              </div>
-              {!noMoney && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#41514E", marginTop: 1 }}>{gbp(list.reduce((t, e) => t + money(e), 0))}</div>}
-            </div>
-          );
-        };
+        const jobOf = e => (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go");
+        const surveyed = enquiries.filter(e => String(e.surveyDate || "").slice(0, 7) === ym);
+        const quotesBooked = surveyed.filter(e => !!jobOf(e) || e.status === "Won");
+        const qMoney = quotesBooked.reduce((t, e) => { const j = jobOf(e); return t + (Number(j ? j.price : e.quoteTotal) || 0); }, 0);
+        const qPct = surveyed.length ? Math.round((quotesBooked.length / surveyed.length) * 100) : 0;
+        const movesMonth = jobs.filter(j => j.status !== "Let Go" && String(jobMoveDate(j) || "").slice(0, 7) === ym);
+        const mMoney = movesMonth.reduce((t, j) => t + (Number(j.price) || 0), 0);
         const monthName = new Date().toLocaleDateString("en-GB", { month: "long" });
+        const tile = { flex: 1, minWidth: 0, background: "#fff", borderRadius: 12, padding: "10px 14px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: "2px solid #F3F4F6", cursor: "pointer" };
+        const big = { fontSize: 24, fontWeight: 800, lineHeight: 1.2 };
+        const lab = { fontSize: 12.5, color: "#6B7280", fontWeight: 700 };
         return (
-          <>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "0 2px 6px" }}>
-              <div onClick={() => go("All")} style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".06em", cursor: "pointer" }}>{monthName} · {n}</div>
-              <div style={{ display: "flex", background: "#E4ECEA", borderRadius: 9, padding: 3, gap: 3 }}>
-                {[["survey", "Survey date"], ["move", "Move date"]].map(([v, l]) => (
-                  <button key={v} type="button" data-ro-ok onClick={() => setHomeBy(v)} style={{ border: "none", borderRadius: 7, padding: "6px 10px", fontFamily: "inherit", fontSize: 12.5, fontWeight: homeBy === v ? 800 : 600, cursor: "pointer", background: homeBy === v ? "#fff" : "transparent", color: homeBy === v ? TEAL : "#6A7B77", boxShadow: homeBy === v ? "0 1px 3px rgba(16,33,30,.15)" : "none" }}>{l}</button>
-                ))}
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            <div style={tile} onClick={() => { try { localStorage.setItem("removals_enq_period", "month"); localStorage.setItem("removals_enq_dateby", "survey"); } catch {} setView({ screen: "enquiries", filter: "Won" }); }}>
+              <div style={lab}>Quotes booked · {monthName}</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ ...big, color: "#059669" }}>{quotesBooked.length}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "#059669" }}>{qPct}%</span>
+                <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>of {surveyed.length} surveyed</span>
               </div>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{gbp(qMoney)}</div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-              <Tile k="Quoted" label="Quoted" color={AMBER} f="Quoted" />
-              <Tile k="Confirmed" label="Confirmed" color="#2563EB" f="Won" />
-              <Tile k="Provisional" label="Provisional" color="#B45309" f="Won" />
-              <Tile k="No date provisional" label="No date prov." color="#C2410C" f="No date provisional" />
-              <Tile k="Lost" label="Lost" color="#DC2626" f="Lost" />
-              <Tile k="Not quoted" label="Didn't quote" color="#4B5563" f="Not quoted" noMoney />
+            <div style={tile} onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })}>
+              <div style={lab}>Moves booked · {monthName}</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ ...big, color: "#2563EB" }}>{movesMonth.length}</span>
+                <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>moving this month</span>
+              </div>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{gbp(mMoney)}</div>
             </div>
-          </>
+          </div>
         );
       })()}
 
