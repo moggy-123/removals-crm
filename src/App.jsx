@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B236";
+const BUILD_NO = "B237";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1822,8 +1822,8 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const [dateBy, setDateByRaw] = useState(() => { try { return localStorage.getItem("removals_enq_dateby") === "move" ? "move" : "survey"; } catch { return "survey"; } });
   const setDateBy = v => { setDateByRaw(v); try { localStorage.setItem("removals_enq_dateby", v); } catch {} };
   // Survey date hides New/Surveyed; move date also hides Survey booked/Not quoted — a hidden pick falls back to all.
-  const hideTiles = dateBy === "survey" ? ["New", "Surveyed"] : ["New", "Surveyed", "Survey booked", "Not quoted"];
-  const filter = hideTiles.includes(filterRaw) ? "All" : filterRaw;
+  const hideTiles = dateBy === "survey" ? ["New", "Surveyed"] : ["New", "Surveyed", "Survey booked", "Quoted", "No date provisional", "Lost", "Not quoted", "Let Go", "All"];
+  const filter = hideTiles.includes(filterRaw) ? (dateBy === "move" ? "Won" : "All") : filterRaw;
   const moveDay = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || e.preferredDate || ""; };
   const cameIn = e => String(dateBy === "move" ? moveDay(e) : dateBy === "enquiry" ? (e.createdAt || e.enquiryDate || "") : (e.surveyDate || "")).slice(0, 10);
   const inPeriod = e => { const d = cameIn(e); if (!d) return !sinceISO && !untilISO; return (!sinceISO || d >= sinceISO) && (!untilISO || d <= untilISO); };
@@ -1883,7 +1883,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
             }}>
               <div style={{ fontSize: 17, fontWeight: 800, color: accent, lineHeight: 1.4 }}>{n}</div>
               <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600, lineHeight: 1.25, minWidth: 0, flex: 1 }}>{label}</div>
-              {f !== "All" && periodList.length > 0 && <div style={{ fontSize: 11.5, fontWeight: 800, color: n ? accent : "#C4CDCB", lineHeight: 1.4, flexShrink: 0 }}>{Math.round((n / periodList.length) * 100)}%</div>}
+              {f !== "All" && dateBy !== "move" && periodList.length > 0 && <div style={{ fontSize: 11.5, fontWeight: 800, color: n ? accent : "#C4CDCB", lineHeight: 1.4, flexShrink: 0 }}>{Math.round((n / periodList.length) * 100)}%</div>}
             </button>
           );
         })}
