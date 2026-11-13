@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B235";
+const BUILD_NO = "B236";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1806,8 +1806,16 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const [custom, setCustomRaw] = useState(() => { try { return JSON.parse(localStorage.getItem("removals_enq_custom") || "null") || { from: "", to: "" }; } catch { return { from: "", to: "" }; } });
   const setCustom = v => { setCustomRaw(v); try { localStorage.setItem("removals_enq_custom", JSON.stringify(v)); } catch {} };
   const thisMonth = todayISO().slice(0, 7);
-  const sinceISO = period === "all" ? "" : period === "custom" ? (custom.from || "") : period === "month" ? thisMonth + "-01" : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
-  const untilISO = period === "custom" ? (custom.to || "") : period === "month" ? thisMonth + "-31" : "";
+  // "Last month" = the whole of the previous calendar month; "Last week" = the previous Mon–Sun.
+  const _now = new Date();
+  const _iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const lastMonthFrom = _iso(new Date(_now.getFullYear(), _now.getMonth() - 1, 1));
+  const lastMonthTo = _iso(new Date(_now.getFullYear(), _now.getMonth(), 0));
+  const _mon = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate() - ((_now.getDay() + 6) % 7)); // this Monday
+  const lastWeekFrom = _iso(new Date(_mon.getFullYear(), _mon.getMonth(), _mon.getDate() - 7));
+  const lastWeekTo = _iso(new Date(_mon.getFullYear(), _mon.getMonth(), _mon.getDate() - 1));
+  const sinceISO = period === "all" ? "" : period === "custom" ? (custom.from || "") : period === "month" ? thisMonth + "-01" : period === "31" ? lastMonthFrom : period === "7" ? lastWeekFrom : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
+  const untilISO = period === "custom" ? (custom.to || "") : period === "month" ? thisMonth + "-31" : period === "31" ? lastMonthTo : period === "7" ? lastWeekTo : "";
   // Same date as Reports uses (survey date, or when it came in if there's no survey), so the
   // numbers here and in Reports always agree.
   // Which date the period looks at: survey date (default, matches Reports), move date or enquiry date.
@@ -1846,6 +1854,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
           {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
       </div>
+      {period !== "all" && period !== "custom" && sinceISO && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#6A7B77", margin: "-4px 2px 10px" }}>{dateBy === "move" ? "Moves" : "Surveys"} {fmtDate(sinceISO)} – {untilISO ? fmtDate(untilISO.endsWith("-31") ? _iso(new Date(Number(untilISO.slice(0, 4)), Number(untilISO.slice(5, 7)), 0)) : untilISO) : "today"}</div>}
       {period === "custom" && (
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           {[["from", "From"], ["to", "To"]].map(([k, l]) => (
