@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B225";
+const BUILD_NO = "B227";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1483,14 +1483,45 @@ function Dashboard({ data, setView, setData }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-        <Stat label="Open enquiries" value={open.length} color={TEAL} onClick={() => setView({ screen: "enquiries", filter: "Open" })} />
-        <Stat label="Quoted" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
-      </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <Stat label="Active moves" value={jobs.filter(j => !["Completed","Let Go"].includes(j.status)).length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
-        <Stat label="Booked (month)" value={`${convRate}%`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
-      </div>
+      {(() => {
+        // This month only — same dates as the Enquiries screen's "This month" (survey date,
+        // or when it came in if there's no survey), so the two always agree.
+        const ym = todayISO().slice(0, 7);
+        const monthList = enquiries.filter(e => String(e.surveyDate || e.createdAt || e.enquiryDate || "").slice(0, 7) === ym);
+        const n = monthList.length;
+        const cnt = st => monthList.filter(e => e.status === st).length;
+        const pct = k => n ? `${Math.round((k / n) * 100)}%` : "—";
+        const go = f => { try { localStorage.setItem("removals_enq_period", "month"); localStorage.setItem("removals_enq_dateby", "survey"); } catch {} setView({ screen: "enquiries", filter: f }); };
+        const q = cnt("Quoted"), b = cnt("Won"), l = cnt("Lost"), nq = cnt("Not quoted");
+        const val = st => monthList.filter(e => e.status === st).reduce((t, e) => {
+          const j = st === "Won" && (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go");
+          return t + (Number(j ? j.price : e.quoteTotal) || 0);
+        }, 0);
+        const Tile = ({ label, k, money, color, f }) => (
+          <div onClick={() => go(f)} style={{ flex: 1, minWidth: 0, background: "#fff", borderRadius: 10, padding: "8px 12px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: "2px solid #F3F4F6", cursor: "pointer" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+              <span style={{ fontSize: 19, fontWeight: 800, color, lineHeight: 1.3 }}>{k}</span>
+              <span style={{ fontSize: 12.5, color: "#6B7280", fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: k ? color : "#C4CDCB" }}>{pct(k)}</span>
+            </div>
+            {money !== null && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#41514E", marginTop: 1 }}>{gbp(money)}</div>}
+          </div>
+        );
+        const monthName = new Date().toLocaleDateString("en-GB", { month: "long" });
+        return (
+          <>
+            <div onClick={() => go("All")} style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".06em", margin: "0 2px 6px", cursor: "pointer" }}>{monthName} · {n} enquir{n === 1 ? "y" : "ies"}</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <Tile label="Quoted" k={q} money={val("Quoted")} color={AMBER} f="Quoted" />
+              <Tile label="Booked" k={b} money={val("Won")} color="#059669" f="Won" />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              <Tile label="Lost" k={l} money={val("Lost")} color="#DC2626" f="Lost" />
+              <Tile label="Not quoted" k={nq} money={null} color="#4B5563" f="Not quoted" />
+            </div>
+          </>
+        );
+      })()}
 
       <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 18px", borderRadius: 10, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
         <Icon name="plus" size={15} /> New Enquiry
