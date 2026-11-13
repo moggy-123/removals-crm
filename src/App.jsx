@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B234";
+const BUILD_NO = "B235";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1811,10 +1811,10 @@ function EnquiriesList({ data, setView, initialFilter }) {
   // Same date as Reports uses (survey date, or when it came in if there's no survey), so the
   // numbers here and in Reports always agree.
   // Which date the period looks at: survey date (default, matches Reports), move date or enquiry date.
-  const [dateBy, setDateByRaw] = useState(() => { try { return localStorage.getItem("removals_enq_dateby") || "survey"; } catch { return "survey"; } });
+  const [dateBy, setDateByRaw] = useState(() => { try { return localStorage.getItem("removals_enq_dateby") === "move" ? "move" : "survey"; } catch { return "survey"; } });
   const setDateBy = v => { setDateByRaw(v); try { localStorage.setItem("removals_enq_dateby", v); } catch {} };
-  // Looking by survey date, "New" and "Surveyed" aren't shown — fall back to all enquiries.
-  const hideTiles = dateBy === "survey" ? ["New", "Surveyed"] : [];
+  // Survey date hides New/Surveyed; move date also hides Survey booked/Not quoted — a hidden pick falls back to all.
+  const hideTiles = dateBy === "survey" ? ["New", "Surveyed"] : ["New", "Surveyed", "Survey booked", "Not quoted"];
   const filter = hideTiles.includes(filterRaw) ? "All" : filterRaw;
   const moveDay = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || e.preferredDate || ""; };
   const cameIn = e => String(dateBy === "move" ? moveDay(e) : dateBy === "enquiry" ? (e.createdAt || e.enquiryDate || "") : (e.surveyDate || "")).slice(0, 10);
@@ -1841,7 +1841,6 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <select value={dateBy} onChange={e => setDateBy(e.target.value)} aria-label="Which date" style={{ padding: "10px 8px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#F3F7F6", fontSize: 14, fontWeight: 700, color: "#10211E", flexShrink: 0 }}>
           <option value="survey">Survey date</option>
           <option value="move">Move date</option>
-          <option value="enquiry">Enquiry date</option>
         </select>
         <select value={period} onChange={e => setPeriod(e.target.value)} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, fontWeight: 700, color: "#10211E" }}>
           {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
