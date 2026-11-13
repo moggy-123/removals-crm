@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B237";
+const BUILD_NO = "B239";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1271,6 +1271,11 @@ function altReps(data, list) {
   (list || []).forEach(x => { const k = altRoot(x); if (!best[k] || score(x) < score(best[k]) || (score(x) === score(best[k]) && !x.altOf)) best[k] = x; });
   return (list || []).filter(x => best[altRoot(x)] === x);
 }
+// Net (ex VAT) value of a move/quote. Quotes with "Add VAT" ticked include 20% VAT in the price.
+function netValue(e, j) {
+  const gross = Number(j && j.price ? j.price : (e && e.quoteTotal)) || 0;
+  return e && e.quoteVat ? gross / 1.2 : gross;
+}
 function enqBadge(data, e) {
   if (!e) return "";
   if (e.altClosed && e.status === "Not quoted") return "Alt. not chosen";
@@ -1495,7 +1500,7 @@ function Dashboard({ data, setView, setData }) {
         const quotesDone = enquiries.filter(e => String(e.surveyDate || "").slice(0, 7) === ym);
         const seen = quotesDone.filter(e => e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won", "Lost"].includes(e.status)).length;
         const movesMonth = jobs.filter(j => j.status !== "Let Go" && String(jobMoveDate(j) || "").slice(0, 7) === ym);
-        const mMoney = movesMonth.reduce((t, j) => t + (Number(j.price) || 0), 0);
+        const mMoney = Math.round(movesMonth.reduce((t, j) => t + netValue((data.enquiries || []).find(e => e.id === j.enquiryId), j), 0) * 100) / 100;
         const monthName = new Date().toLocaleDateString("en-GB", { month: "long" });
         const tile = { flex: 1, minWidth: 0, background: "#fff", borderRadius: 12, padding: "10px 14px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: "2px solid #F3F4F6", cursor: "pointer" };
         const big = { fontSize: 24, fontWeight: 800, lineHeight: 1.2 };
@@ -1516,7 +1521,7 @@ function Dashboard({ data, setView, setData }) {
                 <span style={{ ...big, color: "#2563EB" }}>{movesMonth.length}</span>
                 <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>moving this month</span>
               </div>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{gbp(mMoney)}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{gbp(mMoney)} <span style={{ fontWeight: 600, color: "#9CA3AF", fontSize: 12 }}>net</span></div>
             </div>
           </div>
         );
@@ -1831,6 +1836,9 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const baseList = periodList.filter(e => !moveCompleted(e));
   // Booked but no date yet gets its own tile ("No date provisional").
   const grp = e => { const j = moveOf(e); return j && j.status !== "Let Go" && jobBadge(j) === "No date provisional" ? "No date provisional" : enqGroup(e); };
+  // Net £ value (ex VAT) of the moves in a tile: move price, or the quote if no price is set.
+  const tileList = f => f === "Completed" ? periodList.filter(moveCompleted) : baseList.filter(e => grp(e) === f);
+  const valueFor = f => Math.round(tileList(f).reduce((t, e) => t + netValue(e, moveOf(e)), 0) * 100) / 100;
   const countFor = f => f === "All" ? periodList.length : f === "Completed" ? periodList.filter(moveCompleted).length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => grp(e) === f).length;
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
   const shown = (filter === "All" || filter === "Completed" ? periodList : baseList)
@@ -1877,13 +1885,14 @@ function EnquiriesList({ data, setView, initialFilter }) {
             <button key={f} onClick={() => setFilter(f)} style={{
               gridColumn: f === "All" ? "1 / -1" : "auto",
               textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
-              background: active ? meta.bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", alignItems: "baseline", gap: 7,
+              background: active ? meta.bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 7, rowGap: 0,
               border: active ? `2px solid ${accent}` : "2px solid #F3F4F6",
               boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
             }}>
               <div style={{ fontSize: 17, fontWeight: 800, color: accent, lineHeight: 1.4 }}>{n}</div>
               <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600, lineHeight: 1.25, minWidth: 0, flex: 1 }}>{label}</div>
               {f !== "All" && dateBy !== "move" && periodList.length > 0 && <div style={{ fontSize: 11.5, fontWeight: 800, color: n ? accent : "#C4CDCB", lineHeight: 1.4, flexShrink: 0 }}>{Math.round((n / periodList.length) * 100)}%</div>}
+              {(f === "Won" || f === "Completed") && <div style={{ width: "100%", fontSize: 13, fontWeight: 700, color: "#41514E", lineHeight: 1.3 }}>{gbp(valueFor(f))} <span style={{ fontWeight: 600, color: "#9CA3AF", fontSize: 11.5 }}>net</span></div>}
             </button>
           );
         })}
