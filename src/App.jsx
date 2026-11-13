@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B227";
+const BUILD_NO = "B228";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1487,7 +1487,7 @@ function Dashboard({ data, setView, setData }) {
         // This month only — same dates as the Enquiries screen's "This month" (survey date,
         // or when it came in if there's no survey), so the two always agree.
         const ym = todayISO().slice(0, 7);
-        const monthList = enquiries.filter(e => String(e.surveyDate || e.createdAt || e.enquiryDate || "").slice(0, 7) === ym);
+        const monthList = enquiries.filter(e => String(e.surveyDate || "").slice(0, 7) === ym); // by survey date only
         const n = monthList.length;
         const cnt = st => monthList.filter(e => e.status === st).length;
         const pct = k => n ? `${Math.round((k / n) * 100)}%` : "—";
@@ -1510,7 +1510,7 @@ function Dashboard({ data, setView, setData }) {
         const monthName = new Date().toLocaleDateString("en-GB", { month: "long" });
         return (
           <>
-            <div onClick={() => go("All")} style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".06em", margin: "0 2px 6px", cursor: "pointer" }}>{monthName} · {n} enquir{n === 1 ? "y" : "ies"}</div>
+            <div onClick={() => go("All")} style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".06em", margin: "0 2px 6px", cursor: "pointer" }}>{monthName} surveys · {n}</div>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <Tile label="Quoted" k={q} money={val("Quoted")} color={AMBER} f="Quoted" />
               <Tile label="Booked" k={b} money={val("Won")} color="#059669" f="Won" />
@@ -1815,7 +1815,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const [dateBy, setDateByRaw] = useState(() => { try { return localStorage.getItem("removals_enq_dateby") || "survey"; } catch { return "survey"; } });
   const setDateBy = v => { setDateByRaw(v); try { localStorage.setItem("removals_enq_dateby", v); } catch {} };
   const moveDay = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || e.preferredDate || ""; };
-  const cameIn = e => String(dateBy === "move" ? moveDay(e) : dateBy === "enquiry" ? (e.createdAt || e.enquiryDate || "") : (e.surveyDate || e.createdAt || e.enquiryDate || "")).slice(0, 10);
+  const cameIn = e => String(dateBy === "move" ? moveDay(e) : dateBy === "enquiry" ? (e.createdAt || e.enquiryDate || "") : (e.surveyDate || "")).slice(0, 10);
   const inPeriod = e => { const d = cameIn(e); if (!d) return !sinceISO && !untilISO; return (!sinceISO || d >= sinceISO) && (!untilISO || d <= untilISO); };
   const periodList = enquiries.filter(inPeriod);
   const baseList = periodList.filter(e => !moveCompleted(e));
