@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B223";
+const BUILD_NO = "B224";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4370,8 +4370,9 @@ function BookedNoMove({ data, e, linkedJob, onCreate }) {
   if (isReadOnly() || e.status !== "Won" || linkedJob) return null;
   const backTo = Number(e.quoteTotal) > 0 ? "Quoted" : (e.surveyDone || e.volumeCuFt ? "Surveyed" : "New");
   return (
-    <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "10px 12px", marginBottom: 12 }}>
-      <div style={{ fontSize: 13.5, fontWeight: 700, color: "#92400E" }}>Booked, but there's no move set up for it yet — so it can't be changed to Provisional or Confirmed. Set the move up:</div>
+    <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 14, padding: "12px 14px", marginBottom: 12 }}>
+      <div style={{ fontWeight: 800, color: "#10211E", fontSize: 15 }}>Manage booking</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#92400E", marginTop: 2 }}>Booked, but no move has been set up yet. Choose how to book it:</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
         <Btn size="sm" style={{ whiteSpace: "nowrap" }} onClick={() => onCreate("Provisional")}>Provisional move</Btn>
         <Btn size="sm" style={{ whiteSpace: "nowrap" }} onClick={() => onCreate("Confirmed")}>Confirmed move</Btn>
@@ -4726,7 +4727,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
         <StatusBadge status={enqBadge(data, e)} />
       </div>
       <AltOptions data={data} e={e} setView={setView} />
-      <BookedNoMove data={data} e={e} linkedJob={linkedJob} onCreate={markWon} />
       {e.status === "Not quoted" && !e.altClosed && (
         <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 12, padding: "10px 12px", marginBottom: 12, fontSize: 13.5, color: "#374151" }}>
           <b>🚫 We didn't quote</b>{e.lostReason ? `: ${e.lostReason}` : " — no reason given"}
@@ -4828,6 +4828,8 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
           </div>) : null; })()}
       </Card>}
 
+      {/* Booked but no move behind it: set the move up here (where Manage move normally sits) */}
+      <BookedNoMove data={data} e={e} linkedJob={linkedJob} onCreate={markWon} />
       {/* Manage move — below the quote once a provisional move exists */}
       {linkedJob && (
         <Card>
