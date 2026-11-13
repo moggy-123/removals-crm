@@ -935,7 +935,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B241";
+const BUILD_NO = "B242";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2306,7 +2306,7 @@ function parseEnquiryEmail(text) {
   return out;
 }
 
-function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) {
+function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, header, title, returnView }) {
   const e = editEnquiry || {};
   const [customerId, setCustomerId] = useState(e.customerId || initialCustomerId || "");
   useEffect(() => { if (!e.id && initialCustomerId) selectCustomer(initialCustomerId); /* eslint-disable-next-line */ }, []);
@@ -2429,12 +2429,13 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
       createdAt: e.createdAt || new Date().toISOString(),
     };
     data2 = upsertLocal(data2, "enquiries", rec);
-    try { sessionStorage.setItem("removals_view", JSON.stringify(e.id ? { screen: "enquiryDetail", id: e.id } : { screen: "dashboard" })); } catch {}
+    try { sessionStorage.setItem("removals_view", JSON.stringify(returnView || (e.id ? { screen: "enquiryDetail", id: e.id } : { screen: "dashboard" }))); } catch {}
     await saveAndReload(data2);
   }
 
   return (
-    <Modal title={reopen ? "Rebook survey" : e.id ? "Edit Enquiry" : "New Enquiry"} onClose={onClose}>
+    <Modal title={title || (reopen ? "Rebook survey" : e.id ? "Edit Enquiry" : "New Enquiry")} onClose={onClose}>
+      {header}
       {!e.id && (
         <Field label="Customer" required>
           {!pasteOpen
@@ -5156,6 +5157,26 @@ function OtherContacts({ customer, onLog }) {
   );
 }
 
+// Edit Customer from the customer screen: shows everything — the customer's details AND their
+// enquiry's move details (same as Edit Enquiry). With several enquiries, pick which one.
+// A customer with no enquiries just gets the plain customer form.
+function CustomerEditFull({ data, customer, onClose }) {
+  const list = (data.enquiries || []).filter(e => e.customerId === customer.id)
+    .sort((a, b) => String(b.createdAt || b.enquiryDate || "").localeCompare(String(a.createdAt || a.enquiryDate || "")));
+  const open = list.find(e => !["Lost", "Not quoted", "Let Go"].includes(e.status));
+  const [selId, setSelId] = useState((open || list[0] || {}).id || "");
+  const sel = list.find(e => e.id === selId);
+  if (!sel) return <CustomerForm data={data} editCustomer={customer} onClose={onClose} />;
+  const label = e => [e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "Date TBC"), [e.fromTown, e.toTown].filter(Boolean).join(" → "), enqBadge(data, e)].filter(Boolean).join(" · ");
+  const header = list.length > 1 ? (
+    <Field label="Which enquiry">
+      <select value={selId} onChange={ev => setSelId(ev.target.value)} style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, fontFamily: "inherit", color: "#10211E" }}>
+        {list.map(e => <option key={e.id} value={e.id}>{label(e)}</option>)}
+      </select>
+    </Field>
+  ) : null;
+  return <EnquiryForm key={sel.id} data={data} editEnquiry={sel} onClose={onClose} header={header} title="Edit Customer" returnView={{ screen: "customerDetail", id: customer.id }} />;
+}
 function CustomerForm({ data, onClose, editCustomer }) {
   const c = editCustomer || {};
   const ta0 = tidyAddress(c.address1, c.address2, c.town, c.postcode); // splits an address typed all on one line
@@ -5468,7 +5489,7 @@ function CustomerDetail({ data, id, setView }) {
           ))}
         </>
       )}
-      {showEdit && <CustomerForm data={data} editCustomer={c} onClose={() => setShowEdit(false)} />}
+      {showEdit && <CustomerEditFull data={data} customer={c} onClose={() => setShowEdit(false)} />}
       {jobForm && <StorageJobForm data={data} customer={c} job={jobForm === "new" ? null : jobForm} onClose={() => setJobForm(null)} />}
       {resched && <RescheduleSurveyModal data={data} enquiry={resched} onClose={() => setResched(null)} />}
       {commForm && <CommLogForm data={data} customer={c} entry={commForm.entry} preset={commForm.preset} onClose={() => setCommForm(null)} />}
