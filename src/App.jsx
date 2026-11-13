@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B230";
+const BUILD_NO = "B231";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1491,10 +1491,9 @@ function Dashboard({ data, setView, setData }) {
         //  • Moves booked  — moves with a move date this month (count and £).
         const ym = todayISO().slice(0, 7);
         const jobOf = e => (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go");
-        const surveyed = enquiries.filter(e => String(e.surveyDate || "").slice(0, 7) === ym);
-        const quotesBooked = surveyed.filter(e => !!jobOf(e) || e.status === "Won");
-        const qMoney = quotesBooked.reduce((t, e) => { const j = jobOf(e); return t + (Number(j ? j.price : e.quoteTotal) || 0); }, 0);
-        const qPct = surveyed.length ? Math.round((quotesBooked.length / surveyed.length) * 100) : 0;
+        // Quotes done this month: priced quotes sent this month (or surveyed this month if no sent date).
+        const quotesDone = enquiries.filter(e => Number(e.quoteTotal) > 0 && String(e.quoteSentDate || e.surveyDate || "").slice(0, 7) === ym);
+        const qMoney = quotesDone.reduce((t, e) => t + (Number(e.quoteTotal) || 0), 0);
         const movesMonth = jobs.filter(j => j.status !== "Let Go" && String(jobMoveDate(j) || "").slice(0, 7) === ym);
         const mMoney = movesMonth.reduce((t, j) => t + (Number(j.price) || 0), 0);
         const monthName = new Date().toLocaleDateString("en-GB", { month: "long" });
@@ -1503,17 +1502,16 @@ function Dashboard({ data, setView, setData }) {
         const lab = { fontSize: 12.5, color: "#6B7280", fontWeight: 700 };
         return (
           <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-            <div style={tile} onClick={() => { try { localStorage.setItem("removals_enq_period", "month"); localStorage.setItem("removals_enq_dateby", "survey"); } catch {} setView({ screen: "enquiries", filter: "Won" }); }}>
-              <div style={lab}>Quotes booked · {monthName}</div>
+            <div style={tile} onClick={() => { try { localStorage.setItem("removals_enq_period", "month"); localStorage.setItem("removals_enq_dateby", "survey"); } catch {} setView({ screen: "enquiries", filter: "All" }); }}>
+              <div style={lab}>Quotes done · {monthName}</div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ ...big, color: "#059669" }}>{quotesBooked.length}</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: "#059669" }}>{qPct}%</span>
-                <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>of {surveyed.length} surveyed</span>
+                <span style={{ ...big, color: AMBER }}>{quotesDone.length}</span>
+                <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>quotes this month</span>
               </div>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{gbp(qMoney)}</div>
             </div>
             <div style={tile} onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })}>
-              <div style={lab}>Moves booked · {monthName}</div>
+              <div style={lab}>Moving · {monthName}</div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                 <span style={{ ...big, color: "#2563EB" }}>{movesMonth.length}</span>
                 <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>moving this month</span>
