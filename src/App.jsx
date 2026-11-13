@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B233";
+const BUILD_NO = "B234";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1793,7 +1793,7 @@ function SectionTitle({ children }) {
 
 // ── Enquiries list ──────────────────────────────────────────────────────────
 function EnquiriesList({ data, setView, initialFilter }) {
-  const [filter, setFilter] = useState(initialFilter || "Surveyed");
+  const [filterRaw, setFilter] = useState(initialFilter || "Surveyed");
   const enquiries = altReps(data, data.enquiries || []); // alternative quotes count once
   const filters = ["All", ...ENQUIRY_STATUSES];
   const moveCompleted = e => (data.jobs || []).some(j => j.enquiryId === e.id && j.status === "Completed");
@@ -1813,6 +1813,9 @@ function EnquiriesList({ data, setView, initialFilter }) {
   // Which date the period looks at: survey date (default, matches Reports), move date or enquiry date.
   const [dateBy, setDateByRaw] = useState(() => { try { return localStorage.getItem("removals_enq_dateby") || "survey"; } catch { return "survey"; } });
   const setDateBy = v => { setDateByRaw(v); try { localStorage.setItem("removals_enq_dateby", v); } catch {} };
+  // Looking by survey date, "New" and "Surveyed" aren't shown — fall back to all enquiries.
+  const hideTiles = dateBy === "survey" ? ["New", "Surveyed"] : [];
+  const filter = hideTiles.includes(filterRaw) ? "All" : filterRaw;
   const moveDay = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || e.preferredDate || ""; };
   const cameIn = e => String(dateBy === "move" ? moveDay(e) : dateBy === "enquiry" ? (e.createdAt || e.enquiryDate || "") : (e.surveyDate || "")).slice(0, 10);
   const inPeriod = e => { const d = cameIn(e); if (!d) return !sinceISO && !untilISO; return (!sinceISO || d >= sinceISO) && (!untilISO || d <= untilISO); };
@@ -1856,7 +1859,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
       )}
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New").flatMap(x => x === "Won" ? ["Won", "No date provisional", "Completed"] : [x]), "All"].map(f => {
+        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New").flatMap(x => x === "Won" ? ["Won", "No date provisional", "Completed"] : [x]), "All"].filter(f => !hideTiles.includes(f)).map(f => {
           const active = filter === f;
           const label = f === "Won" ? "Moves Booked" : f === "Completed" ? "Moves completed" : f === "All" ? "All enquiries" : f;
           const n = countFor(f);
