@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B224";
+const BUILD_NO = "B225";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1780,7 +1780,11 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const untilISO = period === "custom" ? (custom.to || "") : period === "month" ? thisMonth + "-31" : "";
   // Same date as Reports uses (survey date, or when it came in if there's no survey), so the
   // numbers here and in Reports always agree.
-  const cameIn = e => String(e.surveyDate || e.createdAt || e.enquiryDate || "").slice(0, 10);
+  // Which date the period looks at: survey date (default, matches Reports), move date or enquiry date.
+  const [dateBy, setDateByRaw] = useState(() => { try { return localStorage.getItem("removals_enq_dateby") || "survey"; } catch { return "survey"; } });
+  const setDateBy = v => { setDateByRaw(v); try { localStorage.setItem("removals_enq_dateby", v); } catch {} };
+  const moveDay = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || e.preferredDate || ""; };
+  const cameIn = e => String(dateBy === "move" ? moveDay(e) : dateBy === "enquiry" ? (e.createdAt || e.enquiryDate || "") : (e.surveyDate || e.createdAt || e.enquiryDate || "")).slice(0, 10);
   const inPeriod = e => { const d = cameIn(e); if (!d) return !sinceISO && !untilISO; return (!sinceISO || d >= sinceISO) && (!untilISO || d <= untilISO); };
   const periodList = enquiries.filter(inPeriod);
   const baseList = periodList.filter(e => !moveCompleted(e));
@@ -1801,7 +1805,11 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: "#6A7B77" }}>Survey date</span>
+        <select value={dateBy} onChange={e => setDateBy(e.target.value)} aria-label="Which date" style={{ padding: "10px 8px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#F3F7F6", fontSize: 14, fontWeight: 700, color: "#10211E", flexShrink: 0 }}>
+          <option value="survey">Survey date</option>
+          <option value="move">Move date</option>
+          <option value="enquiry">Enquiry date</option>
+        </select>
         <select value={period} onChange={e => setPeriod(e.target.value)} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, fontWeight: 700, color: "#10211E" }}>
           {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
@@ -1849,7 +1857,16 @@ function EnquiriesList({ data, setView, initialFilter }) {
               <ReasonLine e={e} />
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
-                {(() => { const j = moveOf(e); const md = j && jobMoveDate(j); return md ? "Move " + fmtDate(md) : (e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"); })()}
+                {(() => {
+                  // Show the date being filtered on first, so the list matches the dates picked.
+                  const j = moveOf(e); const md = j && jobMoveDate(j);
+                  const mv = md ? "Move " + fmtDate(md) : (e.preferredDate ? "Move " + fmtDate(e.preferredDate) : "Move date TBC");
+                  const sv = e.surveyDate ? "Survey " + fmtDate(e.surveyDate) : "";
+                  const en = e.createdAt ? "Enquiry " + fmtDate(String(e.createdAt).slice(0, 10)) : "";
+                  const order = dateBy === "move" ? [mv, sv] : dateBy === "enquiry" ? [en, sv, mv] : [sv, mv];
+                  const [first, ...rest] = order.filter(Boolean);
+                  return <>{first ? <b style={{ color: "#41514E" }}>{first}</b> : null}{rest.length ? " · " + rest.join(" · ") : ""}</>;
+                })()}
                 {e.volumeCuFt ? ` · ${e.volumeCuFt} cu ft` : ""}
                 {e.quoteTotal ? ` · ${gbp(e.quoteTotal)}` : ""}
               </div>
