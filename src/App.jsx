@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B239";
+const BUILD_NO = "B240";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2334,6 +2334,11 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [pickerKey, setPickerKey] = useState(0);
+  // Editing an enquiry also edits the customer's own details (same fields as Edit Customer).
+  const cust0 = e.id ? ((data.customers || []).find(c => c.id === e.customerId) || null) : null;
+  const [cf, setCf] = useState(() => cust0 ? { name: cust0.name || "", custType: cust0.custType || "Private", company: cust0.company || "", phone: cust0.phone || "", homePhone: cust0.homePhone || "", email: cust0.email || "", address1: cust0.address1 || "", address2: cust0.address2 || "", town: cust0.town || "", postcode: cust0.postcode || "", notes: cust0.notes || "" } : null);
+  const [cContacts, setCContacts] = useState(() => (cust0 && cust0.contacts) || []);
+  const setC = (k, v) => setCf(p => ({ ...p, [k]: v }));
   const autofill = () => {
     const p = parseEnquiryEmail(pasteText);
     // Already a customer? (same email or mobile, or the only customer with that name) → use them, don't duplicate.
@@ -2397,6 +2402,12 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
     let cid = customerId;
     if (f.exchanged && !f.preferredDate) { alert("This move is marked as exchanged — please set the confirmed move date."); return; }
     if (!e.id && !f.referredBy) { alert("Please choose where they heard of us (Referred by)."); return; }
+    if (cust0 && cf) {
+      if (!cf.name.trim()) { alert("The customer's name can't be blank."); return; }
+      const keep = cContacts.filter(contactFilled);
+      const crec = { ...cust0, ...cf, name: cf.name.trim(), contacts: keep, contactsCleared: !keep.length && ((cust0.contacts || []).length > 0 || !!cust0.contactsCleared) ? true : undefined };
+      if (JSON.stringify(crec) !== JSON.stringify(cust0)) data2 = upsertLocal(data2, "customers", crec);
+    }
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
       cid = uid();
@@ -2461,6 +2472,25 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
               }}>Fill in</Btn>
             </div>
           </div>)}
+      {cust0 && cf && <>
+        <SectionTitle>Customer</SectionTitle>
+        <Field label="Full name" required><Input value={cf.name} onChange={v => setC("name", v)} /></Field>
+        <Field label="Type"><Select value={cf.custType} onChange={v => setC("custType", v)} options={["Private", "Commercial"]} /></Field>
+        {cf.custType === "Commercial" && <Field label="Company"><Input value={cf.company} onChange={v => setC("company", v)} /></Field>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}><Field label="Mobile phone"><Input value={cf.phone} onChange={v => setC("phone", v)} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Home phone"><Input value={cf.homePhone} onChange={v => setC("homePhone", v)} /></Field></div>
+        </div>
+        <Field label="Email"><Input type="email" value={cf.email} onChange={v => setC("email", v)} /></Field>
+        <ContactsEditor contacts={cContacts} onChange={setCContacts} />
+        <Field label="Customer address" hint="Their home/billing address"><Input value={cf.address1} onChange={v => setC("address1", v)} /></Field>
+        <Field label="Address line 2"><Input value={cf.address2} onChange={v => setC("address2", v)} placeholder="(optional)" /></Field>
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}><Field label="Town"><Input value={cf.town} onChange={v => setC("town", v)} /></Field></div>
+          <div style={{ width: 120 }}><Field label="Postcode"><Input value={cf.postcode} onChange={v => setC("postcode", v)} /></Field></div>
+        </div>
+        <Field label="Customer notes"><Textarea value={cf.notes} onChange={v => setC("notes", v)} /></Field>
+      </>}
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date">
         <Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} />
