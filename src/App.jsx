@@ -936,7 +936,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B222";
+const BUILD_NO = "B223";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4364,6 +4364,22 @@ function FmSeg({ items, value, onChange, big }) {
     </div>
   );
 }
+function BookedNoMove({ data, e, linkedJob, onCreate }) {
+  // A "Booked" (Won) enquiry with no move behind it — e.g. brought over from Mover, or its
+  // move was removed. Without a move there's nothing to change, so offer to set one up.
+  if (isReadOnly() || e.status !== "Won" || linkedJob) return null;
+  const backTo = Number(e.quoteTotal) > 0 ? "Quoted" : (e.surveyDone || e.volumeCuFt ? "Surveyed" : "New");
+  return (
+    <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "10px 12px", marginBottom: 12 }}>
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: "#92400E" }}>Booked, but there's no move set up for it yet — so it can't be changed to Provisional or Confirmed. Set the move up:</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
+        <Btn size="sm" style={{ whiteSpace: "nowrap" }} onClick={() => onCreate("Provisional")}>Provisional move</Btn>
+        <Btn size="sm" style={{ whiteSpace: "nowrap" }} onClick={() => onCreate("Confirmed")}>Confirmed move</Btn>
+        <Btn size="sm" variant="grey" style={{ whiteSpace: "nowrap" }} onClick={() => saveAndReload(upsertLocal(data, "enquiries", { ...e, status: backTo, quoteStatus: e.quoteStatus === "Accepted" ? "Sent" : e.quoteStatus }))}>Back to {backTo}</Btn>
+      </div>
+    </div>
+  );
+}
 function EnquiryFileMaker({ data, e, customer, linkedJob, setView, quoteDone, act }) {
   const c = customer || {};
   const [side, setSide] = useState("from");
@@ -4418,6 +4434,7 @@ function EnquiryFileMaker({ data, e, customer, linkedJob, setView, quoteDone, ac
         }} items={[["customer", "Customer"], ["quote", "Quotation"], ["spec", "Spec sheet"], ["all", "Show all"], ["home", "Home"]]} />
       </div>
       <AltOptions data={data} e={e} setView={setView} />
+      <div style={{ marginTop: 10 }}><BookedNoMove data={data} e={e} linkedJob={linkedJob} onCreate={act.markWon} /></div>
 
       {/* Customer (left) + addresses (right) */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.25fr)", gap: 14, marginTop: 12 }}>
@@ -4547,7 +4564,7 @@ function EnquiryFileMaker({ data, e, customer, linkedJob, setView, quoteDone, ac
             {e.quoteTotal ? <Btn size="sm" variant="grey" style={sb} onClick={() => setView({ screen: "quotePdf", id: e.id })}>Quote PDF</Btn> : null}
             {linkedJob && <Btn size="sm" variant="grey" style={sb} onClick={() => act.setShowCrew(true)}>👷 Crew view</Btn>}
             {linkedJob && <Btn size="sm" style={sb} onClick={() => act.setShowMove(true)}><Icon name="check" size={14} /> {ro ? "View move" : "Manage move"}</Btn>}
-            {!ro && !linkedJob && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn size="sm" style={sb} onClick={act.markWon}><Icon name="check" size={14} /> Create provisional move</Btn>}
+            {!ro && !linkedJob && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn size="sm" style={sb} onClick={() => act.markWon()}><Icon name="check" size={14} /> Create provisional move</Btn>}
           </div>
         </>}
 
@@ -4604,7 +4621,8 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   async function setStatus(status, extra = {}) {
     await saveAndReload(upsertLocal(data, "enquiries", { ...e, status, ...extra }));
   }
-  async function markWon() {
+  async function markWon(newStatus = "Provisional") {
+    if (typeof newStatus !== "string") newStatus = "Provisional";
     const existing = (data.jobs || []).find(j => j.enquiryId === e.id);
     if (existing) {
       // Re-booking an enquiry that already has a move: don't create a second job.
@@ -4635,7 +4653,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       moveDate: stages[0]?.date || e.preferredDate || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
-      status: "Provisional", notes: "", createdAt: new Date().toISOString(),
+      status: newStatus, notes: "", createdAt: new Date().toISOString(),
     };
     let d2 = upsertLocal(data, "jobs", job);
     d2 = upsertLocal(d2, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
@@ -4708,6 +4726,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
         <StatusBadge status={enqBadge(data, e)} />
       </div>
       <AltOptions data={data} e={e} setView={setView} />
+      <BookedNoMove data={data} e={e} linkedJob={linkedJob} onCreate={markWon} />
       {e.status === "Not quoted" && !e.altClosed && (
         <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 12, padding: "10px 12px", marginBottom: 12, fontSize: 13.5, color: "#374151" }}>
           <b>🚫 We didn't quote</b>{e.lostReason ? `: ${e.lostReason}` : " — no reason given"}
@@ -4841,7 +4860,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {!isReadOnly() && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
+        {!isReadOnly() && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn onClick={() => markWon()} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
       </div>
       {(() => {
         const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
