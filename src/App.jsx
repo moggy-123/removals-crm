@@ -503,7 +503,8 @@ function stageChanges(pv, nv, prevD, nextD) {
   a.forEach((st, k) => { if (!used.has(k) && st) out.push({ field: `Day ${k + 1}${st.type ? " " + st.type : ""} removed`, from: summary(st, prevD), to: "—" }); });
   return out;
 }
-let LOG_RESTORING = false; // set while a Restore is being saved, so the log says "Restored"
+let LOG_RESTORING = false;
+let LOG_SUSPEND = false; // imports and backup restores don't write to the activity log // set while a Restore is being saved, so the log says "Restored"
 function diffForLog(prev, next) {
   const out = [], at = new Date().toISOString(), who = logWho();
   const verb = LOG_RESTORING ? "Restored" : "Created";
@@ -793,6 +794,23 @@ async function restoreFromLog(entry, allRows) {
   LOG_RESTORING = true;
   await saveAndReload(upsertLocal(d, table, { ...next, updatedAt: Date.now() }));
 }
+async function clearActivityLog() {
+  if (!isAdmin()) { alert("Only an admin can clear the activity log."); return; }
+  if (!confirm("⚠️ Clear the ENTIRE activity log?\n\nEvery recorded change, for every customer and every device, will be permanently deleted. You won't be able to see who changed what — or use Restore on anything — from before now.\n\nThis can't be undone.")) return;
+  const typed = prompt('To confirm, type CLEAR');
+  if ((typed || "").trim().toUpperCase() !== "CLEAR") { alert("Not cleared."); return; }
+  showSavingOverlay();
+  try {
+    const { error } = await supabase.from("activity_log").delete().neq("id", "");
+    if (error) throw error;
+    const { data: left } = await supabase.from("activity_log").select("id").limit(1);
+    if (left && left.length) throw new Error("the database didn't allow deleting the log");
+    try { localStorage.setItem(LOG_QUEUE_KEY, "[]"); localStorage.removeItem(RESTORED_KEY); } catch {}
+    hideSavingOverlay();
+    alert("Activity log cleared.");
+    window.location.reload();
+  } catch (e) { hideSavingOverlay(); alert("Couldn't clear the log: " + ((e && e.message) || e) + "\n\nCheck you have signal and try again."); }
+}
 function HistoryList({ customerId, title = "History", startOpen = false }) {
   const [open, setOpen] = useState(startOpen);
   const [state, setState] = useState({ rows: null, err: "" });
@@ -830,6 +848,9 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
       {open && (
         <div style={{ marginTop: 10 }}>
           <input data-ro-ok type="search" value={search} onChange={ev => setSearch(ev.target.value)} placeholder="Search: name, ref, postcode, or what changed" style={{ width: "100%", height: 42, border: "1px solid #DDE6E4", borderRadius: 10, padding: "0 12px", fontFamily: "inherit", fontSize: 15, boxSizing: "border-box", marginBottom: 6 }} />
+          {!customerId && isAdmin() && <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+            <button type="button" onClick={clearActivityLog} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1.5px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🗑 Clear log</button>
+          </div>}
           {search.trim() && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>{busy ? "Searching…" : `${rows.length}${rows.length >= 500 ? "+" : ""} change${rows.length !== 1 ? "s" : ""} found`}</div>}
           {!state.rows && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Loading…</div>}
           {state.err === "setup" && <div style={{ fontSize: 12.5, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>The history table isn't set up in the database yet (run add-history.sql). Changes are being kept on this device until it is.</div>}
@@ -893,7 +914,7 @@ async function saveAndReload(data) {
   if (isReadOnly()) { alert("You have read-only access, so changes can't be saved. Ask Dave if you need to change something."); return; }
   showSavingOverlay();
   SAVING_IN_PROGRESS = true;
-  try { queueLog(diffForLog(loadData(), data)); } catch { /* history is best effort */ }
+  if (!LOG_SUSPEND) { try { queueLog(diffForLog(loadData(), data)); } catch { /* history is best effort */ } }
   const stamped = stampData(data);
   setDB(JSON.stringify(stamped));
   flushLog().catch(() => {});
@@ -1161,7 +1182,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B253";
+const BUILD_NO = "B254";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5869,6 +5890,7 @@ async function restoreBackup(currentData, inc) {
   } catch {}
   const counts = tables.map(t => `${merged[t].length} ${t}`).join(", ");
   try { sessionStorage.setItem("restoreMsg", `Restore complete — now holding ${counts}.`); } catch {}
+  LOG_SUSPEND = true; // an import isn't a change anyone made — keep it out of the activity log
   await saveAndReload(merged);
 }
 
