@@ -503,15 +503,17 @@ function stageChanges(pv, nv, prevD, nextD) {
   a.forEach((st, k) => { if (!used.has(k) && st) out.push({ field: `Day ${k + 1}${st.type ? " " + st.type : ""} removed`, from: summary(st, prevD), to: "—" }); });
   return out;
 }
+let LOG_RESTORING = false; // set while a Restore is being saved, so the log says "Restored"
 function diffForLog(prev, next) {
   const out = [], at = new Date().toISOString(), who = logWho();
+  const verb = LOG_RESTORING ? "Restored" : "Created";
   for (const table of TABLES) {
     const fields = LOG_FIELDS[table]; if (!fields) continue;
     const before = new Map((prev[table] || []).map(r => [r.id, r]));
     for (const r of next[table] || []) {
       const p = before.get(r.id);
       const custId = table === "customers" ? r.id : (r.customerId || null);
-      if (!p) { out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `Created ${logRecName(table, r, next)}`, changes: [] }); continue; }
+      if (!p) { out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${verb} ${logRecName(table, r, next)}`, changes: [] }); continue; }
       const changes = [];
       for (const [k, label] of Object.entries(fields)) {
         if (logSame(p[k], r[k])) continue;
@@ -531,7 +533,7 @@ function diffForLog(prev, next) {
         if (from === to) continue;
         changes.push({ field: label, from, to, key: k, raw: p[k] === undefined ? null : p[k] });
       }
-      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${logRecName(table, r, next)}: ${Array.from(new Set(changes.map(c => /^Day \d/.test(c.field) ? "Move plan" : /^Contact /.test(c.field) ? "Other contacts" : c.field))).join(", ")} changed`, changes });
+      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${LOG_RESTORING ? "Restored · " : ""}${logRecName(table, r, next)}: ${Array.from(new Set(changes.map(c => /^Day \d/.test(c.field) ? "Move plan" : /^Contact /.test(c.field) ? "Other contacts" : c.field))).join(", ")} changed`, changes });
     }
   }
   return out;
@@ -652,6 +654,35 @@ function RecentlyDeleted() {
 const RESTORED_KEY = "removals_log_restored";
 const logRestoredSet = () => { try { return new Set(JSON.parse(localStorage.getItem(RESTORED_KEY) || "[]")); } catch { return new Set(); } };
 const logMarkRestored = id => { try { const s0 = logRestoredSet(); s0.add(id); localStorage.setItem(RESTORED_KEY, JSON.stringify([...s0].slice(-500))); } catch {} };
+// What a deleted record was, so you can see what Restore would bring back.
+function logDeletedLines(table, r) {
+  if (!r) return [];
+  const ad = (a, b, c, d) => [a, b, c, d].filter(Boolean).join(", ");
+  const L = [];
+  const add = (field, v) => { if (v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length)) L.push({ field, to: String(v) }); };
+  if (table === "customers") {
+    add("Customer", [r.ref ? `#${r.ref}` : "", r.name].filter(Boolean).join(" "));
+    add("Mobile", r.phone); add("Home phone", r.homePhone); add("Email", r.email);
+    add("Address", ad(r.address1, r.address2, r.town, r.postcode));
+    add("Other contacts", (r.contacts || []).filter(c => c && (c.name || c.phone)).map(logContact).join("; "));
+  } else if (table === "enquiries") {
+    add("From", ad(r.fromAddress1, r.fromAddress2, r.fromTown, r.fromPostcode));
+    add("To", ad(r.toAddress1, r.toAddress2, r.toTown, r.toPostcode));
+    add("Status", r.status);
+    add("Survey date", r.surveyDate ? fmtUK(String(r.surveyDate).slice(0, 10)) + (r.surveyTime ? " " + r.surveyTime : "") : "");
+    add("Move date", r.preferredDate ? fmtUK(String(r.preferredDate).slice(0, 10)) : "");
+    add("Quote", Number(r.quoteTotal) ? "£" + Number(r.quoteTotal).toLocaleString("en-GB") : "");
+    add("Volume", r.volumeCuFt ? `${r.volumeCuFt} cu ft` : "");
+    add("Notes", r.notes);
+  } else if (table === "jobs") {
+    add("Status", r.status);
+    add("Days", (r.stages || []).map(st => [st.type || "Day", st.date ? fmtUK(st.date) : "no date", (st.crew || []).join(", ")].filter(Boolean).join(" · ")).join(" | "));
+    add("Price", Number(r.price) ? "£" + Number(r.price).toLocaleString("en-GB") : "");
+  } else {
+    add("Name", r.name); add("Reg", r.reg); add("Role", r.role); add("Phone", r.phone);
+  }
+  return L;
+}
 const logCanRestore = r => !r.pending && Array.isArray(r.changes) && r.changes.some(c => c && c.key && Object.prototype.hasOwnProperty.call(c, "raw"));
 async function restoreFromLog(entry, allRows) {
   if (isReadOnly()) { alert("You have read-only access, so you can't restore changes."); return; }
@@ -668,7 +699,9 @@ async function restoreFromLog(entry, allRows) {
     const linked = table === "customers" ? (allRows || []).filter(x => x !== entry && x.customer_id === rec.id && Math.abs(new Date(x.at).getTime() - t0) < 5 * 60000 && (x.changes || []).some(c => c && c.key === "__record")) : [];
     const extra = linked.length ? `\n\nThis also brings back ${linked.length} enquir${linked.length === 1 ? "y/move" : "ies/moves"} deleted with them.` : "";
     if (table !== "customers" && rec.customerId && !(d.customers || []).some(c => c.id === rec.customerId)) { alert("The customer this belonged to has been deleted. Restore the customer first (it brings this back with it)."); return; }
-    if (!confirm(`Restore ${(entry.summary || "").replace(/^Deleted /, "")}?${extra}`)) return;
+    const what = logDeletedLines(table, rec).map(c => `${c.field}: ${c.to}`).join("\n");
+    const alsoList = linked.map(x => "• " + (x.summary || "").replace(/^Deleted /, "")).join("\n");
+    if (!confirm(`Restore ${(entry.summary || "").replace(/^Deleted /, "")}?\n\n${what}${extra}${alsoList ? "\n" + alsoList : ""}`)) return;
     const recs = [[table, rec], ...linked.map(x => [x.rec_table, (x.changes.find(c => c.key === "__record") || {}).raw]).filter(([, r]) => r && r.id)];
     const ids = recs.map(([, r]) => r.id);
     showSavingOverlay();
@@ -678,6 +711,7 @@ async function restoreFromLog(entry, allRows) {
     try { const sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); ids.forEach(id => { delete sigs[id]; }); localStorage.setItem(SIG_KEY, JSON.stringify(sigs)); } catch {}
     recs.forEach(([t, r]) => { d = upsertLocal(d, t, { ...r, updatedAt: Date.now() }); });
     logMarkRestored(entry.id); linked.forEach(x => logMarkRestored(x.id));
+    LOG_RESTORING = true;
     await saveAndReload(d);
     return;
   }
@@ -706,6 +740,7 @@ async function restoreFromLog(entry, allRows) {
   // A move plan put back on a move also puts its move date back in step.
   if (table === "jobs" && done.has("stages") && Array.isArray(next.stages)) next.moveDate = (next.stages[0] && next.stages[0].date) || next.moveDate || "";
   logMarkRestored(entry.id);
+  LOG_RESTORING = true;
   await saveAndReload(upsertLocal(d, table, { ...next, updatedAt: Date.now() }));
 }
 function HistoryList({ customerId, title = "History", startOpen = false }) {
@@ -743,6 +778,8 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
           {state.err === "offline" && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>No signal — showing changes made on this device only.</div>}
           {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>{search.trim() ? "Nothing matches that search." : "No changes recorded yet."}</div>}
           {rows.map(r => {
+            const delRec = (Array.isArray(r.changes) ? r.changes : []).find(c => c && c.key === "__record");
+            const delLines = delRec ? logDeletedLines(r.rec_table, delRec.raw) : [];
             const ch = (Array.isArray(r.changes) ? r.changes : []).filter(c => c && c.key !== "__record");
             const canRestore = !isReadOnly() && logCanRestore(r);
             const wasRestored = restored.has(r.id);
@@ -765,6 +802,9 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
                   </div>
                 ))}
                 {!isOpen && <span onClick={() => setExpanded(e => ({ ...e, [r.id]: true }))} style={{ fontSize: 12, color: TEAL, fontWeight: 700, cursor: "pointer" }}>+ {ch.length - 3} more</span>}
+                {delLines.length > 0 && <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "6px 9px", marginTop: 2 }}>
+                  {delLines.map((c, i) => <div key={i} style={{ fontSize: 12.5, color: "#374151", lineHeight: 1.45, overflowWrap: "anywhere" }}><b>{c.field}:</b> <span style={{ color: "#991B1B" }}>{c.to}</span></div>)}
+                </div>}
                 {canRestore && (wasRestored
                   ? <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginTop: 4 }}>✓ Restored</div>
                   : <button type="button" onClick={() => restoreFromLog(r, rows)} style={{ marginTop: 6, height: 34, padding: "0 12px", borderRadius: 9, border: "1.5px solid #D9E2E0", background: "#fff", color: TEAL, fontFamily: "inherit", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>↩ Restore</button>)}
@@ -1050,7 +1090,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B246";
+const BUILD_NO = "B247";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
