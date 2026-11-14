@@ -814,7 +814,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
             return (
               <div key={r.id} style={{ borderTop: "1px solid #F0F4F3", padding: "8px 0", minWidth: 0, overflowWrap: "anywhere" }}>
                 {canRestore && (wasRestored
-                  ? <span style={{ float: "right", fontSize: 12, fontWeight: 800, color: "#6A7B77", marginLeft: 8 }}>✓ Restored</span>
+                  ? <span style={{ float: "right", fontSize: 13, fontWeight: 800, color: "#DC2626", marginLeft: 8 }}>✓ Restored</span>
                   : <button type="button" onClick={() => restoreFromLog(r, rows)} style={{ float: "right", marginLeft: 8, height: 32, padding: "0 12px", borderRadius: 9, border: "none", background: TEAL, color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>↩ Restore</button>)}
                 <div style={{ fontSize: 13.5, fontWeight: 800, color: "#10211E" }}>
                   {r.who || "Unknown"} · {isNaN(when) ? "" : `${fmtUK(when.toISOString().slice(0, 10))} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`}
@@ -823,7 +823,11 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
                 <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: ch.length ? 4 : 0 }}>
                   {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? <b style={{ color: TEAL }}>#{c.ref}</b> : null; })()}
                   {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? " · " : ""; })()}
-                  {ch.length ? (r.summary || "").replace(/:.*$/, "") : r.summary}
+                  {(() => {
+                    const txt = ch.length ? (r.summary || "").replace(/:.*$/, "") : (r.summary || "");
+                    const m = txt.match(/^Restored( · )?/);
+                    return m ? <><b style={{ color: "#DC2626", fontWeight: 800 }}>Restored</b>{txt.slice(m[0].length) ? " · " + txt.slice(m[0].length) : ""}</> : txt;
+                  })()}
                 </div>
                 {(isOpen ? ch : ch.slice(0, 3)).map((c, i) => (
                   <div key={i} style={{ fontSize: 12.5, color: "#374151", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word" }}>
@@ -1116,7 +1120,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B249";
+const BUILD_NO = "B250";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
