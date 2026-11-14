@@ -813,7 +813,14 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
   const rows = state.rows || [];
   const [restored] = useState(logRestoredSet);
   const curData = (() => { try { return loadData(); } catch { return {}; } })();
-  const refOf = (() => { const m = {}; try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {} return id => m[id]; })();
+  // Customer name + ref for every entry — from the customers on this device, or (if the
+  // customer has since been deleted) from the copy kept in the log when they were deleted.
+  const refOf = (() => {
+    const m = {};
+    rows.forEach(x => { (x.changes || []).forEach(c => { if (c && c.key === "__record" && x.rec_table === "customers" && c.raw && c.raw.id) m[c.raw.id] = c.raw; }); });
+    try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {}
+    return id => m[id];
+  })();
   return (
     <Card>
       <div onClick={() => setOpen(o => !o)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
@@ -846,12 +853,21 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
                   {r.pending ? <span style={{ fontWeight: 600, color: "#B45309", fontSize: 11.5 }}> · not uploaded yet</span> : null}
                 </div>
                 <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: ch.length ? 4 : 0 }}>
-                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? <b style={{ color: TEAL }}>#{c.ref}</b> : null; })()}
-                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? " · " : ""; })()}
                   {(() => {
-                    const txt = ch.length ? (r.summary || "").replace(/:.*$/, "") : (r.summary || "");
+                    const c = r.customer_id && refOf(r.customer_id);
+                    const label = c ? [c.ref ? `#${c.ref}` : "", c.name || ""].filter(Boolean).join(" ") : "";
+                    return label ? <><b style={{ color: TEAL }}>{label}</b> · </> : null;
+                  })()}
+                  {(() => {
+                    let txt = ch.length ? (r.summary || "").replace(/:.*$/, "") : (r.summary || "");
+                    // The name is already shown at the front, so a customer entry just says what happened.
+                    const c = r.customer_id && refOf(r.customer_id);
+                    if (r.rec_table === "customers" && c && c.name) {
+                      txt = ch.length ? txt.replace(c.name, "Customer details") : txt.replace(new RegExp(`(Created|Deleted|Restored) ${c.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "$1 customer");
+                    }
                     const m = txt.match(/^Restored( · )?/);
-                    return m ? <><b style={{ color: "#DC2626", fontWeight: 800 }}>Restored</b>{txt.slice(m[0].length) ? " · " + txt.slice(m[0].length) : ""}</> : txt;
+                    const rest = txt.slice(m ? m[0].length : 0).trim();
+                    return m ? <><b style={{ color: "#DC2626", fontWeight: 800 }}>Restored</b>{rest ? " · " + rest : ""}</> : txt;
                   })()}
                 </div>
                 {(isOpen ? ch : ch.slice(0, 3)).map((c, i) => (
@@ -1145,7 +1161,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B252";
+const BUILD_NO = "B253";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
