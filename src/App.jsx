@@ -463,6 +463,7 @@ function logFmt(table, k, v, d) {
 }
 // Blank, missing, "No"/false and an empty list all count as "nothing", so opening and saving a
 // form (which fills in unticked boxes as No) doesn't show up as a change.
+const logContact = c => [c.name, c.relation && `(${c.relation})`, c.phone, c.email].filter(Boolean).join(" ");
 const logEmpty = v => v === undefined || v === null || v === "" || v === false || (Array.isArray(v) && !v.length);
 const logSame = (a, b) => (logEmpty(a) && logEmpty(b)) || JSON.stringify(a ?? null) === JSON.stringify(b ?? null) || ((a ?? "") === "" && (b ?? "") === "") || (Array.isArray(a) && !a.length && (b == null)) || (Array.isArray(b) && !b.length && (a == null));
 function logRecName(table, r, d) {
@@ -518,17 +519,17 @@ function diffForLog(prev, next) {
         if (k === "stages" && table === "enquiries" && (next.jobs || []).some(j => j.enquiryId === r.id)) continue;
         if (k === "contacts") {
           // Just the contact(s) added or removed, not every contact on the record.
-          const one = c => [c.name, c.relation && `(${c.relation})`, c.phone, c.email].filter(Boolean).join(" ");
-          const before = (Array.isArray(p[k]) ? p[k] : []).filter(c => c && (c.name || c.phone)).map(one);
-          const after = (Array.isArray(r[k]) ? r[k] : []).filter(c => c && (c.name || c.phone)).map(one);
-          after.filter(x => !before.includes(x)).forEach(x => changes.push({ field: "Contact added", from: "—", to: x }));
-          before.filter(x => !after.includes(x)).forEach(x => changes.push({ field: "Contact removed", from: x, to: "—" }));
+          const before = (Array.isArray(p[k]) ? p[k] : []).filter(c => c && (c.name || c.phone));
+          const after = (Array.isArray(r[k]) ? r[k] : []).filter(c => c && (c.name || c.phone));
+          const bs = before.map(logContact), as = after.map(logContact);
+          after.forEach((c, i) => { if (!bs.includes(as[i])) changes.push({ field: "Contact added", from: "—", to: as[i], key: "contacts", op: "add", raw: c }); });
+          before.forEach((c, i) => { if (!as.includes(bs[i])) changes.push({ field: "Contact removed", from: bs[i], to: "—", key: "contacts", op: "remove", raw: c }); });
           continue;
         }
-        if (k === "stages") { stageChanges(p[k], r[k], prev, next).forEach(c => changes.push(c)); continue; }
+        if (k === "stages") { stageChanges(p[k], r[k], prev, next).forEach((c, i) => changes.push(i === 0 ? { ...c, key: "stages", raw: p[k] ?? null } : { ...c, key: "stages" })); continue; }
         const from = logFmt(table, k, p[k], prev), to = logFmt(table, k, r[k], next);
         if (from === to) continue;
-        changes.push({ field: label, from, to });
+        changes.push({ field: label, from, to, key: k, raw: p[k] === undefined ? null : p[k] });
       }
       if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${logRecName(table, r, next)}: ${Array.from(new Set(changes.map(c => /^Day \d/.test(c.field) ? "Move plan" : /^Contact /.test(c.field) ? "Other contacts" : c.field))).join(", ")} changed`, changes });
     }
@@ -541,7 +542,7 @@ function queueLog(entries) {
 }
 function logDeletion(table, rec, d) {
   if (!rec) return;
-  queueLog([{ id: uid() + uid(), at: new Date().toISOString(), who: logWho(), customer_id: table === "customers" ? rec.id : (rec.customerId || null), rec_table: table, rec_id: rec.id, summary: `Deleted ${logRecName(table, rec, d)}`, changes: [] }]);
+  queueLog([{ id: uid() + uid(), at: new Date().toISOString(), who: logWho(), customer_id: table === "customers" ? rec.id : (rec.customerId || null), rec_table: table, rec_id: rec.id, summary: `Deleted ${logRecName(table, rec, d)}`, changes: [{ key: "__record", raw: rec }] }]);
 }
 let LOG_FLUSHING = false;
 async function flushLog() {
@@ -644,6 +645,69 @@ function RecentlyDeleted() {
   );
 }
 
+// ── Restore from the activity log ──────────────────────────────────────────
+// A change puts the old values back; a deletion brings the record back (a customer comes back
+// with the enquiries and moves that were deleted with them). Only entries logged from B246 on
+// carry what's needed to restore.
+const RESTORED_KEY = "removals_log_restored";
+const logRestoredSet = () => { try { return new Set(JSON.parse(localStorage.getItem(RESTORED_KEY) || "[]")); } catch { return new Set(); } };
+const logMarkRestored = id => { try { const s0 = logRestoredSet(); s0.add(id); localStorage.setItem(RESTORED_KEY, JSON.stringify([...s0].slice(-500))); } catch {} };
+const logCanRestore = r => !r.pending && Array.isArray(r.changes) && r.changes.some(c => c && c.key && Object.prototype.hasOwnProperty.call(c, "raw"));
+async function restoreFromLog(entry, allRows) {
+  if (isReadOnly()) { alert("You have read-only access, so you can't restore changes."); return; }
+  const ch = (entry.changes || []).filter(c => c && c.key);
+  const table = entry.rec_table;
+  let d = loadData();
+  const deleted = ch.find(c => c.key === "__record");
+  if (deleted) {
+    const rec = deleted.raw;
+    if (!rec || !rec.id) { alert("This entry doesn't hold a copy of the record, so it can't be restored."); return; }
+    if ((d[table] || []).some(x => x.id === rec.id)) { alert("That record is already back in the system."); logMarkRestored(entry.id); return; }
+    // A customer comes back with the enquiries and moves deleted at the same time.
+    const t0 = new Date(entry.at).getTime();
+    const linked = table === "customers" ? (allRows || []).filter(x => x !== entry && x.customer_id === rec.id && Math.abs(new Date(x.at).getTime() - t0) < 5 * 60000 && (x.changes || []).some(c => c && c.key === "__record")) : [];
+    const extra = linked.length ? `\n\nThis also brings back ${linked.length} enquir${linked.length === 1 ? "y/move" : "ies/moves"} deleted with them.` : "";
+    if (table !== "customers" && rec.customerId && !(d.customers || []).some(c => c.id === rec.customerId)) { alert("The customer this belonged to has been deleted. Restore the customer first (it brings this back with it)."); return; }
+    if (!confirm(`Restore ${(entry.summary || "").replace(/^Deleted /, "")}?${extra}`)) return;
+    const recs = [[table, rec], ...linked.map(x => [x.rec_table, (x.changes.find(c => c.key === "__record") || {}).raw]).filter(([, r]) => r && r.id)];
+    const ids = recs.map(([, r]) => r.id);
+    showSavingOverlay();
+    removeTombstones(ids);
+    try { await undeleteInCloud(ids); }
+    catch (e) { hideSavingOverlay(); alert("Restoring needs a signal (it has to tell the other devices it's back). Connect and try again."); return; }
+    try { const sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); ids.forEach(id => { delete sigs[id]; }); localStorage.setItem(SIG_KEY, JSON.stringify(sigs)); } catch {}
+    recs.forEach(([t, r]) => { d = upsertLocal(d, t, { ...r, updatedAt: Date.now() }); });
+    logMarkRestored(entry.id); linked.forEach(x => logMarkRestored(x.id));
+    await saveAndReload(d);
+    return;
+  }
+  const cur = (d[table] || []).find(x => x.id === entry.rec_id);
+  if (!cur) { alert("That record has since been deleted. Restore the deletion first, then this change."); return; }
+  const next = { ...cur };
+  const lines = [];
+  const done = new Set();
+  ch.forEach(c => {
+    if (c.key === "contacts") {
+      const list = Array.isArray(next.contacts) ? next.contacts.slice() : [];
+      const sig = logContact(c.raw || {});
+      if (c.op === "remove" && !list.some(x => logContact(x) === sig)) list.push(c.raw);
+      if (c.op === "add") { const i = list.findIndex(x => logContact(x) === sig); if (i >= 0) list.splice(i, 1); }
+      next.contacts = list; if (!list.length) next.contactsCleared = true;
+      lines.push(c.op === "remove" ? `Put back contact: ${c.from}` : `Remove contact: ${c.to}`);
+      return;
+    }
+    if (done.has(c.key) || !Object.prototype.hasOwnProperty.call(c, "raw")) return;
+    done.add(c.key);
+    next[c.key] = c.raw === null ? (Array.isArray(cur[c.key]) ? [] : "") : c.raw;
+    lines.push(c.key === "stages" ? "Move plan back to how it was" : `${c.field}: back to ${c.from}`);
+  });
+  if (!lines.length) { alert("Nothing in this entry can be restored."); return; }
+  if (!confirm(`Restore these changes?\n\n${lines.join("\n")}`)) return;
+  // A move plan put back on a move also puts its move date back in step.
+  if (table === "jobs" && done.has("stages") && Array.isArray(next.stages)) next.moveDate = (next.stages[0] && next.stages[0].date) || next.moveDate || "";
+  logMarkRestored(entry.id);
+  await saveAndReload(upsertLocal(d, table, { ...next, updatedAt: Date.now() }));
+}
 function HistoryList({ customerId, title = "History", startOpen = false }) {
   const [open, setOpen] = useState(startOpen);
   const [state, setState] = useState({ rows: null, err: "" });
@@ -662,6 +726,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
     /* eslint-disable-next-line */
   }, [open, search]);
   const rows = state.rows || [];
+  const [restored] = useState(logRestoredSet);
   const refOf = (() => { const m = {}; try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {} return id => m[id]; })();
   return (
     <Card>
@@ -678,7 +743,9 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
           {state.err === "offline" && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>No signal — showing changes made on this device only.</div>}
           {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>{search.trim() ? "Nothing matches that search." : "No changes recorded yet."}</div>}
           {rows.map(r => {
-            const ch = Array.isArray(r.changes) ? r.changes : [];
+            const ch = (Array.isArray(r.changes) ? r.changes : []).filter(c => c && c.key !== "__record");
+            const canRestore = !isReadOnly() && logCanRestore(r);
+            const wasRestored = restored.has(r.id);
             const isOpen = expanded[r.id] || ch.length <= 3;
             const when = new Date(r.at);
             return (
@@ -698,6 +765,9 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
                   </div>
                 ))}
                 {!isOpen && <span onClick={() => setExpanded(e => ({ ...e, [r.id]: true }))} style={{ fontSize: 12, color: TEAL, fontWeight: 700, cursor: "pointer" }}>+ {ch.length - 3} more</span>}
+                {canRestore && (wasRestored
+                  ? <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginTop: 4 }}>✓ Restored</div>
+                  : <button type="button" onClick={() => restoreFromLog(r, rows)} style={{ marginTop: 6, height: 34, padding: "0 12px", borderRadius: 9, border: "1.5px solid #D9E2E0", background: "#fff", color: TEAL, fontFamily: "inherit", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>↩ Restore</button>)}
               </div>
             );
           })}
@@ -980,7 +1050,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B245";
+const BUILD_NO = "B246";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
