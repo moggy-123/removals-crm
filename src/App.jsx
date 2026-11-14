@@ -980,7 +980,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B244";
+const BUILD_NO = "B245";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2347,7 +2347,9 @@ function parseEnquiryEmail(text) {
   if (sectioned) add("From property", fromProp);
   add("To property", toProp);
   const keyPoints = [...extras, ...rm.lines];
-  out.notes = (keyPoints.join("\n") + (rm.message ? (keyPoints.length ? "\n\n" : "") + "Message:\n" + rm.message : "")).trim() || t.trim().slice(0, 1200);
+  // Notes = the customer's special requirements only (nothing else from the enquiry).
+  void keyPoints;
+  out.notes = String(fieldIn(topBlock, ["special requirements", "special requirement", "requirements"]) || "").trim();
   return out;
 }
 
