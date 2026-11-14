@@ -461,7 +461,10 @@ function logFmt(table, k, v, d) {
   if (k === "maint") return (v.bookings || []).filter(b => b.start >= todayISO()).map(b => `${b.type} ${fmtUK(b.start)}`).join("; ") || "—";
   const s = String(v); return s.length > 160 ? s.slice(0, 157) + "…" : s;
 }
-const logSame = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null) || ((a ?? "") === "" && (b ?? "") === "") || (Array.isArray(a) && !a.length && (b == null)) || (Array.isArray(b) && !b.length && (a == null));
+// Blank, missing, "No"/false and an empty list all count as "nothing", so opening and saving a
+// form (which fills in unticked boxes as No) doesn't show up as a change.
+const logEmpty = v => v === undefined || v === null || v === "" || v === false || (Array.isArray(v) && !v.length);
+const logSame = (a, b) => (logEmpty(a) && logEmpty(b)) || JSON.stringify(a ?? null) === JSON.stringify(b ?? null) || ((a ?? "") === "" && (b ?? "") === "") || (Array.isArray(a) && !a.length && (b == null)) || (Array.isArray(b) && !b.length && (a == null));
 function logRecName(table, r, d) {
   if (!r) return "";
   if (table === "customers") return r.name || "Customer";
@@ -513,12 +516,21 @@ function diffForLog(prev, next) {
         if (logSame(p[k], r[k])) continue;
         // Once a move exists its plan is logged on the move, so don't log it twice on the enquiry.
         if (k === "stages" && table === "enquiries" && (next.jobs || []).some(j => j.enquiryId === r.id)) continue;
+        if (k === "contacts") {
+          // Just the contact(s) added or removed, not every contact on the record.
+          const one = c => [c.name, c.relation && `(${c.relation})`, c.phone, c.email].filter(Boolean).join(" ");
+          const before = (Array.isArray(p[k]) ? p[k] : []).filter(c => c && (c.name || c.phone)).map(one);
+          const after = (Array.isArray(r[k]) ? r[k] : []).filter(c => c && (c.name || c.phone)).map(one);
+          after.filter(x => !before.includes(x)).forEach(x => changes.push({ field: "Contact added", from: "—", to: x }));
+          before.filter(x => !after.includes(x)).forEach(x => changes.push({ field: "Contact removed", from: x, to: "—" }));
+          continue;
+        }
         if (k === "stages") { stageChanges(p[k], r[k], prev, next).forEach(c => changes.push(c)); continue; }
         const from = logFmt(table, k, p[k], prev), to = logFmt(table, k, r[k], next);
         if (from === to) continue;
         changes.push({ field: label, from, to });
       }
-      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${logRecName(table, r, next)}: ${Array.from(new Set(changes.map(c => /^Day \d/.test(c.field) ? "Move plan" : c.field))).join(", ")} changed`, changes });
+      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${logRecName(table, r, next)}: ${Array.from(new Set(changes.map(c => /^Day \d/.test(c.field) ? "Move plan" : /^Contact /.test(c.field) ? "Other contacts" : c.field))).join(", ")} changed`, changes });
     }
   }
   return out;
@@ -968,7 +980,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B243";
+const BUILD_NO = "B244";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
