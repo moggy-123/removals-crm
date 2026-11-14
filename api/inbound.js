@@ -342,7 +342,9 @@ function parseEnquiryEmail(text) {
   if (sectioned) add("From property", fromProp);
   add("To property", toProp);
   const keyPoints = [...extras, ...rm.lines];
-  out.notes = (keyPoints.join("\n") + (rm.message ? (keyPoints.length ? "\n\n" : "") + "Message:\n" + rm.message : "")).trim() || t.trim().slice(0, 1200);
+  // Notes = the customer's special requirements only (nothing else from the enquiry).
+  void keyPoints;
+  out.notes = String(fieldIn(topBlock, ["special requirements", "special requirement", "requirements"]) || "").trim();
   return out;
 }
 
