@@ -710,7 +710,7 @@ function logWithRaw(r) {
 }
 const logCanRestore = r => !r.pending && Array.isArray(r.changes) && r.changes.some(c => c && c.key && Object.prototype.hasOwnProperty.call(c, "raw"));
 async function restoreFromLog(entry, allRows) {
-  if (isReadOnly()) { alert("You have read-only access, so you can't restore changes."); return; }
+  if (!isAdmin() || isReadOnly()) { alert("Only an admin can restore changes."); return; }
   entry = logWithRaw(entry);
   const ch = (entry.changes || []).filter(c => c && c.key);
   const table = entry.rec_table;
@@ -832,7 +832,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
             const delRec = (Array.isArray(r.changes) ? r.changes : []).find(c => c && c.key === "__record");
             const delLines = delRec ? logDeletedLines(r.rec_table, delRec.raw) : [];
             const ch = (Array.isArray(r.changes) ? r.changes : []).filter(c => c && c.key !== "__record");
-            const canRestore = !isReadOnly() && logCanRestore(logWithRaw(r));
+            const canRestore = isAdmin() && !isReadOnly() && logCanRestore(logWithRaw(r)); // admins only
             const wasRestored = restored.has(r.id) && (!delRec || !delRec.raw || (curData[r.rec_table] || []).some(x => x.id === delRec.raw.id));
             const isOpen = expanded[r.id] || ch.length <= 3;
             const when = new Date(r.at);
@@ -1145,7 +1145,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B251";
+const BUILD_NO = "B252";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
