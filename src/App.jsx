@@ -429,8 +429,8 @@ let SAVING_IN_PROGRESS = false;
 const LOG_QUEUE_KEY = "removals_log_queue";
 const LOG_FIELDS = {
   customers: { name: "Name", phone: "Mobile", homePhone: "Home phone", email: "Email", address1: "Address", address2: "Address line 2", town: "Town", postcode: "Postcode", company: "Company", custType: "Type", notes: "Notes", contacts: "Other contacts", storageJobs: "Storage jobs" },
-  enquiries: { status: "Status", preferredDate: "Move date", moveMonth: "Move month", dateFlexible: "Flexible dates", surveyDate: "Survey date", surveyTime: "Survey time", surveyor: "Surveyor", surveyDone: "Surveyed", quoteTotal: "Quote price", quoteStatus: "Quote status", quoteLines: "Quote lines", fromAddress1: "From address", fromTown: "From town", fromPostcode: "From postcode", toAddress1: "To address", toTown: "To town", toPostcode: "To postcode", fromPropertyType: "From property", toPropertyType: "To property", fromBedrooms: "Bedrooms", inventory: "Inventory", toStore: "Into store", notes: "Notes", lostReason: "Lost reason", referredBy: "Referred by", exchanged: "Exchanged" },
-  jobs: { status: "Status", price: "Price", deposit: "Deposit", moveDate: "Move date", stages: "Move plan", notes: "Notes", depositPaid: "Deposit paid", balancePaid: "Balance paid" },
+  enquiries: { status: "Status", preferredDate: "Move date", moveMonth: "Move month", dateFlexible: "Flexible dates", surveyDate: "Survey date", surveyTime: "Survey time", surveyor: "Surveyor", surveyDone: "Surveyed", quoteTotal: "Quote price", quoteStatus: "Quote status", quoteLines: "Quote lines", fromAddress1: "From address", fromTown: "From town", fromPostcode: "From postcode", toAddress1: "To address", toTown: "To town", toPostcode: "To postcode", fromPropertyType: "From property", toPropertyType: "To property", fromBedrooms: "Bedrooms", inventory: "Inventory", toStore: "Into store", notes: "Notes", lostReason: "Lost reason", referredBy: "Referred by", exchanged: "Exchanged", stages: "Move plan" },
+  jobs: { status: "Status", price: "Price", deposit: "Deposit", stages: "Move plan", notes: "Notes", depositPaid: "Deposit paid", balancePaid: "Balance paid" },
   vehicles: { name: "Name", reg: "Reg", vtype: "Type", maint: "Servicing" },
   staff: { name: "Name", role: "Role", phone: "Phone", active: "Active", away: "Time off" },
 };
@@ -469,6 +469,36 @@ function logRecName(table, r, d) {
   if (table === "jobs") { try { return "Move " + moveRef(d, r); } catch { return "Move"; } }
   return r.name || table;
 }
+// Move plan: list only what changed, day by day (e.g. "Day 1 Move – date: 14 Nov → 15 Nov"),
+// not the whole plan before and after.
+function stageChanges(pv, nv, prevD, nextD) {
+  const a = Array.isArray(pv) ? pv : [], b = Array.isArray(nv) ? nv : [];
+  const vn = (d, ids) => (ids || []).map(id => ((d && d.vehicles) || []).find(x => x.id === id)?.name).filter(Boolean).join(", ");
+  const vt = t => (t && typeof t === "object") ? Object.entries(t).filter(([, n]) => Number(n) > 0).map(([k, n]) => `${n}× ${k}`).join(", ") : "";
+  const parts = (st, d) => ({
+    "date": st.date ? fmtUK(st.date) : "no date",
+    "time": st.time || "",
+    "type": st.type || "Day",
+    "crew": (st.crew || []).join(", "),
+    "vans": vn(d, st.vehicleIds),
+    "staff": st.staffCount ? String(st.staffCount) : "",
+    "van types": vt(st.vehTypes),
+  });
+  const summary = (st, d) => { const x = parts(st, d); return [x.type, x.date, x.time, x.crew, x.vans].filter(Boolean).join(" · "); };
+  const out = [];
+  const used = new Set();
+  b.forEach((st, i) => {
+    let j = a.findIndex((o, k) => !used.has(k) && o && st && o.id && o.id === st.id);
+    if (j < 0 && a[i] && !used.has(i) && !(a[i].id && b.some(x => x && x.id === a[i].id))) j = i;
+    const label = `Day ${i + 1}${st.type ? " " + st.type : ""}`;
+    if (j < 0) { out.push({ field: `${label} added`, from: "—", to: summary(st, nextD) }); return; }
+    used.add(j);
+    const pa = parts(a[j], prevD), pb = parts(st, nextD);
+    Object.keys(pb).forEach(k => { if ((pa[k] || "") !== (pb[k] || "")) out.push({ field: `${label} – ${k}`, from: pa[k] || "—", to: pb[k] || "—" }); });
+  });
+  a.forEach((st, k) => { if (!used.has(k) && st) out.push({ field: `Day ${k + 1}${st.type ? " " + st.type : ""} removed`, from: summary(st, prevD), to: "—" }); });
+  return out;
+}
 function diffForLog(prev, next) {
   const out = [], at = new Date().toISOString(), who = logWho();
   for (const table of TABLES) {
@@ -481,11 +511,14 @@ function diffForLog(prev, next) {
       const changes = [];
       for (const [k, label] of Object.entries(fields)) {
         if (logSame(p[k], r[k])) continue;
+        // Once a move exists its plan is logged on the move, so don't log it twice on the enquiry.
+        if (k === "stages" && table === "enquiries" && (next.jobs || []).some(j => j.enquiryId === r.id)) continue;
+        if (k === "stages") { stageChanges(p[k], r[k], prev, next).forEach(c => changes.push(c)); continue; }
         const from = logFmt(table, k, p[k], prev), to = logFmt(table, k, r[k], next);
         if (from === to) continue;
         changes.push({ field: label, from, to });
       }
-      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${logRecName(table, r, next)}: ${changes.map(c => c.field).join(", ")} changed`, changes });
+      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${logRecName(table, r, next)}: ${Array.from(new Set(changes.map(c => /^Day \d/.test(c.field) ? "Move plan" : c.field))).join(", ")} changed`, changes });
     }
   }
   return out;
@@ -935,7 +968,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B242";
+const BUILD_NO = "B243";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
