@@ -683,9 +683,35 @@ function logDeletedLines(table, r) {
   }
   return L;
 }
+// Older log entries (before B246) only kept the text shown on screen. For simple fields
+// (dates, times, names, prices, yes/no…) that text is enough to put the old value back.
+const LOG_BOOL = new Set(["surveyDone", "dateFlexible", "toStore", "exchanged", "depositPaid", "balancePaid", "active"]);
+const LOG_SKIP = new Set(["contacts", "stages", "inventory", "quoteLines", "storageJobs", "away", "maint"]);
+function logParseOld(table, key, text) {
+  const t = String(text == null ? "" : text);
+  if (t === "—") return { ok: true, v: LOG_BOOL.has(key) ? false : "" };
+  if (LOG_SKIP.has(key) || /…$/.test(t)) return { ok: false };
+  if (LOG_BOOL.has(key)) return t === "Yes" ? { ok: true, v: true } : t === "No" ? { ok: true, v: false } : { ok: false };
+  if (LOG_MONEY.has(key)) { const n = Number(t.replace(/[£,\s]/g, "")); return isNaN(n) ? { ok: false } : { ok: true, v: n }; }
+  if (LOG_DATES.has(key)) { const m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? { ok: true, v: `${m[3]}-${m[2]}-${m[1]}` } : { ok: false }; }
+  if (key === "moveMonth") { const d = new Date("1 " + t); return isNaN(d) ? { ok: false } : { ok: true, v: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` }; }
+  return { ok: true, v: t };
+}
+// Fill in the old value for changes logged before B246, where it can be worked out.
+function logWithRaw(r) {
+  const fields = LOG_FIELDS[r.rec_table] || {};
+  const byLabel = {}; Object.entries(fields).forEach(([k, l]) => { byLabel[l] = k; });
+  return { ...r, changes: (r.changes || []).map(c => {
+    if (!c || c.key || !byLabel[c.field]) return c;
+    const key = byLabel[c.field];
+    const pv = logParseOld(r.rec_table, key, c.from);
+    return pv.ok ? { ...c, key, raw: pv.v } : c;
+  }) };
+}
 const logCanRestore = r => !r.pending && Array.isArray(r.changes) && r.changes.some(c => c && c.key && Object.prototype.hasOwnProperty.call(c, "raw"));
 async function restoreFromLog(entry, allRows) {
   if (isReadOnly()) { alert("You have read-only access, so you can't restore changes."); return; }
+  entry = logWithRaw(entry);
   const ch = (entry.changes || []).filter(c => c && c.key);
   const table = entry.rec_table;
   let d = loadData();
@@ -781,7 +807,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
             const delRec = (Array.isArray(r.changes) ? r.changes : []).find(c => c && c.key === "__record");
             const delLines = delRec ? logDeletedLines(r.rec_table, delRec.raw) : [];
             const ch = (Array.isArray(r.changes) ? r.changes : []).filter(c => c && c.key !== "__record");
-            const canRestore = !isReadOnly() && logCanRestore(r);
+            const canRestore = !isReadOnly() && logCanRestore(logWithRaw(r));
             const wasRestored = restored.has(r.id);
             const isOpen = expanded[r.id] || ch.length <= 3;
             const when = new Date(r.at);
@@ -1090,7 +1116,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B248";
+const BUILD_NO = "B249";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
