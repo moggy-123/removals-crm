@@ -429,7 +429,8 @@ let SAVING_IN_PROGRESS = false;
 const LOG_QUEUE_KEY = "removals_log_queue";
 const LOG_FIELDS = {
   customers: { name: "Name", phone: "Mobile", homePhone: "Home phone", email: "Email", address1: "Address", address2: "Address line 2", town: "Town", postcode: "Postcode", company: "Company", custType: "Type", notes: "Notes", contacts: "Other contacts", storageJobs: "Storage jobs" },
-  enquiries: { status: "Status", preferredDate: "Move date", moveMonth: "Move month", dateFlexible: "Flexible dates", surveyDate: "Survey date", surveyTime: "Survey time", surveyor: "Surveyor", surveyDone: "Surveyed", quoteTotal: "Quote price", quoteStatus: "Quote status", quoteLines: "Quote lines", fromAddress1: "From address", fromTown: "From town", fromPostcode: "From postcode", toAddress1: "To address", toTown: "To town", toPostcode: "To postcode", fromPropertyType: "From property", toPropertyType: "To property", fromBedrooms: "Bedrooms", inventory: "Inventory", toStore: "Into store", notes: "Notes", lostReason: "Lost reason", referredBy: "Referred by", exchanged: "Exchanged", stages: "Move plan" },
+  // The customer's preferred move date isn't logged — only the move plan's dates (stages) are.
+  enquiries: { status: "Status", surveyDate: "Survey date", surveyTime: "Survey time", surveyor: "Surveyor", surveyDone: "Surveyed", quoteTotal: "Quote price", quoteStatus: "Quote status", quoteLines: "Quote lines", fromAddress1: "From address", fromTown: "From town", fromPostcode: "From postcode", toAddress1: "To address", toTown: "To town", toPostcode: "To postcode", fromPropertyType: "From property", toPropertyType: "To property", fromBedrooms: "Bedrooms", inventory: "Inventory", toStore: "Into store", notes: "Notes", lostReason: "Lost reason", referredBy: "Referred by", exchanged: "Exchanged", stages: "Move plan" },
   jobs: { status: "Status", price: "Price", deposit: "Deposit", stages: "Move plan", notes: "Notes", depositPaid: "Deposit paid", balancePaid: "Balance paid" },
   vehicles: { name: "Name", reg: "Reg", vtype: "Type", maint: "Servicing" },
   staff: { name: "Name", role: "Role", phone: "Phone", active: "Active", away: "Time off" },
@@ -1182,7 +1183,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B254";
+const BUILD_NO = "B255";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
