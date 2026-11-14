@@ -736,9 +736,33 @@ async function restoreFromLog(entry, allRows) {
     catch (e) { hideSavingOverlay(); alert("Restoring needs a signal (it has to tell the other devices it's back). Connect and try again."); return; }
     try { const sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); ids.forEach(id => { delete sigs[id]; }); localStorage.setItem(SIG_KEY, JSON.stringify(sigs)); } catch {}
     recs.forEach(([t, r]) => { d = upsertLocal(d, t, { ...r, updatedAt: Date.now() }); });
-    logMarkRestored(entry.id); linked.forEach(x => logMarkRestored(x.id));
+    // Save, upload, then CHECK the cloud really has them back — so a restore can't quietly fail.
+    SAVING_IN_PROGRESS = true;
     LOG_RESTORING = true;
-    await saveAndReload(d);
+    try { queueLog(diffForLog(loadData(), d)); } catch {}
+    LOG_RESTORING = false;
+    const stamped = stampData(d);
+    setDB(JSON.stringify(stamped));
+    flushLog().catch(() => {});
+    let problem = "";
+    try { await pushChangedOnly(stamped); } catch (e) { problem = (e && e.message) || String(e); }
+    if (!problem) {
+      for (const [t, r] of recs) {
+        try {
+          const { data: got, error } = await supabase.from(t).select("id").eq("id", r.id);
+          if (error) { problem = error.message; break; }
+          if (!got || !got.length) { problem = `the ${t === "customers" ? "customer" : t === "enquiries" ? "enquiry" : "record"} didn't arrive in the cloud`; break; }
+        } catch (e) { problem = "no signal"; break; }
+      }
+    }
+    if (!problem) {
+      try { const left = (await readCloudDeletesFull()).ids; if (ids.some(id => left[id])) problem = "it's still on the deleted list"; } catch {}
+    }
+    SAVING_IN_PROGRESS = false;
+    hideSavingOverlay();
+    if (problem) alert(`The restore didn't finish: ${problem}.\n\nNothing is lost — tap ↩ Restore on the same entry again (with signal).`);
+    else { logMarkRestored(entry.id); linked.forEach(x => logMarkRestored(x.id)); }
+    window.location.reload();
     return;
   }
   const cur = (d[table] || []).find(x => x.id === entry.rec_id);
@@ -788,6 +812,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
   }, [open, search]);
   const rows = state.rows || [];
   const [restored] = useState(logRestoredSet);
+  const curData = (() => { try { return loadData(); } catch { return {}; } })();
   const refOf = (() => { const m = {}; try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {} return id => m[id]; })();
   return (
     <Card>
@@ -808,7 +833,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
             const delLines = delRec ? logDeletedLines(r.rec_table, delRec.raw) : [];
             const ch = (Array.isArray(r.changes) ? r.changes : []).filter(c => c && c.key !== "__record");
             const canRestore = !isReadOnly() && logCanRestore(logWithRaw(r));
-            const wasRestored = restored.has(r.id);
+            const wasRestored = restored.has(r.id) && (!delRec || !delRec.raw || (curData[r.rec_table] || []).some(x => x.id === delRec.raw.id));
             const isOpen = expanded[r.id] || ch.length <= 3;
             const when = new Date(r.at);
             return (
@@ -1120,7 +1145,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B250";
+const BUILD_NO = "B251";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
