@@ -158,6 +158,7 @@ const STATUS_META = {
   "Survey booked": { color: "#7C3AED", bg: "#F5F3FF" },
   "Survey missed": { color: "#DC2626", bg: "#FEF2F2" },
   Surveyed:    { color: "#0891B2", bg: "#ECFEFF" },
+  Booked:      { color: "#0891B2", bg: "#ECFEFF" },
   "Let Go":    { color: "#6B7280", bg: "#F3F4F6" },
   "Not quoted": { color: "#6B7280", bg: "#F3F4F6" },
   "Alt. not chosen": { color: "#6B7280", bg: "#F3F4F6" },
@@ -182,7 +183,7 @@ const canDelete = () => isAdmin();
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
-function todayISO() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; } // local date (UK), not UTC
+function todayISO() { return new Date().toISOString().split("T")[0]; }
 function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -429,9 +430,8 @@ let SAVING_IN_PROGRESS = false;
 const LOG_QUEUE_KEY = "removals_log_queue";
 const LOG_FIELDS = {
   customers: { name: "Name", phone: "Mobile", homePhone: "Home phone", email: "Email", address1: "Address", address2: "Address line 2", town: "Town", postcode: "Postcode", company: "Company", custType: "Type", notes: "Notes", contacts: "Other contacts", storageJobs: "Storage jobs" },
-  // The customer's preferred move date isn't logged — only the move plan's dates (stages) are.
-  enquiries: { status: "Status", surveyDate: "Survey date", surveyTime: "Survey time", surveyor: "Surveyor", surveyDone: "Surveyed", quoteTotal: "Quote price", quoteStatus: "Quote status", quoteLines: "Quote lines", fromAddress1: "From address", fromTown: "From town", fromPostcode: "From postcode", toAddress1: "To address", toTown: "To town", toPostcode: "To postcode", fromPropertyType: "From property", toPropertyType: "To property", fromBedrooms: "Bedrooms", inventory: "Inventory", toStore: "Into store", notes: "Notes", lostReason: "Lost reason", referredBy: "Referred by", exchanged: "Exchanged", stages: "Move plan" },
-  jobs: { status: "Status", price: "Price", deposit: "Deposit", stages: "Move plan", notes: "Notes", depositPaid: "Deposit paid", balancePaid: "Balance paid" },
+  enquiries: { status: "Status", preferredDate: "Move date", moveMonth: "Move month", dateFlexible: "Flexible dates", surveyDate: "Survey date", surveyTime: "Survey time", surveyor: "Surveyor", surveyDone: "Surveyed", quoteTotal: "Quote price", quoteStatus: "Quote status", quoteLines: "Quote lines", fromAddress1: "From address", fromTown: "From town", fromPostcode: "From postcode", toAddress1: "To address", toTown: "To town", toPostcode: "To postcode", fromPropertyType: "From property", toPropertyType: "To property", fromBedrooms: "Bedrooms", inventory: "Inventory", toStore: "Into store", notes: "Notes", lostReason: "Lost reason", referredBy: "Referred by", exchanged: "Exchanged" },
+  jobs: { status: "Status", price: "Price", deposit: "Deposit", moveDate: "Move date", stages: "Move plan", notes: "Notes", depositPaid: "Deposit paid", balancePaid: "Balance paid" },
   vehicles: { name: "Name", reg: "Reg", vtype: "Type", maint: "Servicing" },
   staff: { name: "Name", role: "Role", phone: "Phone", active: "Active", away: "Time off" },
 };
@@ -462,11 +462,7 @@ function logFmt(table, k, v, d) {
   if (k === "maint") return (v.bookings || []).filter(b => b.start >= todayISO()).map(b => `${b.type} ${fmtUK(b.start)}`).join("; ") || "—";
   const s = String(v); return s.length > 160 ? s.slice(0, 157) + "…" : s;
 }
-// Blank, missing, "No"/false and an empty list all count as "nothing", so opening and saving a
-// form (which fills in unticked boxes as No) doesn't show up as a change.
-const logContact = c => [c.name, c.relation && `(${c.relation})`, c.phone, c.email].filter(Boolean).join(" ");
-const logEmpty = v => v === undefined || v === null || v === "" || v === false || (Array.isArray(v) && !v.length);
-const logSame = (a, b) => (logEmpty(a) && logEmpty(b)) || JSON.stringify(a ?? null) === JSON.stringify(b ?? null) || ((a ?? "") === "" && (b ?? "") === "") || (Array.isArray(a) && !a.length && (b == null)) || (Array.isArray(b) && !b.length && (a == null));
+const logSame = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null) || ((a ?? "") === "" && (b ?? "") === "") || (Array.isArray(a) && !a.length && (b == null)) || (Array.isArray(b) && !b.length && (a == null));
 function logRecName(table, r, d) {
   if (!r) return "";
   if (table === "customers") return r.name || "Customer";
@@ -474,68 +470,23 @@ function logRecName(table, r, d) {
   if (table === "jobs") { try { return "Move " + moveRef(d, r); } catch { return "Move"; } }
   return r.name || table;
 }
-// Move plan: list only what changed, day by day (e.g. "Day 1 Move – date: 14 Nov → 15 Nov"),
-// not the whole plan before and after.
-function stageChanges(pv, nv, prevD, nextD) {
-  const a = Array.isArray(pv) ? pv : [], b = Array.isArray(nv) ? nv : [];
-  const vn = (d, ids) => (ids || []).map(id => ((d && d.vehicles) || []).find(x => x.id === id)?.name).filter(Boolean).join(", ");
-  const vt = t => (t && typeof t === "object") ? Object.entries(t).filter(([, n]) => Number(n) > 0).map(([k, n]) => `${n}× ${k}`).join(", ") : "";
-  const parts = (st, d) => ({
-    "date": st.date ? fmtUK(st.date) : "no date",
-    "time": st.time || "",
-    "type": st.type || "Day",
-    "crew": (st.crew || []).join(", "),
-    "vans": vn(d, st.vehicleIds),
-    "staff": st.staffCount ? String(st.staffCount) : "",
-    "van types": vt(st.vehTypes),
-  });
-  const summary = (st, d) => { const x = parts(st, d); return [x.type, x.date, x.time, x.crew, x.vans].filter(Boolean).join(" · "); };
-  const out = [];
-  const used = new Set();
-  b.forEach((st, i) => {
-    let j = a.findIndex((o, k) => !used.has(k) && o && st && o.id && o.id === st.id);
-    if (j < 0 && a[i] && !used.has(i) && !(a[i].id && b.some(x => x && x.id === a[i].id))) j = i;
-    const label = `Day ${i + 1}${st.type ? " " + st.type : ""}`;
-    if (j < 0) { out.push({ field: `${label} added`, from: "—", to: summary(st, nextD) }); return; }
-    used.add(j);
-    const pa = parts(a[j], prevD), pb = parts(st, nextD);
-    Object.keys(pb).forEach(k => { if ((pa[k] || "") !== (pb[k] || "")) out.push({ field: `${label} – ${k}`, from: pa[k] || "—", to: pb[k] || "—" }); });
-  });
-  a.forEach((st, k) => { if (!used.has(k) && st) out.push({ field: `Day ${k + 1}${st.type ? " " + st.type : ""} removed`, from: summary(st, prevD), to: "—" }); });
-  return out;
-}
-let LOG_RESTORING = false;
-let LOG_SUSPEND = false; // imports and backup restores don't write to the activity log // set while a Restore is being saved, so the log says "Restored"
 function diffForLog(prev, next) {
   const out = [], at = new Date().toISOString(), who = logWho();
-  const verb = LOG_RESTORING ? "Restored" : "Created";
   for (const table of TABLES) {
     const fields = LOG_FIELDS[table]; if (!fields) continue;
     const before = new Map((prev[table] || []).map(r => [r.id, r]));
     for (const r of next[table] || []) {
       const p = before.get(r.id);
       const custId = table === "customers" ? r.id : (r.customerId || null);
-      if (!p) { out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${verb} ${logRecName(table, r, next)}`, changes: [] }); continue; }
+      if (!p) { out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `Created ${logRecName(table, r, next)}`, changes: [] }); continue; }
       const changes = [];
       for (const [k, label] of Object.entries(fields)) {
         if (logSame(p[k], r[k])) continue;
-        // Once a move exists its plan is logged on the move, so don't log it twice on the enquiry.
-        if (k === "stages" && table === "enquiries" && (next.jobs || []).some(j => j.enquiryId === r.id)) continue;
-        if (k === "contacts") {
-          // Just the contact(s) added or removed, not every contact on the record.
-          const before = (Array.isArray(p[k]) ? p[k] : []).filter(c => c && (c.name || c.phone));
-          const after = (Array.isArray(r[k]) ? r[k] : []).filter(c => c && (c.name || c.phone));
-          const bs = before.map(logContact), as = after.map(logContact);
-          after.forEach((c, i) => { if (!bs.includes(as[i])) changes.push({ field: "Contact added", from: "—", to: as[i], key: "contacts", op: "add", raw: c }); });
-          before.forEach((c, i) => { if (!as.includes(bs[i])) changes.push({ field: "Contact removed", from: bs[i], to: "—", key: "contacts", op: "remove", raw: c }); });
-          continue;
-        }
-        if (k === "stages") { stageChanges(p[k], r[k], prev, next).forEach((c, i) => changes.push(i === 0 ? { ...c, key: "stages", raw: p[k] ?? null } : { ...c, key: "stages" })); continue; }
         const from = logFmt(table, k, p[k], prev), to = logFmt(table, k, r[k], next);
         if (from === to) continue;
-        changes.push({ field: label, from, to, key: k, raw: p[k] === undefined ? null : p[k] });
+        changes.push({ field: label, from, to });
       }
-      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${LOG_RESTORING ? "Restored · " : ""}${logRecName(table, r, next)}: ${Array.from(new Set(changes.map(c => /^Day \d/.test(c.field) ? "Move plan" : /^Contact /.test(c.field) ? "Other contacts" : c.field))).join(", ")} changed`, changes });
+      if (changes.length) out.push({ id: uid() + uid(), at, who, customer_id: custId, rec_table: table, rec_id: r.id, summary: `${logRecName(table, r, next)}: ${changes.map(c => c.field).join(", ")} changed`, changes });
     }
   }
   return out;
@@ -546,7 +497,7 @@ function queueLog(entries) {
 }
 function logDeletion(table, rec, d) {
   if (!rec) return;
-  queueLog([{ id: uid() + uid(), at: new Date().toISOString(), who: logWho(), customer_id: table === "customers" ? rec.id : (rec.customerId || null), rec_table: table, rec_id: rec.id, summary: `Deleted ${logRecName(table, rec, d)}`, changes: [{ key: "__record", raw: rec }] }]);
+  queueLog([{ id: uid() + uid(), at: new Date().toISOString(), who: logWho(), customer_id: table === "customers" ? rec.id : (rec.customerId || null), rec_table: table, rec_id: rec.id, summary: `Deleted ${logRecName(table, rec, d)}`, changes: [] }]);
 }
 let LOG_FLUSHING = false;
 async function flushLog() {
@@ -562,44 +513,17 @@ async function flushLog() {
     localStorage.setItem(LOG_QUEUE_KEY, JSON.stringify(left));
   } catch { /* try again later */ } finally { LOG_FLUSHING = false; }
 }
-// Customers whose name, ref, phone, email, address or postcode match the search words.
-function logCustomerIds(q) {
-  const words = String(q || "").toLowerCase().replace(/^#/, "").split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
-  let d = {}; try { d = loadData(); } catch {}
-  const enqText = {};
-  (d.enquiries || []).forEach(e => { enqText[e.customerId] = (enqText[e.customerId] || "") + " " + [e.fromAddress1, e.fromTown, e.fromPostcode, e.toAddress1, e.toTown, e.toPostcode].filter(Boolean).join(" "); });
-  return (d.customers || []).filter(c => {
-    const t = [c.ref, c.name, c.company, c.phone, c.homePhone, c.email, c.address1, c.town, c.postcode, enqText[c.id]].filter(Boolean).join(" ").toLowerCase();
-    return words.every(w => t.includes(w));
-  }).map(c => c.id).slice(0, 150);
-}
-function logMatches(r, q, custIds) {
-  q = String(q || "").trim().toLowerCase();
-  if (!q) return true;
-  if (r.customer_id && custIds.includes(r.customer_id)) return true;
-  const t = [r.summary, r.who, JSON.stringify(r.changes || [])].join(" ").toLowerCase();
-  return q.split(/\s+/).every(w => t.includes(w));
-}
-async function loadLog(customerId, search = "") {
+async function loadLog(customerId) {
   let rows = [], err = "";
-  const q = String(search || "").trim();
-  const custIds = q ? logCustomerIds(q) : [];
   try {
-    let qy = supabase.from("activity_log").select("*").order("at", { ascending: false }).limit(q ? 500 : (customerId ? 300 : 200));
+    let qy = supabase.from("activity_log").select("*").order("at", { ascending: false }).limit(customerId ? 300 : 200);
     if (customerId) qy = qy.eq("customer_id", customerId);
-    if (q) {
-      const safe = q.replace(/[%,()*\\"']/g, " ").trim();
-      const ors = safe ? [`summary.ilike.%${safe}%`, `who.ilike.%${safe}%`] : [];
-      if (custIds.length) ors.push(`customer_id.in.(${custIds.join(",")})`);
-      if (ors.length) qy = qy.or(ors.join(","));
-    }
     const { data, error } = await qy;
     if (error) err = /activity_log|relation|does not exist|schema cache/i.test(error.message || "") ? "setup" : (error.message || "error"); else rows = data || [];
   } catch (e) { err = "offline"; }
-  let queued = []; try { queued = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]"); } catch {}
+  let q = []; try { q = JSON.parse(localStorage.getItem(LOG_QUEUE_KEY) || "[]"); } catch {}
   const have = new Set(rows.map(r => r.id));
-  const pending = queued.filter(x => !have.has(x.id) && (!customerId || x.customer_id === customerId) && logMatches(x, q, custIds)).map(x => ({ ...x, pending: true }));
+  const pending = q.filter(x => !have.has(x.id) && (!customerId || x.customer_id === customerId)).map(x => ({ ...x, pending: true }));
   return { rows: [...pending, ...rows].sort((a, b) => String(b.at).localeCompare(String(a.at))), err };
 }
 // Admin: see deletions by day and undo a batch (e.g. records removed by mistake).
@@ -649,197 +573,13 @@ function RecentlyDeleted() {
   );
 }
 
-// ── Restore from the activity log ──────────────────────────────────────────
-// A change puts the old values back; a deletion brings the record back (a customer comes back
-// with the enquiries and moves that were deleted with them). Only entries logged from B246 on
-// carry what's needed to restore.
-const RESTORED_KEY = "removals_log_restored";
-const logRestoredSet = () => { try { return new Set(JSON.parse(localStorage.getItem(RESTORED_KEY) || "[]")); } catch { return new Set(); } };
-const logMarkRestored = id => { try { const s0 = logRestoredSet(); s0.add(id); localStorage.setItem(RESTORED_KEY, JSON.stringify([...s0].slice(-500))); } catch {} };
-// What a deleted record was, so you can see what Restore would bring back.
-function logDeletedLines(table, r) {
-  if (!r) return [];
-  const ad = (a, b, c, d) => [a, b, c, d].filter(Boolean).join(", ");
-  const L = [];
-  const add = (field, v) => { if (v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length)) L.push({ field, to: String(v) }); };
-  if (table === "customers") {
-    add("Customer", [r.ref ? `#${r.ref}` : "", r.name].filter(Boolean).join(" "));
-    add("Mobile", r.phone); add("Home phone", r.homePhone); add("Email", r.email);
-    add("Address", ad(r.address1, r.address2, r.town, r.postcode));
-    add("Other contacts", (r.contacts || []).filter(c => c && (c.name || c.phone)).map(logContact).join("; "));
-  } else if (table === "enquiries") {
-    add("From", ad(r.fromAddress1, r.fromAddress2, r.fromTown, r.fromPostcode));
-    add("To", ad(r.toAddress1, r.toAddress2, r.toTown, r.toPostcode));
-    add("Status", r.status);
-    add("Survey date", r.surveyDate ? fmtUK(String(r.surveyDate).slice(0, 10)) + (r.surveyTime ? " " + r.surveyTime : "") : "");
-    add("Move date", r.preferredDate ? fmtUK(String(r.preferredDate).slice(0, 10)) : "");
-    add("Quote", Number(r.quoteTotal) ? "£" + Number(r.quoteTotal).toLocaleString("en-GB") : "");
-    add("Volume", r.volumeCuFt ? `${r.volumeCuFt} cu ft` : "");
-    add("Notes", r.notes);
-  } else if (table === "jobs") {
-    add("Status", r.status);
-    add("Days", (r.stages || []).map(st => [st.type || "Day", st.date ? fmtUK(st.date) : "no date", (st.crew || []).join(", ")].filter(Boolean).join(" · ")).join(" | "));
-    add("Price", Number(r.price) ? "£" + Number(r.price).toLocaleString("en-GB") : "");
-  } else {
-    add("Name", r.name); add("Reg", r.reg); add("Role", r.role); add("Phone", r.phone);
-  }
-  return L;
-}
-// Older log entries (before B246) only kept the text shown on screen. For simple fields
-// (dates, times, names, prices, yes/no…) that text is enough to put the old value back.
-const LOG_BOOL = new Set(["surveyDone", "dateFlexible", "toStore", "exchanged", "depositPaid", "balancePaid", "active"]);
-const LOG_SKIP = new Set(["contacts", "stages", "inventory", "quoteLines", "storageJobs", "away", "maint"]);
-function logParseOld(table, key, text) {
-  const t = String(text == null ? "" : text);
-  if (t === "—") return { ok: true, v: LOG_BOOL.has(key) ? false : "" };
-  if (LOG_SKIP.has(key) || /…$/.test(t)) return { ok: false };
-  if (LOG_BOOL.has(key)) return t === "Yes" ? { ok: true, v: true } : t === "No" ? { ok: true, v: false } : { ok: false };
-  if (LOG_MONEY.has(key)) { const n = Number(t.replace(/[£,\s]/g, "")); return isNaN(n) ? { ok: false } : { ok: true, v: n }; }
-  if (LOG_DATES.has(key)) { const m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? { ok: true, v: `${m[3]}-${m[2]}-${m[1]}` } : { ok: false }; }
-  if (key === "moveMonth") { const d = new Date("1 " + t); return isNaN(d) ? { ok: false } : { ok: true, v: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` }; }
-  return { ok: true, v: t };
-}
-// Fill in the old value for changes logged before B246, where it can be worked out.
-function logWithRaw(r) {
-  const fields = LOG_FIELDS[r.rec_table] || {};
-  const byLabel = {}; Object.entries(fields).forEach(([k, l]) => { byLabel[l] = k; });
-  return { ...r, changes: (r.changes || []).map(c => {
-    if (!c || c.key || !byLabel[c.field]) return c;
-    const key = byLabel[c.field];
-    const pv = logParseOld(r.rec_table, key, c.from);
-    return pv.ok ? { ...c, key, raw: pv.v } : c;
-  }) };
-}
-const logCanRestore = r => !r.pending && Array.isArray(r.changes) && r.changes.some(c => c && c.key && Object.prototype.hasOwnProperty.call(c, "raw"));
-async function restoreFromLog(entry, allRows) {
-  if (!isAdmin() || isReadOnly()) { alert("Only an admin can restore changes."); return; }
-  entry = logWithRaw(entry);
-  const ch = (entry.changes || []).filter(c => c && c.key);
-  const table = entry.rec_table;
-  let d = loadData();
-  const deleted = ch.find(c => c.key === "__record");
-  if (deleted) {
-    const rec = deleted.raw;
-    if (!rec || !rec.id) { alert("This entry doesn't hold a copy of the record, so it can't be restored."); return; }
-    if ((d[table] || []).some(x => x.id === rec.id)) { alert("That record is already back in the system."); logMarkRestored(entry.id); return; }
-    // A customer comes back with the enquiries and moves deleted at the same time.
-    const t0 = new Date(entry.at).getTime();
-    const linked = table === "customers" ? (allRows || []).filter(x => x !== entry && x.customer_id === rec.id && Math.abs(new Date(x.at).getTime() - t0) < 5 * 60000 && (x.changes || []).some(c => c && c.key === "__record")) : [];
-    const extra = linked.length ? `\n\nThis also brings back ${linked.length} enquir${linked.length === 1 ? "y/move" : "ies/moves"} deleted with them.` : "";
-    if (table !== "customers" && rec.customerId && !(d.customers || []).some(c => c.id === rec.customerId)) { alert("The customer this belonged to has been deleted. Restore the customer first (it brings this back with it)."); return; }
-    const what = logDeletedLines(table, rec).map(c => `${c.field}: ${c.to}`).join("\n");
-    const alsoList = linked.map(x => "• " + (x.summary || "").replace(/^Deleted /, "")).join("\n");
-    if (!confirm(`Restore ${(entry.summary || "").replace(/^Deleted /, "")}?\n\n${what}${extra}${alsoList ? "\n" + alsoList : ""}`)) return;
-    const recs = [[table, rec], ...linked.map(x => [x.rec_table, (x.changes.find(c => c.key === "__record") || {}).raw]).filter(([, r]) => r && r.id)];
-    const ids = recs.map(([, r]) => r.id);
-    showSavingOverlay();
-    removeTombstones(ids);
-    try { await undeleteInCloud(ids); }
-    catch (e) { hideSavingOverlay(); alert("Restoring needs a signal (it has to tell the other devices it's back). Connect and try again."); return; }
-    try { const sigs = JSON.parse(localStorage.getItem(SIG_KEY) || "{}"); ids.forEach(id => { delete sigs[id]; }); localStorage.setItem(SIG_KEY, JSON.stringify(sigs)); } catch {}
-    recs.forEach(([t, r]) => { d = upsertLocal(d, t, { ...r, updatedAt: Date.now() }); });
-    // Save, upload, then CHECK the cloud really has them back — so a restore can't quietly fail.
-    SAVING_IN_PROGRESS = true;
-    LOG_RESTORING = true;
-    try { queueLog(diffForLog(loadData(), d)); } catch {}
-    LOG_RESTORING = false;
-    const stamped = stampData(d);
-    setDB(JSON.stringify(stamped));
-    flushLog().catch(() => {});
-    let problem = "";
-    try { await pushChangedOnly(stamped); } catch (e) { problem = (e && e.message) || String(e); }
-    if (!problem) {
-      for (const [t, r] of recs) {
-        try {
-          const { data: got, error } = await supabase.from(t).select("id").eq("id", r.id);
-          if (error) { problem = error.message; break; }
-          if (!got || !got.length) { problem = `the ${t === "customers" ? "customer" : t === "enquiries" ? "enquiry" : "record"} didn't arrive in the cloud`; break; }
-        } catch (e) { problem = "no signal"; break; }
-      }
-    }
-    if (!problem) {
-      try { const left = (await readCloudDeletesFull()).ids; if (ids.some(id => left[id])) problem = "it's still on the deleted list"; } catch {}
-    }
-    SAVING_IN_PROGRESS = false;
-    hideSavingOverlay();
-    if (problem) alert(`The restore didn't finish: ${problem}.\n\nNothing is lost — tap ↩ Restore on the same entry again (with signal).`);
-    else { logMarkRestored(entry.id); linked.forEach(x => logMarkRestored(x.id)); }
-    window.location.reload();
-    return;
-  }
-  const cur = (d[table] || []).find(x => x.id === entry.rec_id);
-  if (!cur) { alert("That record has since been deleted. Restore the deletion first, then this change."); return; }
-  const next = { ...cur };
-  const lines = [];
-  const done = new Set();
-  ch.forEach(c => {
-    if (c.key === "contacts") {
-      const list = Array.isArray(next.contacts) ? next.contacts.slice() : [];
-      const sig = logContact(c.raw || {});
-      if (c.op === "remove" && !list.some(x => logContact(x) === sig)) list.push(c.raw);
-      if (c.op === "add") { const i = list.findIndex(x => logContact(x) === sig); if (i >= 0) list.splice(i, 1); }
-      next.contacts = list; if (!list.length) next.contactsCleared = true;
-      lines.push(c.op === "remove" ? `Put back contact: ${c.from}` : `Remove contact: ${c.to}`);
-      return;
-    }
-    if (done.has(c.key) || !Object.prototype.hasOwnProperty.call(c, "raw")) return;
-    done.add(c.key);
-    next[c.key] = c.raw === null ? (Array.isArray(cur[c.key]) ? [] : "") : c.raw;
-    lines.push(c.key === "stages" ? "Move plan back to how it was" : `${c.field}: back to ${c.from}`);
-  });
-  if (!lines.length) { alert("Nothing in this entry can be restored."); return; }
-  if (!confirm(`Restore these changes?\n\n${lines.join("\n")}`)) return;
-  // A move plan put back on a move also puts its move date back in step.
-  if (table === "jobs" && done.has("stages") && Array.isArray(next.stages)) next.moveDate = (next.stages[0] && next.stages[0].date) || next.moveDate || "";
-  logMarkRestored(entry.id);
-  LOG_RESTORING = true;
-  await saveAndReload(upsertLocal(d, table, { ...next, updatedAt: Date.now() }));
-}
-async function clearActivityLog() {
-  if (!isAdmin()) { alert("Only an admin can clear the activity log."); return; }
-  if (!confirm("⚠️ Clear the ENTIRE activity log?\n\nEvery recorded change, for every customer and every device, will be permanently deleted. You won't be able to see who changed what — or use Restore on anything — from before now.\n\nThis can't be undone.")) return;
-  const typed = prompt('To confirm, type CLEAR');
-  if ((typed || "").trim().toUpperCase() !== "CLEAR") { alert("Not cleared."); return; }
-  showSavingOverlay();
-  try {
-    const { error } = await supabase.from("activity_log").delete().neq("id", "");
-    if (error) throw error;
-    const { data: left } = await supabase.from("activity_log").select("id").limit(1);
-    if (left && left.length) throw new Error("the database didn't allow deleting the log");
-    try { localStorage.setItem(LOG_QUEUE_KEY, "[]"); localStorage.removeItem(RESTORED_KEY); } catch {}
-    hideSavingOverlay();
-    alert("Activity log cleared.");
-    window.location.reload();
-  } catch (e) { hideSavingOverlay(); alert("Couldn't clear the log: " + ((e && e.message) || e) + "\n\nCheck you have signal and try again."); }
-}
 function HistoryList({ customerId, title = "History", startOpen = false }) {
   const [open, setOpen] = useState(startOpen);
   const [state, setState] = useState({ rows: null, err: "" });
   const [expanded, setExpanded] = useState({});
-  const [search, setSearch] = useState("");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    let live = true;
-    const t = setTimeout(async () => {
-      setBusy(true);
-      const res = await loadLog(customerId, search);
-      if (live) { setState(res); setBusy(false); }
-    }, search ? 450 : 0);
-    return () => { live = false; clearTimeout(t); };
-    /* eslint-disable-next-line */
-  }, [open, search]);
+  useEffect(() => { if (open && !state.rows) loadLog(customerId).then(setState); /* eslint-disable-next-line */ }, [open]);
   const rows = state.rows || [];
-  const [restored] = useState(logRestoredSet);
-  const curData = (() => { try { return loadData(); } catch { return {}; } })();
-  // Customer name + ref for every entry — from the customers on this device, or (if the
-  // customer has since been deleted) from the copy kept in the log when they were deleted.
-  const refOf = (() => {
-    const m = {};
-    rows.forEach(x => { (x.changes || []).forEach(c => { if (c && c.key === "__record" && x.rec_table === "customers" && c.raw && c.raw.id) m[c.raw.id] = c.raw; }); });
-    try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {}
-    return id => m[id];
-  })();
+  const refOf = (() => { const m = {}; try { (loadData().customers || []).forEach(c => { m[c.id] = c; }); } catch {} return id => m[id]; })();
   return (
     <Card>
       <div onClick={() => setOpen(o => !o)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
@@ -848,49 +588,24 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
       </div>
       {open && (
         <div style={{ marginTop: 10 }}>
-          <input data-ro-ok type="search" value={search} onChange={ev => setSearch(ev.target.value)} placeholder="Search: name, ref, postcode, or what changed" style={{ width: "100%", height: 42, border: "1px solid #DDE6E4", borderRadius: 10, padding: "0 12px", fontFamily: "inherit", fontSize: 15, boxSizing: "border-box", marginBottom: 6 }} />
-          {!customerId && isAdmin() && <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-            <button type="button" onClick={clearActivityLog} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1.5px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🗑 Clear log</button>
-          </div>}
-          {search.trim() && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>{busy ? "Searching…" : `${rows.length}${rows.length >= 500 ? "+" : ""} change${rows.length !== 1 ? "s" : ""} found`}</div>}
           {!state.rows && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Loading…</div>}
           {state.err === "setup" && <div style={{ fontSize: 12.5, color: "#7C4A03", background: "#FFF7E8", border: "1px solid #FBD9A0", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>The history table isn't set up in the database yet (run add-history.sql). Changes are being kept on this device until it is.</div>}
           {state.err === "offline" && <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 8 }}>No signal — showing changes made on this device only.</div>}
-          {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>{search.trim() ? "Nothing matches that search." : "No changes recorded yet."}</div>}
+          {state.rows && !rows.length && <div style={{ fontSize: 13, color: "#9CA3AF" }}>No changes recorded yet.</div>}
           {rows.map(r => {
-            const delRec = (Array.isArray(r.changes) ? r.changes : []).find(c => c && c.key === "__record");
-            const delLines = delRec ? logDeletedLines(r.rec_table, delRec.raw) : [];
-            const ch = (Array.isArray(r.changes) ? r.changes : []).filter(c => c && c.key !== "__record");
-            const canRestore = isAdmin() && !isReadOnly() && logCanRestore(logWithRaw(r)); // admins only
-            const wasRestored = restored.has(r.id) && (!delRec || !delRec.raw || (curData[r.rec_table] || []).some(x => x.id === delRec.raw.id));
+            const ch = Array.isArray(r.changes) ? r.changes : [];
             const isOpen = expanded[r.id] || ch.length <= 3;
             const when = new Date(r.at);
             return (
               <div key={r.id} style={{ borderTop: "1px solid #F0F4F3", padding: "8px 0", minWidth: 0, overflowWrap: "anywhere" }}>
-                {canRestore && (wasRestored
-                  ? <span style={{ float: "right", fontSize: 13, fontWeight: 800, color: "#DC2626", marginLeft: 8 }}>✓ Restored</span>
-                  : <button type="button" onClick={() => restoreFromLog(r, rows)} style={{ float: "right", marginLeft: 8, height: 32, padding: "0 12px", borderRadius: 9, border: "none", background: TEAL, color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>↩ Restore</button>)}
                 <div style={{ fontSize: 13.5, fontWeight: 800, color: "#10211E" }}>
                   {r.who || "Unknown"} · {isNaN(when) ? "" : `${fmtUK(when.toISOString().slice(0, 10))} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`}
                   {r.pending ? <span style={{ fontWeight: 600, color: "#B45309", fontSize: 11.5 }}> · not uploaded yet</span> : null}
                 </div>
                 <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: ch.length ? 4 : 0 }}>
-                  {(() => {
-                    const c = r.customer_id && refOf(r.customer_id);
-                    const label = c ? [c.ref ? `#${c.ref}` : "", c.name || ""].filter(Boolean).join(" ") : "";
-                    return label ? <><b style={{ color: TEAL }}>{label}</b> · </> : null;
-                  })()}
-                  {(() => {
-                    let txt = ch.length ? (r.summary || "").replace(/:.*$/, "") : (r.summary || "");
-                    // The name is already shown at the front, so a customer entry just says what happened.
-                    const c = r.customer_id && refOf(r.customer_id);
-                    if (r.rec_table === "customers" && c && c.name) {
-                      txt = ch.length ? txt.replace(c.name, "Customer details") : txt.replace(new RegExp(`(Created|Deleted|Restored) ${c.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "$1 customer");
-                    }
-                    const m = txt.match(/^Restored( · )?/);
-                    const rest = txt.slice(m ? m[0].length : 0).trim();
-                    return m ? <><b style={{ color: "#DC2626", fontWeight: 800 }}>Restored</b>{rest ? " · " + rest : ""}</> : txt;
-                  })()}
+                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? <b style={{ color: TEAL }}>#{c.ref}</b> : null; })()}
+                  {(() => { const c = r.customer_id && refOf(r.customer_id); return c && c.ref ? " · " : ""; })()}
+                  {ch.length ? (r.summary || "").replace(/:.*$/, "") : r.summary}
                 </div>
                 {(isOpen ? ch : ch.slice(0, 3)).map((c, i) => (
                   <div key={i} style={{ fontSize: 12.5, color: "#374151", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word" }}>
@@ -898,9 +613,6 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
                   </div>
                 ))}
                 {!isOpen && <span onClick={() => setExpanded(e => ({ ...e, [r.id]: true }))} style={{ fontSize: 12, color: TEAL, fontWeight: 700, cursor: "pointer" }}>+ {ch.length - 3} more</span>}
-                {delLines.length > 0 && <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "6px 9px", marginTop: 2 }}>
-                  {delLines.map((c, i) => <div key={i} style={{ fontSize: 12.5, color: "#374151", lineHeight: 1.45, overflowWrap: "anywhere" }}><b>{c.field}:</b> <span style={{ color: "#991B1B" }}>{c.to}</span></div>)}
-                </div>}
               </div>
             );
           })}
@@ -915,7 +627,7 @@ async function saveAndReload(data) {
   if (isReadOnly()) { alert("You have read-only access, so changes can't be saved. Ask Dave if you need to change something."); return; }
   showSavingOverlay();
   SAVING_IN_PROGRESS = true;
-  if (!LOG_SUSPEND) { try { queueLog(diffForLog(loadData(), data)); } catch { /* history is best effort */ } }
+  try { queueLog(diffForLog(loadData(), data)); } catch { /* history is best effort */ }
   const stamped = stampData(data);
   setDB(JSON.stringify(stamped));
   flushLog().catch(() => {});
@@ -1183,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B255";
+const BUILD_NO = "B214";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1331,79 +1043,6 @@ function moveSeqOf(data, job) {
 function hwBoxes(inv) {
   return (inv || []).reduce((n, it) => n + ((it && it.qty > 0 && (it.wardrobe || /wardrobe box/i.test(it.name || ""))) ? Number(it.qty) || 0 : 0), 0);
 }
-// ── Furniture covers (equipment required) ──
-// Worked out from the survey (detailed list OR freehand text): sofas, armchairs and mattresses.
-// Corner sofa = 1 × 2 seater + 1 × 3 seater cover. 3 piece suite = 3 seater + 2 armchairs.
-// A sofa with no size given gets a 3 seater cover (the bigger one always fits).
-const COVER_TYPES = ["3 Seater Sofa", "2 Seater Sofa", "Armchair", "King Mattress", "Double Mattress", "Single Mattress"];
-const COVER_CATALOG = { "cons-sofa": { "2 Seater Sofa": 1 } };
-const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
-const COVER_RE = /\b(?:(\d+|one|two|three|four|five|six)\s*(?:x|×)\s*|(\d+|one|two|three|four|five|six)\s+(?=[a-z]))?((?:3|three)[\s-]*(?:piece|pce|pc)[\s-]*suites?|(?:large\s+|small\s+)?corner[\s-]*(?:sofa|settee|couch|suite|unit)s?(?:\s*\/\s*sectional)?|sectional(?:\s*(?:sofa|settee|couch))?s?|(?:[34]|three|four)[\s-]*seat(?:er|ed)?(?:\s*(?:sofa|settee|couch)(?:es|s)?)?(?![\s-]*(?:dining|kitchen|garden|patio|table|bench))|(?:2|two)[\s-]*seat(?:er|ed)?(?:\s*(?:sofa|settee|couch)(?:es|s)?)?(?![\s-]*(?:dining|kitchen|garden|patio|table|bench))|(?<!(?:garden|rattan|patio|outdoor|conservatory)\s)(?:sofa[\s-]*beds?|sofas?|settees?|couch(?:es)?)|arm[\s-]*chairs?|easy[\s-]*chairs?|recliners?(?:\s*chairs?)?|wing[\s-]*(?:back[\s-]*)?chairs?|(?:super[\s-]*)?king[\s-]*(?:size[d]?\s*)?mattress(?:es)?|(?:small[\s-]*)?double[\s-]*mattress(?:es)?|single[\s-]*mattress(?:es)?|cot[\s-]*mattress(?:es)?|mattress(?:es)?(?![\s-]*(?:topper|protector|cover)))\b(?:\s*(?:x|×)\s*(\d+))?/gi;
-// Freehand only: a bed includes its mattress (we don't write mattresses separately), so each bed
-// gets a mattress cover. Bunk bed = 2 singles; cabin / high / mid sleeper / cot bed = single;
-// a bed with no size given = double. Sofa beds, dog beds, day beds, air beds etc. are ignored.
-const BED_RE = /\b(?:(\d+|one|two|three|four|five|six)\s*(?:x|×)\s*|(\d+|one|two|three|four|five|six)\s+(?=[a-z]))?(?<!(?:sofa|dog|cat|pet|garden|flower|raised|day|camp|air|futon|water|plant|seed)[\s-]?)((?:(?:super[\s-]*)?king(?:[\s-]*size[d]?)?|(?:small[\s-]*)?double|single|bunk|cabin|cot|guest|divan|kids?|childs?|children'?s)?[\s-]*(?:beds?|divans?)|high[\s-]*sleepers?|mid[\s-]*sleepers?)\b(?:\s*(?:x|×)\s*(\d+))?/gi;
-function bedsInText(chunk, add) {
-  const re = new RegExp(BED_RE.source, "gi"); let m, found = false;
-  while ((m = re.exec(chunk))) {
-    const w = m[3].toLowerCase().trim();
-    if (!w) continue;
-    found = true;
-    const q0 = m[1] || m[2] || m[4];
-    const q = q0 ? (NUM_WORDS[q0.toLowerCase()] || parseInt(q0, 10) || 1) : 1;
-    if (/bunk/.test(w)) add("Single Mattress", q * 2);
-    else if (/king/.test(w)) add("King Mattress", q);
-    else if (/single|cabin|cot|sleeper|kid|child/.test(w)) add("Single Mattress", q);
-    else add("Double Mattress", q);
-  }
-  return found;
-}
-function coversInText(text, mult = 1, add, withBeds = false) {
-  String(text || "").split(/\n|,|;|·/).forEach(line => {
-    // "Double bed & mattress" → one cover, not two.
-    const hasBed = withBeds && bedsInText(line, add);
-    line.split(/\+|&|\band\b|\bwith\b/i).forEach(chunk => {
-    const re = new RegExp(COVER_RE.source, "gi"); let m;
-    while ((m = re.exec(chunk))) {
-      if (hasBed && /mattress/i.test(m[3])) continue;
-      const q0 = m[1] || m[2] || m[4];
-      const q = (q0 ? (NUM_WORDS[q0.toLowerCase()] || parseInt(q0, 10) || 1) : 1) * mult;
-      const w = m[3].toLowerCase();
-      if (/piece|pce|pc/.test(w) && /suite/.test(w)) { add("3 Seater Sofa", q); add("Armchair", q * 2); }
-      else if (/corner|sectional/.test(w)) { add("2 Seater Sofa", q); add("3 Seater Sofa", q); }
-      else if (/^(2|two)[\s-]*seat/.test(w)) add("2 Seater Sofa", q);
-      else if (/seat|sofa|settee|couch/.test(w)) add("3 Seater Sofa", q);
-      else if (/chair|recliner/.test(w)) add("Armchair", q);
-      else if (/king/.test(w)) add("King Mattress", q);
-      else if (/single|cot/.test(w)) add("Single Mattress", q);
-      else add("Double Mattress", q); // double, small double, or size not given
-    }
-    });
-  });
-}
-function coversRequired(inv) {
-  const tot = {};
-  const add = (k, q) => { if (q > 0) tot[k] = (tot[k] || 0) + q; };
-  (inv || []).forEach(it => {
-    if (!it || it.wardrobe || it.dismantleNote || !(Number(it.qty) > 0)) return;
-    const qty = Number(it.qty) || 1;
-    const fixed = it.catalogId && COVER_CATALOG[it.catalogId];
-    if (fixed) Object.entries(fixed).forEach(([k, n]) => add(k, n * qty));
-    else coversInText(it.freehand ? (it.raw ?? it.name) : it.name, it.freehand ? 1 : qty, add, !!it.freehand);
-  });
-  return COVER_TYPES.filter(k => tot[k]).map(k => ({ name: k + " Cover", qty: tot[k] }));
-}
-const coversText = list => (list || []).map(c => `${c.qty} × ${c.name}`).join(", ");
-function CoversBox({ inv }) {
-  const list = coversRequired(inv);
-  if (!list.length) return null;
-  return (
-    <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 8 }}>
-      🛋 Equipment required
-      {list.map(c => <div key={c.name} style={{ fontSize: 13.5, fontWeight: 700, color: "#374151", paddingLeft: 8 }}>{c.qty} × {c.name}</div>)}
-    </div>
-  );
-}
 function jobVolume(data, j) {
   const e = j && (data.enquiries || []).find(x => x.id === j.enquiryId);
   if (!e) return 0;
@@ -1518,11 +1157,6 @@ function altReps(data, list) {
   (list || []).forEach(x => { const k = altRoot(x); if (!best[k] || score(x) < score(best[k]) || (score(x) === score(best[k]) && !x.altOf)) best[k] = x; });
   return (list || []).filter(x => best[altRoot(x)] === x);
 }
-// Net (ex VAT) value of a move/quote. Quotes with "Add VAT" ticked include 20% VAT in the price.
-function netValue(e, j) {
-  const gross = Number(j && j.price ? j.price : (e && e.quoteTotal)) || 0;
-  return e && e.quoteVat ? gross / 1.2 : gross;
-}
 function enqBadge(data, e) {
   if (!e) return "";
   if (e.altClosed && e.status === "Not quoted") return "Alt. not chosen";
@@ -1536,7 +1170,7 @@ function quoteChase(data, e) {
   if ((data.jobs || []).some(j => j.enquiryId === e.id)) return null;
   const cust = (data.customers || []).find(c => c.id === e.customerId) || {};
   const days = e.quoteSentDate ? Math.max(0, Math.round((new Date(todayISO() + "T00:00") - new Date(e.quoteSentDate + "T00:00")) / 86400000)) : null;
-  return { phone: cust.phone || cust.homePhone || "", days, sent: e.quoteSentDate || "", lastCall: e.quoteChasedAt || "" };
+  return { phone: callPhone(cust), days, sent: e.quoteSentDate || "", lastCall: e.quoteChasedAt || "" };
 }
 // When a sent quote should come up in To do: on the date you picked, otherwise
 // a week after it was sent (or a week after your last chase call).
@@ -1566,6 +1200,31 @@ function quoteChaseText(q) {
   const sent = q.days == null ? "Quote sent" : q.days === 0 ? "Quote sent today" : `Quote sent ${q.days} day${q.days !== 1 ? "s" : ""} ago`;
   return sent + (q.lastCall ? ` · last called ${fmtDateShort(q.lastCall.slice(0, 10))}` : " · not called yet");
 }
+// Who to ring: a contact ticked "Call this person first" wins, otherwise the customer's own number.
+function callFirst(cust) {
+  const c = ((cust && cust.contacts) || []).find(x => x && x.preferred && x.phone);
+  return c || null;
+}
+function callPhone(cust) {
+  const c = callFirst(cust);
+  return c ? c.phone : ((cust && (cust.phone || cust.homePhone)) || "");
+}
+function callLabel(cust) {
+  const c = callFirst(cust);
+  return c ? `📞 Call ${String(c.name || "contact").split(" ")[0]}` : "📞 Call";
+}
+// "Calling Sarah (wife) first · or call Mrs Jessica Harvey" row under the call buttons.
+function CallFirstNote({ cust, onCall }) {
+  const c = callFirst(cust);
+  const own = cust && (cust.phone || cust.homePhone);
+  if (!c || !own) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", fontSize: 13, background: "#FFF9EE", border: "1px solid #FBD9A0", borderRadius: 10, padding: "8px 11px", marginBottom: 12 }}>
+      <span style={{ color: "#92400E", fontWeight: 700 }}>📞 Calls go to {c.name || "contact"}{c.relation ? ` (${c.relation.toLowerCase()})` : ""} first</span>
+      <span role="button" onClick={() => { if (onCall) onCall(); window.location.href = `tel:${own}`; }} style={{ color: TEAL, fontWeight: 800, textDecoration: "underline", cursor: "pointer" }}>Call {cust.name || "customer"} instead</span>
+    </div>
+  );
+}
 // Ring the customer about their quote: logs the call and remembers when, without a full reload.
 function callAboutQuote(e, phone) {
   try {
@@ -1586,7 +1245,7 @@ function ChaseCallBtn({ data, e, small }) {
 function newEnqCall(data, e) {
   if (!e || e.status !== "New" || e.surveyDate) return null;
   const cust = (data.customers || []).find(c => c.id === e.customerId) || {};
-  return { phone: cust.phone || cust.homePhone || "", lastCall: e.newCalledAt || "" };
+  return { phone: callPhone(cust), lastCall: e.newCalledAt || "" };
 }
 function callNewEnquiry(e, phone) {
   try {
@@ -1642,8 +1301,6 @@ function Dashboard({ data, setView, setData }) {
   const jobs = data.jobs || [];
   const dashShow = ""; // the Surveys / Moves / Servicing buttons were removed
   const [tmOpen, toggleTm] = useRemembered("removals_home_today_moves");
-  const [homeBy, setHomeByRaw] = useState(() => { try { return localStorage.getItem("removals_home_dateby") === "move" ? "move" : "survey"; } catch { return "survey"; } });
-  const setHomeBy = v => { setHomeByRaw(v); try { localStorage.setItem("removals_home_dateby", v); } catch {} };
   const [tsOpen, toggleTs] = useRemembered("removals_home_today_surveys");
   const [svOpen, toggleSv] = useRemembered("removals_home_servicing", false);
   const [usOpen, toggleUs] = useRemembered("removals_home_upsurveys", true);
@@ -1737,42 +1394,14 @@ function Dashboard({ data, setView, setData }) {
 
   return (
     <div>
-      {(() => {
-        // Two simple results for this month:
-        //  • Quotes booked — of this month's surveys, how many have been booked (and the % / £).
-        //  • Moves booked  — moves with a move date this month (count and £).
-        const ym = todayISO().slice(0, 7);
-        const jobOf = e => (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go");
-        // Quotes booked in to see: survey visits with a survey date this month.
-        const quotesDone = enquiries.filter(e => String(e.surveyDate || "").slice(0, 7) === ym);
-        const seen = quotesDone.filter(e => e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won", "Lost"].includes(e.status)).length;
-        const movesMonth = jobs.filter(j => j.status !== "Let Go" && String(jobMoveDate(j) || "").slice(0, 7) === ym);
-        const mMoney = Math.round(movesMonth.reduce((t, j) => t + netValue((data.enquiries || []).find(e => e.id === j.enquiryId), j), 0) * 100) / 100;
-        const monthName = new Date().toLocaleDateString("en-GB", { month: "long" });
-        const tile = { flex: 1, minWidth: 0, background: "#fff", borderRadius: 12, padding: "10px 14px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: "2px solid #F3F4F6", cursor: "pointer" };
-        const big = { fontSize: 24, fontWeight: 800, lineHeight: 1.2 };
-        const lab = { fontSize: 12.5, color: "#6B7280", fontWeight: 700 };
-        return (
-          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-            <div style={tile} onClick={() => { try { localStorage.setItem("removals_enq_period", "month"); localStorage.setItem("removals_enq_dateby", "survey"); } catch {} setView({ screen: "enquiries", filter: "All" }); }}>
-              <div style={lab}>Quotes booked in · {monthName}</div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ ...big, color: AMBER }}>{quotesDone.length}</span>
-                <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>to see this month</span>
-              </div>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{seen} seen · {quotesDone.length - seen} to go</div>
-            </div>
-            <div style={tile} onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })}>
-              <div style={lab}>Moving · {monthName}</div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ ...big, color: "#2563EB" }}>{movesMonth.length}</span>
-                <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>moving this month</span>
-              </div>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{gbp(mMoney)} <span style={{ fontWeight: 600, color: "#9CA3AF", fontSize: 12 }}>net</span></div>
-            </div>
-          </div>
-        );
-      })()}
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <Stat label="Open enquiries" value={open.length} color={TEAL} onClick={() => setView({ screen: "enquiries", filter: "Open" })} />
+        <Stat label="Quoted" value={quotesOut.length} color={AMBER} onClick={() => setView({ screen: "enquiries", filter: "Quoted" })} />
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <Stat label="Active moves" value={jobs.filter(j => !["Completed","Let Go"].includes(j.status)).length} color="#2563EB" onClick={() => setView({ screen: "enquiries", filter: "Won" })} />
+        <Stat label="Booked (month)" value={`${convRate}%`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
+      </div>
 
       <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 18px", borderRadius: 10, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
         <Icon name="plus" size={15} /> New Enquiry
@@ -1781,7 +1410,7 @@ function Dashboard({ data, setView, setData }) {
       {/* ── To do: every reminder in one list, most urgent first ── */}
       {(() => {
         const items = [];
-        const phoneOf = cid => { const c = (data.customers || []).find(x => x.id === cid) || {}; return c.phone || c.homePhone || ""; };
+        const phoneOf = cid => callPhone((data.customers || []).find(x => x.id === cid) || {});
         const markDone = en => saveAndReload(upsertLocal(data, "enquiries", { ...en, surveyDone: true, status: en.status === "New" ? "Surveyed" : en.status }));
         const openQuote = en => { try { sessionStorage.setItem("removals_open_quote", en.id); } catch {} setView({ screen: "enquiryDetail", id: en.id }); };
         const openEdit = en => { try { sessionStorage.setItem("removals_open_edit", en.id); } catch {} setView({ screen: "enquiryDetail", id: en.id }); };
@@ -2045,7 +1674,7 @@ function SectionTitle({ children }) {
 
 // ── Enquiries list ──────────────────────────────────────────────────────────
 function EnquiriesList({ data, setView, initialFilter }) {
-  const [filterRaw, setFilter] = useState(initialFilter || "Surveyed");
+  const [filter, setFilter] = useState(initialFilter || "Surveyed");
   const enquiries = altReps(data, data.enquiries || []); // alternative quotes count once
   const filters = ["All", ...ENQUIRY_STATUSES];
   const moveCompleted = e => (data.jobs || []).some(j => j.enquiryId === e.id && j.status === "Completed");
@@ -2058,34 +1687,16 @@ function EnquiriesList({ data, setView, initialFilter }) {
   const [custom, setCustomRaw] = useState(() => { try { return JSON.parse(localStorage.getItem("removals_enq_custom") || "null") || { from: "", to: "" }; } catch { return { from: "", to: "" }; } });
   const setCustom = v => { setCustomRaw(v); try { localStorage.setItem("removals_enq_custom", JSON.stringify(v)); } catch {} };
   const thisMonth = todayISO().slice(0, 7);
-  // "Last month" = the whole of the previous calendar month; "Last week" = the previous Mon–Sun.
-  const _now = new Date();
-  const _iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const lastMonthFrom = _iso(new Date(_now.getFullYear(), _now.getMonth() - 1, 1));
-  const lastMonthTo = _iso(new Date(_now.getFullYear(), _now.getMonth(), 0));
-  const _mon = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate() - ((_now.getDay() + 6) % 7)); // this Monday
-  const lastWeekFrom = _iso(new Date(_mon.getFullYear(), _mon.getMonth(), _mon.getDate() - 7));
-  const lastWeekTo = _iso(new Date(_mon.getFullYear(), _mon.getMonth(), _mon.getDate() - 1));
-  const sinceISO = period === "all" ? "" : period === "custom" ? (custom.from || "") : period === "month" ? thisMonth + "-01" : period === "31" ? lastMonthFrom : period === "7" ? lastWeekFrom : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
-  const untilISO = period === "custom" ? (custom.to || "") : period === "month" ? thisMonth + "-31" : period === "31" ? lastMonthTo : period === "7" ? lastWeekTo : "";
+  const sinceISO = period === "all" ? "" : period === "custom" ? (custom.from || "") : period === "month" ? thisMonth + "-01" : new Date(Date.now() - Number(period) * 86400000).toISOString().slice(0, 10);
+  const untilISO = period === "custom" ? (custom.to || "") : period === "month" ? thisMonth + "-31" : "";
   // Same date as Reports uses (survey date, or when it came in if there's no survey), so the
   // numbers here and in Reports always agree.
-  // Which date the period looks at: survey date (default, matches Reports), move date or enquiry date.
-  const [dateBy, setDateByRaw] = useState(() => { try { return localStorage.getItem("removals_enq_dateby") === "move" ? "move" : "survey"; } catch { return "survey"; } });
-  const setDateBy = v => { setDateByRaw(v); try { localStorage.setItem("removals_enq_dateby", v); } catch {} };
-  // Survey date hides New/Surveyed; move date also hides Survey booked/Not quoted — a hidden pick falls back to all.
-  const hideTiles = dateBy === "survey" ? ["New", "Surveyed"] : ["New", "Surveyed", "Survey booked", "Quoted", "No date provisional", "Lost", "Not quoted", "Let Go", "All"];
-  const filter = hideTiles.includes(filterRaw) ? (dateBy === "move" ? "Won" : "All") : filterRaw;
-  const moveDay = e => { const j = moveOf(e); return (j && jobMoveDate(j)) || e.preferredDate || ""; };
-  const cameIn = e => String(dateBy === "move" ? moveDay(e) : dateBy === "enquiry" ? (e.createdAt || e.enquiryDate || "") : (e.surveyDate || "")).slice(0, 10);
+  const cameIn = e => String(e.surveyDate || e.createdAt || e.enquiryDate || "").slice(0, 10);
   const inPeriod = e => { const d = cameIn(e); if (!d) return !sinceISO && !untilISO; return (!sinceISO || d >= sinceISO) && (!untilISO || d <= untilISO); };
   const periodList = enquiries.filter(inPeriod);
   const baseList = periodList.filter(e => !moveCompleted(e));
   // Booked but no date yet gets its own tile ("No date provisional").
   const grp = e => { const j = moveOf(e); return j && j.status !== "Let Go" && jobBadge(j) === "No date provisional" ? "No date provisional" : enqGroup(e); };
-  // Net £ value (ex VAT) of the moves in a tile: move price, or the quote if no price is set.
-  const tileList = f => f === "Completed" ? periodList.filter(moveCompleted) : baseList.filter(e => grp(e) === f);
-  const valueFor = f => Math.round(tileList(f).reduce((t, e) => t + netValue(e, moveOf(e)), 0) * 100) / 100;
   const countFor = f => f === "All" ? periodList.length : f === "Completed" ? periodList.filter(moveCompleted).length : f === "Open" ? baseList.filter(e => ["New", "Surveyed", "Quoted"].includes(e.status)).length : baseList.filter(e => grp(e) === f).length;
   const surveyedCount = enquiries.filter(e => e.status === "Surveyed").length;
   const shown = (filter === "All" || filter === "Completed" ? periodList : baseList)
@@ -2093,7 +1704,6 @@ function EnquiriesList({ data, setView, initialFilter }) {
     .sort((a, b) => filter === "Won"
       ? moveDateOf(a).localeCompare(moveDateOf(b))
       : (b.createdAt || "").localeCompare(a.createdAt || ""));
-  try { sessionStorage.setItem("removals_enq_order", JSON.stringify(shown.map(e => e.id))); } catch {}
 
   return (
     <div>
@@ -2101,15 +1711,11 @@ function EnquiriesList({ data, setView, initialFilter }) {
         <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <select value={dateBy} onChange={e => setDateBy(e.target.value)} aria-label="Which date" style={{ padding: "10px 8px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#F3F7F6", fontSize: 14, fontWeight: 700, color: "#10211E", flexShrink: 0 }}>
-          <option value="survey">Survey date</option>
-          <option value="move">Move date</option>
-        </select>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#6A7B77" }}>Survey date</span>
         <select value={period} onChange={e => setPeriod(e.target.value)} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, fontWeight: 700, color: "#10211E" }}>
           {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
       </div>
-      {period !== "all" && period !== "custom" && sinceISO && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#6A7B77", margin: "-4px 2px 10px" }}>{dateBy === "move" ? "Moves" : "Surveys"} {fmtDate(sinceISO)} – {untilISO ? fmtDate(untilISO.endsWith("-31") ? _iso(new Date(Number(untilISO.slice(0, 4)), Number(untilISO.slice(5, 7)), 0)) : untilISO) : "today"}</div>}
       {period === "custom" && (
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           {[["from", "From"], ["to", "To"]].map(([k, l]) => (
@@ -2122,7 +1728,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
       )}
       {/* Status tiles — same style as the dashboard stat cards. Tap a tile to filter. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New").flatMap(x => x === "Won" ? ["Won", "No date provisional", "Completed"] : [x]), "All"].filter(f => !hideTiles.includes(f)).map(f => {
+        {["New", "Survey booked", ...ENQUIRY_STATUSES.filter(x => x !== "New").flatMap(x => x === "Won" ? ["Won", "No date provisional", "Completed"] : [x]), "All"].map(f => {
           const active = filter === f;
           const label = f === "Won" ? "Moves Booked" : f === "Completed" ? "Moves completed" : f === "All" ? "All enquiries" : f;
           const n = countFor(f);
@@ -2132,14 +1738,13 @@ function EnquiriesList({ data, setView, initialFilter }) {
             <button key={f} onClick={() => setFilter(f)} style={{
               gridColumn: f === "All" ? "1 / -1" : "auto",
               textAlign: "left", minWidth: 0, cursor: "pointer", fontFamily: "inherit",
-              background: active ? meta.bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 7, rowGap: 0,
+              background: active ? meta.bg : "#fff", borderRadius: 10, padding: "7px 12px", display: "flex", alignItems: "baseline", gap: 7,
               border: active ? `2px solid ${accent}` : "2px solid #F3F4F6",
               boxShadow: "0 1px 3px rgba(0,0,0,.07)", transition: "all .15s",
             }}>
               <div style={{ fontSize: 17, fontWeight: 800, color: accent, lineHeight: 1.4 }}>{n}</div>
               <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 600, lineHeight: 1.25, minWidth: 0, flex: 1 }}>{label}</div>
-              {f !== "All" && dateBy !== "move" && periodList.length > 0 && <div style={{ fontSize: 11.5, fontWeight: 800, color: n ? accent : "#C4CDCB", lineHeight: 1.4, flexShrink: 0 }}>{Math.round((n / periodList.length) * 100)}%</div>}
-              {(f === "Won" || f === "Completed") && <div style={{ width: "100%", fontSize: 13, fontWeight: 700, color: "#41514E", lineHeight: 1.3 }}>{gbp(valueFor(f))} <span style={{ fontWeight: 600, color: "#9CA3AF", fontSize: 11.5 }}>net</span></div>}
+              {f !== "All" && periodList.length > 0 && <div style={{ fontSize: 11.5, fontWeight: 800, color: n ? accent : "#C4CDCB", lineHeight: 1.4, flexShrink: 0 }}>{Math.round((n / periodList.length) * 100)}%</div>}
             </button>
           );
         })}
@@ -2154,16 +1759,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
               <ReasonLine e={e} />
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
               <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
-                {(() => {
-                  // Show the date being filtered on first, so the list matches the dates picked.
-                  const j = moveOf(e); const md = j && jobMoveDate(j);
-                  const mv = md ? "Move " + fmtDate(md) : (e.preferredDate ? "Move " + fmtDate(e.preferredDate) : "Move date TBC");
-                  const sv = e.surveyDate ? "Survey " + fmtDate(e.surveyDate) : "";
-                  const en = e.createdAt ? "Enquiry " + fmtDate(String(e.createdAt).slice(0, 10)) : "";
-                  const order = dateBy === "move" ? [mv, sv] : dateBy === "enquiry" ? [en, sv, mv] : [sv, mv];
-                  const [first, ...rest] = order.filter(Boolean);
-                  return <>{first ? <b style={{ color: "#41514E" }}>{first}</b> : null}{rest.length ? " · " + rest.join(" · ") : ""}</>;
-                })()}
+                {(() => { const j = moveOf(e); const md = j && jobMoveDate(j); return md ? "Move " + fmtDate(md) : (e.preferredDate ? fmtDate(e.preferredDate) : "Date TBC"); })()}
                 {e.volumeCuFt ? ` · ${e.volumeCuFt} cu ft` : ""}
                 {e.quoteTotal ? ` · ${gbp(e.quoteTotal)}` : ""}
               </div>
@@ -2550,13 +2146,11 @@ function parseEnquiryEmail(text) {
   if (sectioned) add("From property", fromProp);
   add("To property", toProp);
   const keyPoints = [...extras, ...rm.lines];
-  // Notes = the customer's special requirements only (nothing else from the enquiry).
-  void keyPoints;
-  out.notes = String(fieldIn(topBlock, ["special requirements", "special requirement", "requirements"]) || "").trim();
+  out.notes = (keyPoints.join("\n") + (rm.message ? (keyPoints.length ? "\n\n" : "") + "Message:\n" + rm.message : "")).trim() || t.trim().slice(0, 1200);
   return out;
 }
 
-function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, header, title, returnView }) {
+function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) {
   const e = editEnquiry || {};
   const [customerId, setCustomerId] = useState(e.customerId || initialCustomerId || "");
   useEffect(() => { if (!e.id && initialCustomerId) selectCustomer(initialCustomerId); /* eslint-disable-next-line */ }, []);
@@ -2583,11 +2177,6 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [pickerKey, setPickerKey] = useState(0);
-  // Editing an enquiry also edits the customer's own details (same fields as Edit Customer).
-  const cust0 = e.id ? ((data.customers || []).find(c => c.id === e.customerId) || null) : null;
-  const [cf, setCf] = useState(() => cust0 ? { name: cust0.name || "", custType: cust0.custType || "Private", company: cust0.company || "", phone: cust0.phone || "", homePhone: cust0.homePhone || "", email: cust0.email || "", address1: cust0.address1 || "", address2: cust0.address2 || "", town: cust0.town || "", postcode: cust0.postcode || "", notes: cust0.notes || "" } : null);
-  const [cContacts, setCContacts] = useState(() => (cust0 && cust0.contacts) || []);
-  const setC = (k, v) => setCf(p => ({ ...p, [k]: v }));
   const autofill = () => {
     const p = parseEnquiryEmail(pasteText);
     // Already a customer? (same email or mobile, or the only customer with that name) → use them, don't duplicate.
@@ -2651,12 +2240,6 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
     let cid = customerId;
     if (f.exchanged && !f.preferredDate) { alert("This move is marked as exchanged — please set the confirmed move date."); return; }
     if (!e.id && !f.referredBy) { alert("Please choose where they heard of us (Referred by)."); return; }
-    if (cust0 && cf) {
-      if (!cf.name.trim()) { alert("The customer's name can't be blank."); return; }
-      const keep = cContacts.filter(contactFilled);
-      const crec = { ...cust0, ...cf, name: cf.name.trim(), contacts: keep, contactsCleared: !keep.length && ((cust0.contacts || []).length > 0 || !!cust0.contactsCleared) ? true : undefined };
-      if (JSON.stringify(crec) !== JSON.stringify(cust0)) data2 = upsertLocal(data2, "customers", crec);
-    }
     if (!cid) {
       if (!newCust.name.trim()) { alert("Enter a customer name (or pick an existing customer)."); return; }
       cid = uid();
@@ -2679,13 +2262,12 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
       createdAt: e.createdAt || new Date().toISOString(),
     };
     data2 = upsertLocal(data2, "enquiries", rec);
-    try { sessionStorage.setItem("removals_view", JSON.stringify(returnView || (e.id ? { screen: "enquiryDetail", id: e.id } : { screen: "dashboard" }))); } catch {}
+    try { sessionStorage.setItem("removals_view", JSON.stringify(e.id ? { screen: "enquiryDetail", id: e.id } : { screen: "dashboard" })); } catch {}
     await saveAndReload(data2);
   }
 
   return (
-    <Modal title={title || (reopen ? "Rebook survey" : e.id ? "Edit Enquiry" : "New Enquiry")} onClose={onClose}>
-      {header}
+    <Modal title={reopen ? "Rebook survey" : e.id ? "Edit Enquiry" : "New Enquiry"} onClose={onClose}>
       {!e.id && (
         <Field label="Customer" required>
           {!pasteOpen
@@ -2722,25 +2304,6 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
               }}>Fill in</Btn>
             </div>
           </div>)}
-      {cust0 && cf && <>
-        <SectionTitle>Customer</SectionTitle>
-        <Field label="Full name" required><Input value={cf.name} onChange={v => setC("name", v)} /></Field>
-        <Field label="Type"><Select value={cf.custType} onChange={v => setC("custType", v)} options={["Private", "Commercial"]} /></Field>
-        {cf.custType === "Commercial" && <Field label="Company"><Input value={cf.company} onChange={v => setC("company", v)} /></Field>}
-        <div style={{ display: "flex", gap: 10 }}>
-          <div style={{ flex: 1 }}><Field label="Mobile phone"><Input value={cf.phone} onChange={v => setC("phone", v)} /></Field></div>
-          <div style={{ flex: 1 }}><Field label="Home phone"><Input value={cf.homePhone} onChange={v => setC("homePhone", v)} /></Field></div>
-        </div>
-        <Field label="Email"><Input type="email" value={cf.email} onChange={v => setC("email", v)} /></Field>
-        <ContactsEditor contacts={cContacts} onChange={setCContacts} />
-        <Field label="Customer address" hint="Their home/billing address"><Input value={cf.address1} onChange={v => setC("address1", v)} /></Field>
-        <Field label="Address line 2"><Input value={cf.address2} onChange={v => setC("address2", v)} placeholder="(optional)" /></Field>
-        <div style={{ display: "flex", gap: 10 }}>
-          <div style={{ flex: 1 }}><Field label="Town"><Input value={cf.town} onChange={v => setC("town", v)} /></Field></div>
-          <div style={{ width: 120 }}><Field label="Postcode"><Input value={cf.postcode} onChange={v => setC("postcode", v)} /></Field></div>
-        </div>
-        <Field label="Customer notes"><Textarea value={cf.notes} onChange={v => setC("notes", v)} /></Field>
-      </>}
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date">
         <Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} />
@@ -3409,17 +2972,6 @@ function InventoryModal({ data, enquiry, onClose }) {
               ? Object.values(freeRooms).reduce((n, r) => n + (Number(r.wardrobe) || 0), 0)
               : Object.values(lines).reduce((n, v) => n + (v.qty > 0 && /wardrobe box/i.test(v.name || "") ? Number(v.qty) || 0 : 0), 0)}</span>
           </div>
-          {(() => {
-            const cv = coversRequired(invMode === "freehand"
-              ? Object.values(freeRooms).map(r => ({ freehand: true, raw: r.text, qty: 1 }))
-              : Object.values(lines));
-            return cv.length ? (
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-                <span style={{ fontSize: 13, opacity: .85, flexShrink: 0 }}>Covers required</span>
-                <span style={{ fontWeight: 700, textAlign: "right", fontSize: 13 }}>{cv.map(c => <div key={c.name}>{c.qty} × {c.name.replace(/ Cover$/, "")}</div>)}</span>
-              </div>
-            ) : null;
-          })()}
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, opacity: .85 }}>Recommended</span>
             <span style={{ fontWeight: 700 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads} loads` : ""}</span>
@@ -4273,15 +3825,6 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
     at(`Total volume: ${cuft} cu ft  (${m3} m3)`, M, y - 6, 10, bold, teal); y -= 22;
   }
 
-  const covers = coversRequired(inv);
-  const hw = hwBoxes(inv);
-  if ((forStaff || forOffice) && (covers.length || hw)) {
-    heading("Equipment required");
-    if (hw) { ensure(13); at(`${hw} x Hanging Wardrobe Box`, M + 10, y, 9.5, font, navy); y -= 13; }
-    covers.forEach(cv => { ensure(13); at(`${cv.qty} x ${cv.name}`, M + 10, y, 9.5, font, navy); y -= 13; });
-    y -= 6;
-  }
-
   heading("Acknowledgement");
   wrap("I confirm that the inventory and move plan shown above are correct to the best of my knowledge. Please advise R&J Removals & Storage of any additions or changes before the move date.", M, 9.5, font, W - 2 * M).forEach(ln => { ensure(13); at(ln, M, y, 9.5, font, navy); y -= 13; });
   y -= 24; ensure(40);
@@ -4681,269 +4224,7 @@ function AltOptions({ data, e, setView }) {
   );
 }
 
-// ── FileMaker-style customer record (iPad, "FileMaker" layout) ──────────────
-// Same data and buttons as the classic screen, laid out like the old FileMaker
-// record: customer + addresses on top, tabs underneath. Switch back any time
-// with "Layout" at the bottom of the side menu.
-const LAYOUT_KEY = "removals_layout";
-const getLayout = () => { try { return localStorage.getItem(LAYOUT_KEY) === "filemaker" ? "filemaker" : "classic"; } catch { return "classic"; } };
-const setLayoutPref = v => { try { localStorage.setItem(LAYOUT_KEY, v); } catch {} };
-const fmStamp = v => { if (!v) return ""; const d = typeof v === "number" ? new Date(v) : new Date(v); return isNaN(d) ? "" : fmtUK(d.toISOString().slice(0, 10)); };
-const FM_LINE = "#D9E2E0";
-function FmField({ label, children, lw = 112, onClick }) {
-  return (
-    <div onClick={onClick} style={{ display: "flex", alignItems: "stretch", minHeight: 44, border: `1px solid ${FM_LINE}`, borderRadius: 10, background: "#fff", overflow: "hidden", fontSize: 14.5, cursor: onClick ? "pointer" : "default" }}>
-      <span style={{ width: lw, flexShrink: 0, background: "#F3F7F6", borderRight: `1px solid ${FM_LINE}`, display: "flex", alignItems: "center", padding: "0 12px", color: "#55665F", fontSize: 13, fontWeight: 700 }}>{label}</span>
-      <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", padding: "8px 12px", color: "#10211E", fontWeight: 600, overflowWrap: "anywhere" }}>{children || <span style={{ color: "#94A4A0", fontWeight: 500 }}>—</span>}</span>
-    </div>
-  );
-}
-function FmBox({ children, ph }) {
-  return <div style={{ minHeight: 44, border: `1px solid ${FM_LINE}`, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", padding: "8px 12px", fontSize: 15, fontWeight: ph ? 500 : 600, color: ph ? "#94A4A0" : "#10211E", boxSizing: "border-box" }}>{children}</div>;
-}
-function FmSeg({ items, value, onChange, big }) {
-  return (
-    <div role="tablist" style={{ display: "flex", background: "#E4ECEA", borderRadius: 12, padding: 4, gap: 4 }}>
-      {items.map(([k, l]) => {
-        const on = k === value;
-        return <button key={k} type="button" role="tab" aria-selected={on} data-ro-ok onClick={() => onChange(k)} style={{ flex: 1, minWidth: 0, height: big ? 44 : 38, border: "none", borderRadius: 9, background: on ? "#fff" : "transparent", boxShadow: on ? "0 1px 3px rgba(16,33,30,.15)" : "none", color: on ? TEAL : "#55665F", fontFamily: "inherit", fontSize: big ? 14.5 : 13, fontWeight: on ? 800 : 600, cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", padding: "0 6px" }}>{l}</button>;
-      })}
-    </div>
-  );
-}
-function BookedNoMove({ data, e, linkedJob, onCreate }) {
-  // A "Booked" (Won) enquiry with no move behind it — e.g. brought over from Mover, or its
-  // move was removed. Without a move there's nothing to change, so offer to set one up.
-  if (isReadOnly() || e.status !== "Won" || linkedJob) return null;
-  const backTo = Number(e.quoteTotal) > 0 ? "Quoted" : (e.surveyDone || e.volumeCuFt ? "Surveyed" : "New");
-  return (
-    <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 14, padding: "12px 14px", marginBottom: 12 }}>
-      <div style={{ fontWeight: 800, color: "#10211E", fontSize: 15 }}>Manage booking</div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#92400E", marginTop: 2 }}>Booked, but no move has been set up yet. Choose how to book it:</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-        <Btn size="sm" style={{ whiteSpace: "nowrap" }} onClick={() => onCreate("Provisional")}>Provisional move</Btn>
-        <Btn size="sm" style={{ whiteSpace: "nowrap" }} onClick={() => onCreate("Confirmed")}>Confirmed move</Btn>
-        <Btn size="sm" variant="grey" style={{ whiteSpace: "nowrap" }} onClick={() => saveAndReload(upsertLocal(data, "enquiries", { ...e, status: backTo, quoteStatus: e.quoteStatus === "Accepted" ? "Sent" : e.quoteStatus }))}>Back to {backTo}</Btn>
-      </div>
-    </div>
-  );
-}
-function EnquiryFileMaker({ data, e, customer, linkedJob, setView, quoteDone, act }) {
-  const c = customer || {};
-  const [side, setSide] = useState("from");
-  const [tab, setTabRaw] = useState(() => { try { return localStorage.getItem("removals_fm_tab") || "survey"; } catch { return "survey"; } });
-  const setTab = t => { setTabRaw(t); try { localStorage.setItem("removals_fm_tab", t); } catch {} };
-  const ro = isReadOnly();
-  // Previous / Next follow the order of the enquiries list you came from.
-  let order = [];
-  try { order = JSON.parse(sessionStorage.getItem("removals_enq_order") || "[]"); } catch {}
-  if (!order.includes(e.id)) order = (data.enquiries || []).slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).map(x => x.id);
-  const pos = order.indexOf(e.id);
-  const go = id => id && setView({ screen: "enquiryDetail", id });
-  const nm = (c.company ? `${c.name} (${c.company})` : c.name) || "Unknown";
-  const fromLines = [e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode];
-  const toLines = [e.toAddress1, e.toAddress2, e.toTown, e.toPostcode];
-  const addr = a => a.filter(Boolean).join(", ");
-  const maps = q => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`, "_blank");
-  const distance = () => window.open(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(addr(fromLines))}&destination=${encodeURIComponent(addr(toLines))}`, "_blank");
-  const hdrBtn = { height: 44, padding: "0 14px", borderRadius: 10, border: "none", background: "rgba(255,255,255,.12)", color: "#fff", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer" };
-  const sb = { padding: "10px 12px", whiteSpace: "nowrap" };
-  const surveyed = !!(e.surveyDone || ["Surveyed", "Quoted", "Won"].includes(e.status));
-  const hasInv = !!(e.inventory && e.inventory.length);
-  const covers = coversRequired(e.inventory);
-  const hw = hwBoxes(e.inventory);
-  const sideLines = side === "from" ? fromLines : toLines;
-  const extra = side === "from" ? (e.extraFrom || []) : (e.extraTo || []);
-  const q = quoteChase(data, e);
-  const H2 = ({ children }) => <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: ".05em", textTransform: "uppercase", color: "#10211E", margin: "4px 0 2px" }}>{children}</div>;
-  const grid2 = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 0, minHeight: "100%" }}>
-      {/* Header: name, ref, status, Previous / Next */}
-      <div style={{ background: NAVY, color: "#fff", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10, borderRadius: 14 }}>
-        <button type="button" data-ro-ok onClick={() => setView({ screen: "enquiries" })} style={hdrBtn} aria-label="Back to list">‹ List</button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#A7D3CC" }}>{c.ref ? `Ref ${c.ref}` : "No ref"}{pos >= 0 ? ` · ${pos + 1} of ${order.length}` : ""}</div>
-          <div style={{ fontSize: 21, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nm}</div>
-        </div>
-        <StatusBadge status={enqBadge(data, e)} />
-        <button type="button" data-ro-ok disabled={pos <= 0} onClick={() => go(order[pos - 1])} style={{ ...hdrBtn, opacity: pos <= 0 ? .4 : 1 }}>‹ Previous</button>
-        <button type="button" data-ro-ok disabled={pos < 0 || pos >= order.length - 1} onClick={() => go(order[pos + 1])} style={{ ...hdrBtn, opacity: pos < 0 || pos >= order.length - 1 ? .4 : 1 }}>Next ›</button>
-      </div>
-
-      {/* Top buttons, like FileMaker's */}
-      <div style={{ marginTop: 12 }}>
-        <FmSeg big value="customer" onChange={k => {
-          if (k === "quote") act.setShowQuote(true);
-          else if (k === "spec") { if (hasInv || (e.stages && e.stages.length)) setView({ screen: "surveyPdf", id: e.id }); else act.setShowInv(true); }
-          else if (k === "all") setView({ screen: "enquiries", filter: "All" });
-          else if (k === "home") setView({ screen: "dashboard" });
-        }} items={[["customer", "Customer"], ["quote", "Quotation"], ["spec", "Spec sheet"], ["all", "Show all"], ["home", "Home"]]} />
-      </div>
-      <AltOptions data={data} e={e} setView={setView} />
-      <div style={{ marginTop: 10 }}><BookedNoMove data={data} e={e} linkedJob={linkedJob} onCreate={act.markWon} /></div>
-
-      {/* Customer (left) + addresses (right) */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.25fr)", gap: 14, marginTop: 12 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <FmField label="Ref">{c.ref}</FmField>
-          <FmBox>{nm}</FmBox>
-          <FmField label="Mobile" onClick={c.phone ? () => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; } : undefined}>{c.phone ? <span style={{ color: TEAL }}>📞 {c.phone}</span> : ""}</FmField>
-          <FmField label="Home phone" onClick={c.homePhone ? () => { window.location.href = `tel:${c.homePhone}`; } : undefined}>{c.homePhone ? <span style={{ color: TEAL }}>📞 {c.homePhone}</span> : ""}</FmField>
-          <FmField label="Email" onClick={c.email ? () => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; } : undefined}>{c.email ? <span style={{ color: TEAL }}>{c.email}</span> : ""}</FmField>
-          {customer && <MessageButton size="md" variant="primary" style={{ width: "100%" }} customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />}
-        </div>
-        <div style={{ background: "#fff", border: `1px solid ${FM_LINE}`, borderRadius: 14, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-          <FmSeg value={side} onChange={setSide} items={[["from", "From"], ["to", "To"], ["store", "Store"]]} />
-          {side === "store" ? (
-            <FmBox ph={!storeSummary(e)}>{storeSummary(e) || "Not going into store"}</FmBox>
-          ) : (
-            <>
-              <FmBox ph={!sideLines[0]}>{sideLines[0] || "Address 1"}</FmBox>
-              <FmBox ph={!sideLines[1]}>{sideLines[1] || "Address 2"}</FmBox>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr)", gap: 8 }}>
-                <FmBox ph={!sideLines[2]}>{sideLines[2] || "Town"}</FmBox>
-                <FmBox ph={!sideLines[3]}>{sideLines[3] || "Postcode"}</FmBox>
-              </div>
-              {extra.map((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); return a ? <div key={i} style={{ fontSize: 13, color: "#374151" }}>+ {side === "from" ? "Pickup" : "Delivery"} {i + 2}: {a}{s.note ? ` (${s.note})` : ""}</div> : null; })}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Btn size="sm" style={sb} disabled={!addr(fromLines) || !addr(toLines)} onClick={distance}>Check distance</Btn>
-                <Btn size="sm" variant="grey" style={sb} onClick={() => setTab("access")}>Access</Btn>
-                <Btn size="sm" variant="grey" style={sb} disabled={!addr(sideLines)} onClick={() => maps(addr(sideLines))}>Map</Btn>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Lower tabs */}
-      <div style={{ marginTop: 14 }}>
-        <FmSeg value={tab} onChange={setTab} items={[["survey", "Survey info"], ["notes", "Notes"], ["move", "Move info"], ["access", "Access"]]} />
-      </div>
-      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-        {tab === "survey" && <>
-          <div style={grid2}>
-            <FmField label="Surveyor">{e.surveyor}</FmField>
-            <FmField label="Referred by">{e.referredBy}</FmField>
-            <FmField label="Status">{enqBadge(data, e)}</FmField>
-            <FmField label="Move date">{e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : (e.moveMonth ? fmtMonth(e.moveMonth) + " (month)" : "TBC")}</FmField>
-            <FmField label="Survey date">{e.surveyDate ? <span style={{ color: surveyOverdue(e) ? "#B91C1C" : undefined }}>{fmtDate(e.surveyDate)}{surveyOverdue(e) ? " — not surveyed" : ""}</span> : ""}</FmField>
-            <FmField label="Survey time">{e.surveyTime}</FmField>
-            <FmField label="Quote">{e.quoteTotal ? `${gbp(e.quoteTotal)} · ${e.quoteStatus || ""}` : ""}</FmField>
-            <FmField label="Quote sent">{e.quoteSentDate ? fmtDate(e.quoteSentDate) : ""}</FmField>
-            <FmField label="Volume">{e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³` : "Not surveyed yet"}</FmField>
-            <FmField label="Call back" onClick={!ro ? act.setFollowUp : undefined}>{e.followUpDate ? `${fmtDate(e.followUpDate)}${e.followUpTime ? " " + e.followUpTime : ""}` : ""}</FmField>
-          </div>
-          {e.followUpNote ? <div style={{ fontSize: 13.5, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "8px 12px" }}><b>Call back note:</b> {e.followUpNote}</div> : null}
-          {q ? <div style={{ padding: "10px 12px", borderRadius: 10, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400E" }}>{quoteChaseText(q)}<div style={{ fontWeight: 600, color: "#B45309", marginTop: 2 }}>Reminder: {e.noChase && !e.quoteChaseDate ? "none set" : fmtDate(quoteChaseDue(e))} <button onClick={() => act.setShowChaseDate(true)} style={{ background: "none", border: "none", color: TEAL, fontWeight: 800, cursor: "pointer", padding: 0, fontSize: 12.5 }}>Change</button></div></div>
-            {q.phone ? <ChaseCallBtn data={data} e={e} /> : null}
-          </div> : null}
-          <div style={{ border: `1px solid ${FM_LINE}`, borderRadius: 12, background: "#fff", overflow: "hidden" }}>
-            <div style={{ padding: "9px 12px", background: "#F3F7F6", borderBottom: `1px solid ${FM_LINE}`, fontSize: 13, fontWeight: 700, color: "#55665F" }}>Notes</div>
-            <div style={{ minHeight: 70, padding: "10px 12px", fontSize: 14, color: e.notes ? "#10211E" : "#94A4A0", whiteSpace: "pre-wrap" }}>{e.notes || "No notes"}</div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {(!ro || hasInv) && <Btn size="sm" style={sb} onClick={() => act.setShowInv(true)}><Icon name="box" size={14} /> {ro ? "View survey" : e.volumeCuFt ? "Edit survey" : "Start survey"}</Btn>}
-            {!ro && e.surveyDate && <Btn size="sm" variant={surveyed ? "grey" : "primary"} style={sb} onClick={async () => { const done = !surveyed; await saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: done, status: done ? (e.status === "New" ? "Surveyed" : e.status) : (e.status === "Surveyed" ? "New" : e.status) })); }}>{surveyed ? "✓ Surveyed" : "Mark surveyed"}</Btn>}
-            {!ro && surveyOverdue(e) && <Btn size="sm" variant="danger" style={sb} onClick={() => act.setShowResched(true)}>📅 Reschedule</Btn>}
-            <NewEnqCallBtn data={data} e={e} small />
-            {(!ro || e.quoteTotal) && <Btn size="sm" variant="amber" style={sb} onClick={() => act.setShowQuote(true)}><Icon name="quote" size={14} /> {ro ? "View quote" : e.quoteTotal ? "Edit quote" : "Build quote"}</Btn>}
-            {e.quoteTotal ? <Btn size="sm" variant="grey" style={sb} onClick={() => setView({ screen: "quotePdf", id: e.id })}>Quote PDF</Btn> : null}
-          </div>
-          <div style={{ display: "flex", gap: 16, fontSize: 12.5, color: "#55665F", padding: "2px 2px 0" }}>
-            {e.createdAt ? <span>Created <b style={{ color: "#10211E" }}>{fmStamp(e.createdAt)}</b></span> : null}
-            {e.updatedAt ? <span>Modified <b style={{ color: "#10211E" }}>{fmStamp(e.updatedAt)}</b></span> : null}
-          </div>
-        </>}
-
-        {tab === "notes" && <>
-          <div style={{ border: `1px solid ${FM_LINE}`, borderRadius: 12, background: "#fff", overflow: "hidden" }}>
-            <div style={{ padding: "9px 12px", background: "#F3F7F6", borderBottom: `1px solid ${FM_LINE}`, fontSize: 13, fontWeight: 700, color: "#55665F" }}>Enquiry notes</div>
-            <div style={{ minHeight: 120, padding: "10px 12px", fontSize: 14.5, color: e.notes ? "#10211E" : "#94A4A0", whiteSpace: "pre-wrap" }}>{e.notes || "No notes"}</div>
-          </div>
-          {c.notes ? <div style={{ border: `1px solid ${FM_LINE}`, borderRadius: 12, background: "#fff", overflow: "hidden" }}>
-            <div style={{ padding: "9px 12px", background: "#F3F7F6", borderBottom: `1px solid ${FM_LINE}`, fontSize: 13, fontWeight: 700, color: "#55665F" }}>Customer notes</div>
-            <div style={{ padding: "10px 12px", fontSize: 14.5, color: "#10211E", whiteSpace: "pre-wrap" }}>{c.notes}</div>
-          </div> : null}
-          {customer && <OtherContacts customer={customer} onLog={en => logComm(customer.id, en)} />}
-          {!ro && <Btn size="sm" style={{ ...sb, alignSelf: "flex-start" }} onClick={() => act.setShowEdit(true)}><Icon name="edit" size={14} /> Edit notes</Btn>}
-        </>}
-
-        {tab === "move" && <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-            {[["Volume", e.volumeCuFt ? `${e.volumeCuFt} cu ft` : "—"],
-              ["Price", linkedJob ? gbp(linkedJob.price) : (e.quoteTotal ? gbp(e.quoteTotal) : "—")],
-              ["Deposit", linkedJob && linkedJob.deposit ? `${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : "—"],
-              ["Balance", linkedJob ? `${gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}${linkedJob.balancePaid ? " ✓" : ""}` : "—"]].map(([l, v]) => (
-              <div key={l} style={{ background: "#fff", border: `1px solid ${FM_LINE}`, borderRadius: 12, padding: "10px 12px" }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#55665F" }}>{l}</div>
-                <div style={{ fontSize: 16.5, fontWeight: 800, color: "#10211E" }}>{v}</div>
-              </div>))}
-          </div>
-          <div style={{ background: "#fff", border: `1px solid ${FM_LINE}`, borderRadius: 12, padding: "10px 12px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <H2>{linkedJob ? `Move ${moveRef(data, linkedJob)}` : "Move plan"}</H2>
-              {linkedJob ? <StatusBadge status={jobBadge(linkedJob)} /> : null}
-            </div>
-            {(linkedJob ? jobStages(linkedJob) : (e.stages || [])).length === 0
-              ? <div style={{ fontSize: 13.5, color: "#55665F", marginTop: 4 }}>No days planned yet</div>
-              : (linkedJob ? jobStages(linkedJob) : e.stages).map((d, i) => {
-                const vn = (d.vehicleIds || []).map(id => (((data.vehicles || []).find(v => v.id === id)) || {}).name).filter(Boolean).join(", ");
-                return <div key={d.id || i} style={{ fontSize: 13.5, color: "#374151", padding: "6px 0", borderTop: i ? `1px solid ${FM_LINE}` : "none" }}>
-                  <b style={{ color: "#10211E" }}>{d.type || "Day"}</b> · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}{d.time ? ` ${d.time}` : ""}
-                  {vn ? ` · ${vn}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
-                  {(d.crew && d.crew.length) ? ` · ${d.crew.join(", ")}` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
-                </div>; })}
-            {linkedJob && (() => { const so = Object.values(linkedJob.signOffs || {}); if (!so.length) return null; const last = so.sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
-              return <div onClick={() => act.setShowSignOff(true)} style={{ fontSize: 13, color: "#059669", fontWeight: 700, marginTop: 6, cursor: "pointer" }}>✅ Signed off · {last.staffName} &amp; {last.custName}{so.some(x => x.notes) ? <span style={{ color: "#B45309" }}> · 📝 note</span> : null}</div>; })()}
-          </div>
-          {(hw || covers.length) ? <div style={{ background: "#fff", border: `1px solid ${FM_LINE}`, borderRadius: 12, padding: "10px 12px" }}>
-            <H2>Equipment required</H2>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-              {hw ? <span style={{ padding: "5px 10px", borderRadius: 99, background: "#F1F5F4", fontSize: 13, fontWeight: 600 }}>{hw} × H/W boxes</span> : null}
-              {covers.map(cv => <span key={cv.name} style={{ padding: "5px 10px", borderRadius: 99, background: "#F1F5F4", fontSize: 13, fontWeight: 600 }}>{cv.qty} × {cv.name}</span>)}
-            </div>
-          </div> : null}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {(!ro || (e.stages && e.stages.length)) && <Btn size="sm" variant="grey" style={sb} onClick={() => act.setShowPlan(true)}><Icon name="calendar" size={14} /> {ro ? "View plan" : (e.stages && e.stages.length) ? "Edit plan" : "Add plan"}</Btn>}
-            {(hasInv || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={sb} onClick={() => setView({ screen: "surveyPdf", id: e.id })}>Survey PDF</Btn> : null}
-            {e.quoteTotal ? <Btn size="sm" variant="grey" style={sb} onClick={() => setView({ screen: "quotePdf", id: e.id })}>Quote PDF</Btn> : null}
-            {linkedJob && <Btn size="sm" variant="grey" style={sb} onClick={() => act.setShowCrew(true)}>👷 Crew view</Btn>}
-            {linkedJob && <Btn size="sm" style={sb} onClick={() => act.setShowMove(true)}><Icon name="check" size={14} /> {ro ? "View move" : "Manage move"}</Btn>}
-            {!ro && !linkedJob && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn size="sm" style={sb} onClick={() => act.markWon()}><Icon name="check" size={14} /> Create provisional move</Btn>}
-          </div>
-        </>}
-
-        {tab === "access" && <>
-          <div style={grid2}>
-            <FmField label="From property">{[e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.fromFloor].filter(Boolean).join(" · ")}</FmField>
-            <FmField label="To property">{[e.toPropertyType, e.toFloor].filter(Boolean).join(" · ")}</FmField>
-          </div>
-          {[["From access", e.fromAccess], ["To access", e.toAccess]].map(([l, v]) => (
-            <div key={l} style={{ border: `1px solid ${FM_LINE}`, borderRadius: 12, background: "#fff", overflow: "hidden" }}>
-              <div style={{ padding: "9px 12px", background: "#F3F7F6", borderBottom: `1px solid ${FM_LINE}`, fontSize: 13, fontWeight: 700, color: "#55665F" }}>{l}</div>
-              <div style={{ minHeight: 50, padding: "10px 12px", fontSize: 14.5, color: v ? "#10211E" : "#94A4A0", whiteSpace: "pre-wrap" }}>{v || "Nothing noted"}</div>
-            </div>))}
-          {!ro && <Btn size="sm" style={{ ...sb, alignSelf: "flex-start" }} onClick={() => act.setShowEdit(true)}><Icon name="edit" size={14} /> Edit access</Btn>}
-        </>}
-      </div>
-
-      {/* Bottom bar: the usual actions */}
-      <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${FM_LINE}`, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {ro ? <Btn variant="grey" style={sb} onClick={() => act.setShowEdit(true)}>👁 View enquiry details</Btn> : <>
-          <Btn style={sb} onClick={() => act.setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
-          {!linkedJob && <Btn variant="grey" style={sb} onClick={act.setFollowUp}>⏰ Call back</Btn>}
-          {!["Won", "Lost", "Not quoted"].includes(e.status) && <Btn variant="grey" style={{ ...sb, color: "#B91C1C" }} onClick={act.markLost}>✕ Mark Lost</Btn>}
-          {!["Won", "Lost", "Not quoted"].includes(e.status) && !linkedJob && <Btn variant="grey" style={{ ...sb, color: "#4B5563" }} onClick={() => markNotQuotedFlow(data, e)}>🚫 Didn't quote</Btn>}
-          {canDelete() && <Btn variant="danger" style={{ ...sb, marginLeft: "auto" }} onClick={act.del}><Icon name="trash" size={15} /> Delete</Btn>}
-        </>}
-      </div>
-    </div>
-  );
-}
-function EnquiryDetail({ data, id, setView, fm = false }) {
+function EnquiryDetail({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const [showEdit, setShowEdit] = useState(false);
   const [showInv, setShowInv] = useState(false);
@@ -4951,7 +4232,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   const [showPlan, setShowPlan] = useState(false);
   const [showMove, setShowMove] = useState(false);
   const [showCrew, setShowCrew] = useState(false);
-  const [showSignOff, setShowSignOff] = useState(false);
   const [rebook, setRebook] = useState(false);
   const [showResched, setShowResched] = useState(false);
   const [showChaseDate, setShowChaseDate] = useState(false);
@@ -4963,15 +4243,13 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   }, [id]);
   const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name || "Vehicle";
   const customer = (data.customers || []).find(c => c.id === e?.customerId);
-  const [followUpOpen, setFollowUpOpen] = useState(false);
   if (!e) return <div style={{ padding: 20 }}>Enquiry not found.</div>;
   const linkedJob = (data.jobs || []).find(j => j.enquiryId === e.id);
 
   async function setStatus(status, extra = {}) {
     await saveAndReload(upsertLocal(data, "enquiries", { ...e, status, ...extra }));
   }
-  async function markWon(newStatus = "Provisional") {
-    if (typeof newStatus !== "string") newStatus = "Provisional";
+  async function markWon() {
     const existing = (data.jobs || []).find(j => j.enquiryId === e.id);
     if (existing) {
       // Re-booking an enquiry that already has a move: don't create a second job.
@@ -5002,7 +4280,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       moveDate: stages[0]?.date || e.preferredDate || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
-      status: newStatus, notes: "", createdAt: new Date().toISOString(),
+      status: "Provisional", notes: "", createdAt: new Date().toISOString(),
     };
     let d2 = upsertLocal(data, "jobs", job);
     d2 = upsertLocal(d2, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
@@ -5020,6 +4298,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
     window.location.reload();
   }
   async function markLost() { await markLostFlow(data, e, setView); }
+  const [followUpOpen, setFollowUpOpen] = useState(false);
   const setFollowUp = () => setFollowUpOpen(true);
   async function del() {
     if (!confirm("Delete this enquiry? This cannot be undone.")) return;
@@ -5045,28 +4324,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
     : !quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) ? "Next: build the quote — you can then create the provisional move."
     : "";
 
-  const modals = (
-    <>
-      {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
-      {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
-      {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
-      {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
-      {showChaseDate && <ChaseDateModal data={data} enquiry={e} onClose={() => setShowChaseDate(false)} />}
-      {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
-      {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
-      {showMove && linkedJob && <MoveManageModal data={data} job={linkedJob} onClose={() => setShowMove(false)} />}
-      {showCrew && linkedJob && <CrewPreviewModal data={data} job={linkedJob} onClose={() => setShowCrew(false)} />}
-      {showSignOff && linkedJob && <SignOffRecordModal data={data} job={linkedJob} onClose={() => setShowSignOff(false)} />}
-    </>
-  );
-  if (fm) return (
-    <>
-      <EnquiryFileMaker data={data} e={e} customer={customer} linkedJob={linkedJob} setView={setView} quoteDone={quoteDone}
-        act={{ setShowEdit, setShowInv, setShowQuote, setShowPlan, setShowMove, setShowCrew, setShowSignOff, setShowResched, setShowChaseDate, setFollowUp, markWon, markLost, del }} />
-      {modals}
-    </>
-  );
-
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 10px" }}>
@@ -5084,12 +4341,13 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
         </div>
       )}
       {customer && (
-        <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 14 }}>
-          {customer.phone && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
+        <div style={{ ...contactRowStyle(1 + !!callPhone(customer) + !!customer.email), marginBottom: callFirst(customer) ? 8 : 14 }}>
+          {callPhone(customer) && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(customer.id, { type: "Call" }); window.location.href = `tel:${callPhone(customer)}`; }}>{callLabel(customer)}</Btn>}
           <MessageButton size="md" variant="primary" style={contactBtn} customer={customer} ctx={{ date: e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : ""), survey_date: e.surveyDate ? fmtDate(e.surveyDate) : "", survey_time: e.surveyTime || "", price: e.quoteTotal ? gbp(e.quoteTotal) : "", deposit: e.quoteTotal ? gbp(Math.round(e.quoteTotal * 0.6)) : "" }} />
           {customer.email && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
         </div>
       )}
+      {customer && <CallFirstNote cust={customer} onCall={() => logComm(customer.id, { type: "Call" })} />}
       {customer && <OtherContacts customer={customer} onLog={en => logComm(customer.id, en)} />}
 
       <Card>
@@ -5117,7 +4375,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
               {e.volumeCuFt ? `${e.volumeCuFt} cu ft · ${e.volumeM3} m³${Number(e.weightKg) ? ` · ${e.weightKg} kg` : ""}${hwBoxes(e.inventory) ? ` · ${hwBoxes(e.inventory)} H/W boxes` : ""}` : "Not surveyed yet"}
             </div>
-            {coversRequired(e.inventory).length > 0 && <div style={{ fontSize: 12.5, color: "#374151", marginTop: 2 }}>🛋 {coversText(coversRequired(e.inventory))}</div>}
             {e.volumeCuFt > 0 && <div style={{ fontSize: 13, color: TEAL, fontWeight: 600, marginTop: 2 }}>{rec.vehicle}{rec.loads > 1 ? ` × ${rec.loads}` : ""}</div>}
             {((e.inventory && e.inventory.length) || (e.stages && e.stages.length)) ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "surveyPdf", id: e.id })}><Icon name="quote" size={14} /> Survey &amp; move plan PDF</Btn> : null}
           </div>
@@ -5175,8 +4432,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
           </div>) : null; })()}
       </Card>}
 
-      {/* Booked but no move behind it: set the move up here (where Manage move normally sits) */}
-      <BookedNoMove data={data} e={e} linkedJob={linkedJob} onCreate={markWon} />
       {/* Manage move — below the quote once a provisional move exists */}
       {linkedJob && (
         <Card>
@@ -5190,7 +4445,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
                 {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}
               </div>
               {(() => { const so = Object.values(linkedJob.signOffs || {}); if (!so.length) return null; const last = so.sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
-                return <div onClick={() => setShowSignOff(true)} style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 4, cursor: "pointer" }}>✅ Signed off{so.length > 1 ? ` (${so.length} days)` : ""} · {last.staffName} &amp; {last.custName}{so.some(x => x.notes) ? <span style={{ color: "#B45309" }}> · 📝 note</span> : null}</div>; })()}
+                return <div onClick={() => setShowCrew(true)} style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 4, cursor: "pointer" }}>✅ Signed off{so.length > 1 ? ` (${so.length} days)` : ""} · {last.staffName} &amp; {last.custName}{so.some(x => x.notes) ? <span style={{ color: "#B45309" }}> · 📝 note</span> : null}</div>; })()}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
               <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {isReadOnly() ? "View" : "Manage"}</Btn>
@@ -5199,6 +4454,8 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
           </div>
         </Card>
       )}
+      {showCrew && linkedJob && <CrewPreviewModal data={data} job={linkedJob} onClose={() => setShowCrew(false)} />}
+
       {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
       {e.followUpDate && (
@@ -5209,7 +4466,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {!isReadOnly() && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn onClick={() => markWon()} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
+        {!isReadOnly() && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn onClick={markWon} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
       </div>
       {(() => {
         const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
@@ -5232,7 +4489,14 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
         </>;
       })()}
 
-      {modals}
+      {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
+      {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
+      {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
+      {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
+      {showChaseDate && <ChaseDateModal data={data} enquiry={e} onClose={() => setShowChaseDate(false)} />}
+      {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
+      {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
+      {showMove && linkedJob && <MoveManageModal data={data} job={linkedJob} onClose={() => setShowMove(false)} />}
     </div>
   );
 }
@@ -5407,26 +4671,6 @@ function OtherContacts({ customer, onLog }) {
   );
 }
 
-// Edit Customer from the customer screen: shows everything — the customer's details AND their
-// enquiry's move details (same as Edit Enquiry). With several enquiries, pick which one.
-// A customer with no enquiries just gets the plain customer form.
-function CustomerEditFull({ data, customer, onClose }) {
-  const list = (data.enquiries || []).filter(e => e.customerId === customer.id)
-    .sort((a, b) => String(b.createdAt || b.enquiryDate || "").localeCompare(String(a.createdAt || a.enquiryDate || "")));
-  const open = list.find(e => !["Lost", "Not quoted", "Let Go"].includes(e.status));
-  const [selId, setSelId] = useState((open || list[0] || {}).id || "");
-  const sel = list.find(e => e.id === selId);
-  if (!sel) return <CustomerForm data={data} editCustomer={customer} onClose={onClose} />;
-  const label = e => [e.preferredDate ? fmtDate(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "Date TBC"), [e.fromTown, e.toTown].filter(Boolean).join(" → "), enqBadge(data, e)].filter(Boolean).join(" · ");
-  const header = list.length > 1 ? (
-    <Field label="Which enquiry">
-      <select value={selId} onChange={ev => setSelId(ev.target.value)} style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, fontFamily: "inherit", color: "#10211E" }}>
-        {list.map(e => <option key={e.id} value={e.id}>{label(e)}</option>)}
-      </select>
-    </Field>
-  ) : null;
-  return <EnquiryForm key={sel.id} data={data} editEnquiry={sel} onClose={onClose} header={header} title="Edit Customer" returnView={{ screen: "customerDetail", id: customer.id }} />;
-}
 function CustomerForm({ data, onClose, editCustomer }) {
   const c = editCustomer || {};
   const ta0 = tidyAddress(c.address1, c.address2, c.town, c.postcode); // splits an address typed all on one line
@@ -5637,11 +4881,12 @@ function CustomerDetail({ data, id, setView }) {
         <Row label="Address" value={[c.address1, c.address2, c.town, c.postcode].filter(Boolean).join(", ")} />
         {c.notes && <Row label="Notes" value={c.notes} />}
       </Card>
-      <div style={{ ...contactRowStyle(1 + !!c.phone + !!c.email), marginBottom: 8, marginTop: 4 }}>
-        {c.phone && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${c.phone}`; }}>📞 Call</Btn>}
+      <div style={{ ...contactRowStyle(1 + !!callPhone(c) + !!c.email), marginBottom: 8, marginTop: 4 }}>
+        {callPhone(c) && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Call" }); window.location.href = `tel:${callPhone(c)}`; }}>{callLabel(c)}</Btn>}
         <MessageButton customer={c} ctx={msgCtx} size="md" variant="primary" style={contactBtn} />
         {c.email && <Btn variant="primary" style={contactBtn} onClick={() => { logComm(c.id, { type: "Email" }); window.location.href = `mailto:${c.email}`; }}>✉️ Email</Btn>}
       </div>
+      <CallFirstNote cust={c} onCall={() => logComm(c.id, { type: "Call" })} />
       <OtherContacts customer={c} onLog={en => logComm(c.id, en)} />
       {surveyPanel}
       {quotePanel}
@@ -5739,7 +4984,7 @@ function CustomerDetail({ data, id, setView }) {
           ))}
         </>
       )}
-      {showEdit && <CustomerEditFull data={data} customer={c} onClose={() => setShowEdit(false)} />}
+      {showEdit && <CustomerForm data={data} editCustomer={c} onClose={() => setShowEdit(false)} />}
       {jobForm && <StorageJobForm data={data} customer={c} job={jobForm === "new" ? null : jobForm} onClose={() => setJobForm(null)} />}
       {resched && <RescheduleSurveyModal data={data} enquiry={resched} onClose={() => setResched(null)} />}
       {commForm && <CommLogForm data={data} customer={c} entry={commForm.entry} preset={commForm.preset} onClose={() => setCommForm(null)} />}
@@ -5891,7 +5136,6 @@ async function restoreBackup(currentData, inc) {
   } catch {}
   const counts = tables.map(t => `${merged[t].length} ${t}`).join(", ");
   try { sessionStorage.setItem("restoreMsg", `Restore complete — now holding ${counts}.`); } catch {}
-  LOG_SUSPEND = true; // an import isn't a change anyone made — keep it out of the activity log
   await saveAndReload(merged);
 }
 
@@ -6698,7 +5942,7 @@ function CompanyView({ data, setView, setData }) {
         <Btn style={{ width: "100%", marginBottom: 0 }} onClick={() => setView({ screen: "reports" })}>📊 Reports — where leads come from &amp; what wins</Btn>
         {LOGINS_ENABLED && <AccountCard />}
         <HistoryList title="Activity log (all changes)" />
-
+        {isAdmin() && <RecentlyDeleted />}
         {LOGINS_ENABLED && isAdmin() && <UsersAdmin data={data} />}
         <Card style={{ marginBottom: 0 }}>
           <h4 style={{ margin: "0 0 2px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Sync</h4>
@@ -7073,13 +6317,9 @@ function PickChips({ options, selectedIds, takenIds, onToggle, empty, takenReaso
 }
 
 function JobDetail({ data, id, setView }) {
-  // Hooks must run the same way every time, so the "not found" check sits outside the screen itself.
   const j = (data.jobs || []).find(x => x.id === id);
-  if (!j) return <div style={{ padding: 20 }}>Move not found.</div>;
-  return <JobDetailScreen key={id} data={data} j={j} setView={setView} />;
-}
-function JobDetailScreen({ data, j, setView }) {
   const customer = (data.customers || []).find(c => c.id === j?.customerId);
+  if (!j) return <div style={{ padding: 20 }}>Move not found.</div>;
   const [f, setF] = useState({
     stages: jobStages(j).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", vehicleIds: st.vehicleIds || [], crew: st.crew || [], notes: st.notes || "" })),
     price: j.price || 0, deposit: j.deposit || 0,
@@ -7192,7 +6432,7 @@ function JobDetailScreen({ data, j, setView }) {
       </div>
       {customer && (
         <div style={{ ...contactRowStyle(1 + !!customer.phone + !!customer.email), marginBottom: 12 }}>
-          {customer.phone && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `tel:${customer.phone}`}>📞 Call</Btn>}
+          {callPhone(customer) && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `tel:${callPhone(customer)}`}>{callLabel(customer)}</Btn>}
           <MessageButton size="md" variant="primary" style={contactBtn} customer={customer} ctx={{ ref: moveRef(data, j), date: j.moveDate ? fmtDate(j.moveDate) : "", time: (jobStages(j)[0]?.time) || j.startTime || "", price: gbp(j.price), deposit: gbp(j.deposit), balance: gbp((Number(j.price) || 0) - (Number(j.deposit) || 0)) }} />
           {customer.email && <Btn variant="primary" style={contactBtn} onClick={() => window.location.href = `mailto:${customer.email}`}>✉️ Email</Btn>}
         </div>
@@ -9254,7 +8494,7 @@ function crewAddress(parts) { return parts.filter(Boolean).join(", "); }
 function CrewJobCard({ data, j, st }) {
   const en = (data.enquiries || []).find(e => e.id === j.enquiryId) || {};
   const cust = (data.customers || []).find(c => c.id === j.customerId) || {};
-  const phone = cust.phone || cust.homePhone || "";
+  const phone = callPhone(cust);
   const vans = (st.vehicleIds || []).map(id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? v.name : ""; }).filter(Boolean);
   const from = crewAddress([j.fromAddress1 || en.fromAddress1, j.fromAddress2 || en.fromAddress2, j.fromTown || en.fromTown, j.fromPostcode || en.fromPostcode]);
   const to = crewAddress([j.toAddress1 || en.toAddress1, j.toAddress2 || en.toAddress2, j.toTown || en.toTown, j.toPostcode || en.toPostcode]);
@@ -9283,7 +8523,7 @@ function CrewJobCard({ data, j, st }) {
       <div style={{ fontSize: 11, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.time ? `${st.time} · ` : ""}{st.type || "Move"}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, margin: "2px 0 8px" }}>
         <div style={{ fontSize: 18, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"}</div>
-        {phone && <a href={`tel:${phone}`} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, background: TEAL, color: "#fff", fontWeight: 800, fontSize: 14, textDecoration: "none" }}>📞 Call</a>}
+        {phone && <a href={`tel:${phone}`} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, background: TEAL, color: "#fff", fontWeight: 800, fontSize: 14, textDecoration: "none" }}>{callLabel(cust)}</a>}
       </div>
       <Addr label="FROM" addr={from} access={fromAccess} />
       {(en.extraFrom || []).map((x, i) => <Addr key={"ef" + i} label={`EXTRA PICKUP ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
@@ -9298,14 +8538,12 @@ function CrewJobCard({ data, j, st }) {
         <H>Packing</H>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 6 }}>🛏 {bedrooms ? `${bedrooms} bedroom${bedrooms === "1" || bedrooms === 1 ? "" : "s"}` : "Bedrooms not recorded"}{en.fromPropertyType ? ` · ${en.fromPropertyType}` : ""}</div>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 6 }}>👔 {hwBoxes(inv)} H/W boxes required</div>
-        <CoversBox inv={inv} />
         <H>Dismantling</H>
         {disList.length === 0 ? <div style={{ fontSize: 13, color: "#94A4A0" }}>Nothing to dismantle.</div>
           : disList.map((t, i) => <div key={i} style={{ fontSize: 13.5, color: TEAL_D, fontWeight: 700, whiteSpace: "pre-wrap", marginBottom: 2 }}>🔧 {t}</div>)}
       </> : <>
       <H>Inventory</H>
       {hwBoxes(inv) > 0 && <div style={{ fontSize: 14, fontWeight: 800, color: "#10211E", background: "#F3FAF8", borderRadius: 9, padding: "7px 10px", marginBottom: 8 }}>👔 {hwBoxes(inv)} H/W boxes required</div>}
-      <CoversBox inv={inv} />
       {rooms.length === 0 && <div style={{ fontSize: 13, color: "#94A4A0" }}>No inventory recorded.</div>}
       {rooms.map(([room, items]) => {
         const moving = items.filter(it => it.qty > 0 && !it.dismantleNote), staying = items.filter(it => it.qty < 0), dis = items.filter(it => it.dismantleNote);
@@ -9322,7 +8560,7 @@ function CrewJobCard({ data, j, st }) {
         );
       })}
       </>}
-      <JobSignOff j={j} st={st} cust={cust} from={from} to={to} />
+      <JobSignOff j={j} st={st} cust={cust} />
     </Card>
   );
 }
@@ -9349,16 +8587,7 @@ async function flushSignOffs() {
   for (const it of q) { try { await sendSignOff(it); } catch { left.push(it); } }
   writeSignQueue(left);
 }
-const isPackDay = st => /pack/i.test((st && st.type) || "") && !/unpack/i.test((st && st.type) || "");
-// Is this the job's last day? (latest date; same date → the later one in the list)
-function isLastJobDay(j, st) {
-  const days = jobStages(j).filter(Boolean);
-  if (days.length < 2) return true;
-  let last = days[0];
-  days.forEach(d => { if (String(d.date || "") >= String(last.date || "")) last = d; });
-  return signOffKey(last) === signOffKey(st);
-}
-function JobSignOff({ j, st, cust, from = "", to = "" }) {
+function JobSignOff({ j, st, cust }) {
   const key = signOffKey(st);
   const [saved, setSaved] = useState(null);
   const done = (j.signOffs && j.signOffs[key]) || saved || ([...readSignQueue(), ...readSignSent()].find(x => x.jobId === j.id && x.key === key) || {}).data;
@@ -9392,8 +8621,6 @@ function JobSignOff({ j, st, cust, from = "", to = "" }) {
     );
   }
   if (isReadOnly()) return null;
-  // Signed off once, on the last day of the job only (never on a packing day).
-  if (isPackDay(st) || !isLastJobDay(j, st)) return null;
   if (!open) return (
     <div style={box}>
       <button type="button" data-ro-ok onClick={() => setOpen(true)} style={{ width: "100%", padding: "13px 12px", borderRadius: 12, border: "none", background: TEAL, color: "#fff", fontWeight: 800, fontSize: 15.5, cursor: "pointer" }}>✍️ Sign off job</button>
@@ -9415,25 +8642,17 @@ function JobSignOff({ j, st, cust, from = "", to = "" }) {
   };
   const lbl = { fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4 };
   const inp = { width: "100%", boxSizing: "border-box", padding: "11px 12px", border: "1px solid #D9E2E0", borderRadius: 10, fontSize: 16, marginBottom: 10, background: "#fff", color: "#10211E" };
-  // Opens on its own screen, so the customer only sees the address and the sign-off —
-  // not the crew, vans, inventory or notes.
   return (
-    <Modal title="Job sign-off" onClose={() => setOpen(false)}>
-    <div data-ro-ok>
-      <div style={{ background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"}</div>
-        <div style={{ fontSize: 12.5, color: "#6A7B77", fontWeight: 600 }}>{st.date ? fmtDate(st.date) : ""}</div>
-        {from ? <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}><b>From:</b> {from}</div> : null}
-        {to ? <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}><b>To:</b> {to}</div> : null}
-      </div>
+    <div style={box} data-ro-ok>
+      <div style={{ fontSize: 15, fontWeight: 800, color: "#10211E", marginBottom: 8 }}>✍️ Job sign-off</div>
       <div style={lbl}>Crew member</div>
       {crewNames.length > 1 && !CURRENT_USER.staffName
         ? <select value={staffName} onChange={e => setStaffName(e.target.value)} style={inp}><option value="">Choose…</option>{crewNames.map(n => <option key={n}>{n}</option>)}</select>
         : <input value={staffName} onChange={e => setStaffName(e.target.value)} placeholder="Name" style={inp} />}
       <SigField label="Crew member signature" value={staffSig} onOpen={() => setSigning("staff")} />
-      <div style={{ fontSize: 13, color: "#374151", background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", margin: "4px 0 10px" }}>I confirm the move has been completed and my belongings have been delivered in good order.</div>
-      <div style={lbl}>Comments (optional)</div>
-      <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Any comments…" style={{ ...inp, resize: "vertical" }} />
+      <div style={{ fontSize: 13, color: "#374151", background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", margin: "4px 0 10px" }}>I confirm the move has been completed and my belongings have been delivered in good order, except for anything noted below.</div>
+      <div style={lbl}>Any damage or comments (optional)</div>
+      <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="e.g. scuff on wardrobe door" style={{ ...inp, resize: "vertical" }} />
       <div style={lbl}>Customer name</div>
       <input value={custName} onChange={e => setCustName(e.target.value)} placeholder="Name" style={inp} />
       <SigField label="Customer signature" value={custSig} onOpen={() => setSigning("cust")} />
@@ -9445,92 +8664,6 @@ function JobSignOff({ j, st, cust, from = "", to = "" }) {
       {signing === "staff" && <SignatureModal title={`Crew signature${staffName ? " — " + staffName : ""}`} initial={staffSig} onCancel={() => setSigning(null)} onAccept={v => { setStaffSig(v); setSigning(null); }} />}
       {signing === "cust" && <SignatureModal title={`Customer signature${custName ? " — " + custName : ""}`} initial={custSig} onCancel={() => setSigning(null)} onAccept={v => { setCustSig(v); setSigning(null); }} />}
     </div>
-    </Modal>
-  );
-}
-// ── Saved sign-off (office record): just the job address and the sign-off itself ──
-function signOffParts(data, j) {
-  const en = (data.enquiries || []).find(e => e.id === j.enquiryId) || {};
-  const cust = (data.customers || []).find(c => c.id === j.customerId) || {};
-  const from = crewAddress([j.fromAddress1 || en.fromAddress1, j.fromAddress2 || en.fromAddress2, j.fromTown || en.fromTown, j.fromPostcode || en.fromPostcode]);
-  const to = crewAddress([j.toAddress1 || en.toAddress1, j.toAddress2 || en.toAddress2, j.toTown || en.toTown, j.toPostcode || en.toPostcode]);
-  const list = Object.values(j.signOffs || {}).filter(Boolean).sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
-  return { cust, from, to, list, ref: moveRef(data, j) };
-}
-const signOffWhen = so => { const d = so.at ? new Date(so.at) : null; return d && !isNaN(d) ? `${fmtUK(d.toISOString().slice(0, 10))} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : (so.date ? fmtUK(so.date) : ""); };
-async function buildSignOffPdf(data, j) {
-  const { cust, from, to, list, ref } = signOffParts(data, j);
-  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
-  const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const W = 595.28, H = 841.89, M = 44;
-  const teal = rgb(0.055, 0.486, 0.451), navy = rgb(0.059, 0.18, 0.165), grey = rgb(0.42, 0.46, 0.45), white = rgb(1, 1, 1);
-  const clean = t => String(t == null ? "" : t).replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, "-").replace(/\u2026/g, "...").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
-  const embedSig = async url => { if (!url || url.indexOf("data:image") !== 0) return null; try { const bin = atob(url.split(",")[1]); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return /image\/jpe?g/.test(url) ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes); } catch { return null; } };
-  const wrap = (t, size, f, maxW) => { const words = clean(t).split(/\s+/); const out = []; let ln = ""; for (const w of words) { const test = ln ? ln + " " + w : w; if (f.widthOfTextAtSize(test, size) > maxW && ln) { out.push(ln); ln = w; } else ln = test; } if (ln) out.push(ln); return out; };
-  let page = pdf.addPage([W, H]); let y;
-  const at = (t, x, yy, size, f = font, col = navy) => page.drawText(clean(t), { x, y: yy, size, font: f, color: col });
-  page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
-  at("R&J Removals & Storage", M, H - 34, 16, bold, white);
-  at("Job sign-off", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
-  if (ref) { const w = bold.widthOfTextAtSize(clean(ref), 12); at(ref, W - M - w, H - 40, 12, bold, white); }
-  y = H - 96;
-  at("Customer", M, y, 9.5, bold, grey); at(cust.name || "-", M + 80, y, 9.5); y -= 15;
-  [["From", from], ["To", to]].forEach(([l, a]) => { if (!a) return; at(l, M, y, 9.5, bold, grey); wrap(a, 9.5, font, W - M - (M + 80)).forEach(ln => { at(ln, M + 80, y, 9.5); y -= 13; }); y -= 2; });
-  y -= 10;
-  for (const so of list) {
-    if (y < 260) { page = pdf.addPage([W, H]); y = H - M; }
-    at(`Signed off ${signOffWhen(so)}`, M, y, 11, bold, teal); y -= 8;
-    page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: teal }); y -= 16;
-    wrap("I confirm the move has been completed and my belongings have been delivered in good order.", 9.5, font, W - 2 * M).forEach(ln => { at(ln, M, y, 9.5); y -= 13; });
-    if (so.notes) { y -= 4; at("Comments", M, y, 9.5, bold, grey); y -= 13; wrap(so.notes, 9.5, font, W - 2 * M).forEach(ln => { at(ln, M, y, 9.5); y -= 13; }); }
-    y -= 10;
-    const boxW = (W - 2 * M - 20) / 2, boxH = 80;
-    const sigs = [["Crew member", so.staffName, await embedSig(so.staffSig)], ["Customer", so.custName, await embedSig(so.custSig)]];
-    sigs.forEach(([l, n, img], i) => {
-      const x = M + i * (boxW + 20);
-      page.drawRectangle({ x, y: y - boxH, width: boxW, height: boxH, borderColor: grey, borderWidth: 0.6 });
-      if (img) { const s0 = Math.min((boxW - 12) / img.width, (boxH - 12) / img.height); page.drawImage(img, { x: x + 6, y: y - boxH + 6, width: img.width * s0, height: img.height * s0 }); }
-      at(`${l}: ${n || "-"}`, x, y - boxH - 13, 9, bold, grey);
-    });
-    y -= boxH + 36;
-  }
-  if (!list.length) at("Not signed off yet.", M, y, 9.5);
-  return await pdf.save();
-}
-function SignOffRecordModal({ data, job, onClose }) {
-  const { cust, from, to, list, ref } = signOffParts(data, job);
-  const [busy, setBusy] = useState(false);
-  const pdfIt = async () => {
-    setBusy(true);
-    try { const bytes = await buildSignOffPdf(data, job); await showPdf(new File([bytes], `SignOff-${String(ref).replace(/[^\w-]+/g, "")}.pdf`, { type: "application/pdf" })); }
-    catch (ex) { alert("Couldn't make the PDF: " + (ex.message || ex)); }
-    setBusy(false);
-  };
-  return (
-    <Modal title="Job sign-off" onClose={onClose}>
-      <div style={{ background: "#F3FAF8", borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"} <span style={{ fontSize: 12.5, color: "#6A7B77" }}>· {ref}</span></div>
-        {from ? <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}><b>From:</b> {from}</div> : null}
-        {to ? <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}><b>To:</b> {to}</div> : null}
-      </div>
-      {list.map((so, i) => (
-        <div key={i} style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11.5, fontWeight: 800, color: "#059669", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>✅ Signed off · {signOffWhen(so)}</div>
-          {so.notes ? <div style={{ fontSize: 13, color: "#374151", background: "#F9FAFB", borderRadius: 8, padding: "6px 9px", marginBottom: 8, whiteSpace: "pre-wrap" }}>📝 {so.notes}</div> : null}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {[["Crew member", so.staffName, so.staffSig], ["Customer", so.custName, so.custSig]].map(([l, n, sg]) => (
-              <div key={l}>
-                <div style={{ fontSize: 11.5, color: "#6A7B77", fontWeight: 700 }}>{l}: {n || "-"}</div>
-                {sg ? <img src={sg} alt={`${l} signature`} style={{ width: "100%", maxHeight: 80, objectFit: "contain", border: "1px solid #E5ECEA", borderRadius: 8, background: "#fff" }} /> : null}
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-      <Btn variant="grey" style={{ width: "100%" }} disabled={busy} onClick={pdfIt}>{busy ? "Making PDF…" : "📄 PDF (if the customer asks for a copy)"}</Btn>
-    </Modal>
   );
 }
 function CrewApp() {
@@ -9652,8 +8785,6 @@ function MainApp() {
   const [catalog, setCatalogState] = useState(() => { const l = loadLocalCatalog(); if (l) applyCatalog(l); return l || buildDefaultCatalog(); });
   const device = useDeviceType();
   const wide = device !== "phone";
-  const [layout, setLayout] = useState(getLayout);
-  const fmLayout = wide && layout === "filemaker";
 
   // One-off tidy: imported Mover enquiries keep only their survey notes in the Notes field.
   useEffect(() => {
@@ -9797,14 +8928,6 @@ function MainApp() {
     if (!sec) return null;
     const { List, Detail } = sec;
     const detailId = view.screen === sec.detail ? view.id : null;
-    // FileMaker layout: an open enquiry fills the whole screen (no list beside it).
-    if (fmLayout && sectionKey === "enquiries" && detailId) {
-      return <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "18px 20px 40px" }}>{isReadOnly() && <ReadOnlyBanner />}<EnquiryDetail data={data} id={detailId} setView={setView} fm /></div>;
-    }
-    // FileMaker layout: the enquiries list uses the whole screen too (no empty pane beside it).
-    if (fmLayout && sectionKey === "enquiries") {
-      return <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "18px 20px 40px" }}><div style={{ maxWidth: 900, margin: "0 auto" }}><List data={data} setView={setView} initialFilter={view.filter} /></div></div>;
-    }
     if (wide) {
       return (
         <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0 }}>
@@ -9852,19 +8975,7 @@ function MainApp() {
               );
             })}
           </nav>
-          <div style={{ marginTop: "auto", padding: "12px 14px 0" }}>
-            <div style={{ fontSize: 10.5, fontWeight: 800, color: "#94A4A0", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 5 }}>Customer screen layout</div>
-            <div data-ro-ok style={{ display: "flex", background: "#EEF3F2", borderRadius: 10, padding: 3, gap: 3 }}>
-              {[["classic", "Classic"], ["filemaker", "FileMaker"]].map(([k, l]) => (
-                <button key={k} type="button" data-ro-ok onClick={() => {
-                  setLayoutPref(k); setLayout(k);
-                  // Show the change straight away: FileMaker opens the enquiries screen.
-                  if (k === "filemaker" && sectionFor(view.screen) !== "enquiries") setView({ screen: "enquiries" });
-                }} style={{ flex: 1, height: 36, border: "none", borderRadius: 8, fontFamily: "inherit", fontSize: 13, fontWeight: layout === k ? 800 : 600, cursor: "pointer", background: layout === k ? "#fff" : "transparent", color: layout === k ? TEAL : "#6A7B77", boxShadow: layout === k ? "0 1px 3px rgba(16,33,30,.15)" : "none" }}>{l}</button>
-              ))}
-            </div>
-          </div>
-          <div style={{ marginTop: 10, padding: "14px 18px", borderTop: "1px solid #E9EEED", display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: "#6A7B77", fontWeight: 600 }}>
+          <div style={{ marginTop: "auto", padding: "14px 18px", borderTop: "1px solid #E9EEED", display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: "#6A7B77", fontWeight: 600 }}>
             <SyncDot /> {syncStatus === "synced" ? "All changes synced" : syncStatus === "syncing" ? "Syncing…" : "Offline — saved on device"}
           </div>
         </aside>
