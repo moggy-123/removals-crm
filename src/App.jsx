@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B215";
+const BUILD_NO = "B216";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1437,7 +1437,7 @@ function Dashboard({ data, setView, setData }) {
             <Btn key="d" size="sm" variant="grey" style={sm} onClick={() => markDone(e)}>✓ Surveyed</Btn>,
             <Btn key="l" size="sm" variant="grey" style={{ ...sm, color: "#B91C1C" }} onClick={() => markLostFlow(data, e)}>✕ Lost</Btn>] });
           const qt = quoteTodo(data, e);
-          if (qt && Number(e.quoteTotal) > 0) items.push({ key: "qs" + e.id, p: 3, sort: e.surveyDate || "", e, ...ORANGE, label: `⚠️ Send quote · ${gbp(e.quoteTotal)} built, not emailed`, sub: route, acts: [<Btn key="q" size="sm" variant="amber" style={sm} onClick={() => openQuote(e)}>📧 Email quote</Btn>] });
+          if (qt && Number(e.quoteTotal) > 0) items.push({ key: "qs" + e.id, p: 3, sort: e.surveyDate || "", e, ...ORANGE, label: `⚠️ Send quote · ${gbp(e.quoteTotal)} built, not emailed`, sub: route, acts: [<Btn key="q" size="sm" variant="amber" style={sm} onClick={() => setView({ screen: "quotePdf", id: e.id })}>📧 Email quote</Btn>] });
           else if (qt) items.push({ key: "qb" + e.id, p: 4, sort: e.surveyDate || "", e, ...BLUE, label: "Build quote · surveyed, no quote yet", sub: route, acts: [<Btn key="q" size="sm" variant="amber" style={sm} onClick={() => openQuote(e)}>Build quote</Btn>] });
           const nc = newEnqCall(data, e);
           if (nc) items.push({ key: "bs" + e.id, p: 6, sort: e.createdAt || "", e, ...TEALC, label: `Book survey · ${e.newCalledAt ? `last called ${fmtDateShort(e.newCalledAt.slice(0, 10))}` : "not called yet"}`, sub: route + (e.preferredDate ? ` · move ${fmtDateShort(e.preferredDate)}` : e.moveMonth ? ` · move ${fmtMonth(e.moveMonth)}` : ""), acts: [
@@ -1572,7 +1572,7 @@ function Dashboard({ data, setView, setData }) {
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                   <StatusBadge status={enqBadge(data, e)} />
                   {stage === "needQuote" && <Btn size="sm" variant="amber" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => openQuote(ev, e)}>Build quote</Btn>}
-                  {stage === "notSent" && <Btn size="sm" variant="amber" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => openQuote(ev, e)}>📧 Email quote</Btn>}
+                  {stage === "notSent" && <Btn size="sm" variant="amber" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => { ev.stopPropagation(); setView({ screen: "quotePdf", id: e.id }); }}>📧 Send quote</Btn>}
                   {overdue && <Btn size="sm" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => { ev.stopPropagation(); setResched(e); }}>📅 Reschedule</Btn>}
                   {overdue && <Btn size="sm" variant="grey" style={{ padding: "6px 10px", fontSize: 12.5 }} onClick={ev => { ev.stopPropagation(); saveAndReload(upsertLocal(data, "enquiries", { ...e, surveyDone: true, status: e.status === "New" ? "Surveyed" : e.status })); }}>✓ Surveyed</Btn>}
                 </div>
@@ -3558,6 +3558,7 @@ function QuotePdfView({ data, id, setView }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState("");
+  const [sentNow, setSentNow] = useState(false);
   if (!e) return <div style={{ padding: 20 }}>Quote not found.</div>;
   const copy = (which, val) => { if (!val || !navigator.clipboard) return; navigator.clipboard.writeText(val).then(() => { setCopied(which); setTimeout(() => setCopied(""), 1500); }).catch(() => {}); };
 
@@ -3567,13 +3568,25 @@ function QuotePdfView({ data, id, setView }) {
     return { file: new File([bytes], `Quote-${ref || "RJ"}.pdf`, { type: "application/pdf" }), ref };
   };
   const downloadFile = file => showPdf(file, file.name);
+  const markSent = () => {
+    if (isReadOnly()) return;
+    try {
+      const cur = loadData();
+      const en = (cur.enquiries || []).find(x => x.id === e.id) || e;
+      const rec = { ...en, quoteStatus: "Sent", quoteSentDate: todayISO(), status: ["Won", "Lost", "Not quoted"].includes(en.status) ? en.status : "Quoted" };
+      const stamped = stampData(upsertLocal(cur, "enquiries", rec));
+      setDB(JSON.stringify(stamped));
+      pushChangedOnly(stamped).catch(() => {});
+      setSentNow(true);
+    } catch (_e) {}
+  };
   const share = async () => {
     setErr(""); setBusy(true);
     try {
       const { file, ref } = await makeFile();
       const text = `Hi ${firstName}, please find your removals quotation attached${ref ? ` (ref ${ref})` : ""}. Any questions just let us know.\n\nR&J Removals & Storage`;
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: `Quotation${ref ? " " + ref : ""}`, text }); resetZoomSoon();
+        await navigator.share({ files: [file], title: `Quotation${ref ? " " + ref : ""}`, text }); markSent(); resetZoomSoon();
       } else { downloadFile(file); }
     } catch (ex) { if (ex && ex.name !== "AbortError") setErr(ex.message || "Could not share the PDF."); }
     setBusy(false);
@@ -3588,6 +3601,7 @@ function QuotePdfView({ data, id, setView }) {
     const ref = c?.ref ? String(c.ref) : "";
     const subject = `Your removals quotation${ref ? ` – ref ${ref}` : ""}`;
     const body = `Hi ${firstName},\n\nPlease find your removals quotation attached${ref ? ` (ref ${ref})` : ""}. Any questions just let us know.\n\nR&J Removals & Storage`;
+    markSent();
     window.location.href = `mailto:${quoteMailTo(c)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
@@ -3595,7 +3609,7 @@ function QuotePdfView({ data, id, setView }) {
     <div style={{ maxWidth: 560, margin: "0 auto" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
         <Btn variant="ghost" size="sm" onClick={() => { setView({ screen: "enquiryDetail", id: e.id }); setTimeout(() => { try { window.location.reload(); } catch (_e) {} }, 30); }}><Icon name="back" size={14} /> Back</Btn>
-        <div style={{ fontWeight: 800, fontSize: 18 }}>Quote PDF</div>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Send quote</div>
       </div>
       <Card>
         <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>This fills your R&J quotation template with {c?.name || "the customer"}'s details and quote, ready to send.</div>
@@ -3609,6 +3623,7 @@ function QuotePdfView({ data, id, setView }) {
           </div>
         )}
         {err ? <div style={{ marginTop: 12, fontSize: 12.5, color: "#B91C1C", background: "#FEF2F2", borderRadius: 8, padding: "8px 11px" }}>{err}</div> : null}
+        {sentNow ? <div style={{ marginTop: 12, fontSize: 12.5, color: "#065F46", background: "#ECFDF5", borderRadius: 8, padding: "8px 11px", fontWeight: 700 }}>✓ Quote marked as sent today</div> : (e.quoteStatus === "Sent" && e.quoteSentDate ? <div style={{ marginTop: 12, fontSize: 12.5, color: "#6B7280" }}>Last sent {fmtDate(e.quoteSentDate)}</div> : null)}
         <div style={{ marginTop: 14, fontSize: 11.5, color: "#6B7280" }}>"Create &amp; send" opens the share menu with the PDF attached — pick Mail, Messages or WhatsApp. "Email {firstName}" opens a ready-addressed email; download first, then attach it.</div>
       </Card>
     </div>
@@ -4430,7 +4445,8 @@ function EnquiryDetail({ data, id, setView }) {
           </div>
           {(!isReadOnly() || e.quoteTotal) && <Btn size="sm" variant="amber" onClick={() => setShowQuote(true)}><Icon name="quote" size={14} /> {isReadOnly() ? "View" : e.quoteTotal ? "Edit" : "Build"}</Btn>}
         </div>
-        {e.quoteTotal ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> Save PDF quote</Btn> : null}
+        {e.quoteTotal && !isReadOnly() ? <Btn variant="amber" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}>📧 Send quote{e.quoteStatus === "Sent" ? " again" : ""}</Btn> : null}
+        {e.quoteTotal && isReadOnly() ? <Btn size="sm" variant="grey" style={{ marginTop: 10 }} onClick={() => setView({ screen: "quotePdf", id: e.id })}><Icon name="quote" size={14} /> View PDF quote</Btn> : null}
         {(() => { const q = quoteChase(data, e); return q ? (
           <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400E" }}>{quoteChaseText(q)}
@@ -4838,7 +4854,7 @@ function CustomerDetail({ data, id, setView }) {
               {built ? `⚠️ Quote built (${gbp(e.quoteTotal)}) but not emailed yet.` : "✓ Surveyed — quote still to build."}
               <div style={{ fontSize: 12, color: "#6A7B77", fontWeight: 500, marginTop: 2 }}>{e.fromTown || "—"} → {e.toTown || "—"}</div>
             </div>
-            <div style={{ flexShrink: 0 }}><Btn size="sm" variant="amber" onClick={() => openQuote(e)}>{built ? "📧 Email quote" : "Build quote"}</Btn></div>
+            <div style={{ flexShrink: 0 }}><Btn size="sm" variant="amber" onClick={() => built ? setView({ screen: "quotePdf", id: e.id }) : openQuote(e)}>{built ? "📧 Send quote" : "Build quote"}</Btn></div>
           </div>
         </Card>
       );
