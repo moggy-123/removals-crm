@@ -1183,7 +1183,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B258";
+const BUILD_NO = "B259";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6925,13 +6925,7 @@ function CompanyView({ data, setView, setData }) {
         </Card>
         )}
 
-        <Card style={{ marginBottom: 0 }}>
-          <h4 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0", fontWeight: 800 }}>Tablet layout</h4>
-          <div style={{ fontSize: 13, color: "#6A7B77", lineHeight: 1.5, marginBottom: 10 }}>Trial the compact iPhone-style layout on iPad. Turn it off any time to go back to the normal tablet layout.</div>
-          {(() => { const on = (() => { try { return localStorage.getItem("removals_force_phone") === "1"; } catch { return false; } })();
-            return <Btn variant={on ? "primary" : "grey"} onClick={() => { try { if (on) localStorage.removeItem("removals_force_phone"); else localStorage.setItem("removals_force_phone", "1"); } catch {} window.location.reload(); }}>{on ? "Compact layout ON — tap to revert" : "Use iPhone layout on this device"}</Btn>;
-          })()}
-        </Card>
+        {/* Tablet layout switch removed — the iPhone-style layout is now used everywhere */}
 
 {isAdmin() && (
         <Card style={{ marginBottom: 0 }}>
@@ -7905,8 +7899,10 @@ const navBtn = { width:36, height:36, borderRadius:11, border:"1px solid #E3E9E8
 
 // ── Device responsiveness ───────────────────────────────────────────────────
 function useDeviceType() {
+  // The iPhone-style layout (header + bottom tabs) is used on every device now — iPad and computer too.
+  // Screens size themselves to fill the width (see the calendar).
   const get = () => {
-    try { if (localStorage.getItem("removals_force_phone") === "1") return "phone"; } catch {}
+    if (APP_LAYOUT === "phone") return "phone";
     const w = typeof window !== "undefined" ? window.innerWidth : 520;
     if (w >= 1024) return "desktop";
     if (w >= 768) return "tablet";
@@ -7920,6 +7916,7 @@ function useDeviceType() {
   }, []);
   return device;
 }
+const APP_LAYOUT = "phone";
 function ResponsiveStyles({ device }) {
   const wide = device !== "phone";
   const common = `
@@ -9868,7 +9865,7 @@ function MainApp() {
   const device = useDeviceType();
   const wide = device !== "phone";
   const [layout, setLayout] = useState(getLayout);
-  const fmLayout = wide && layout === "filemaker";
+  const fmLayout = false; // FileMaker layout removed
 
   // One-off tidy: imported Mover enquiries keep only their survey notes in the Notes field.
   useEffect(() => {
@@ -10007,7 +10004,7 @@ function MainApp() {
 
   function content() {
     const full = fullScreen();
-    if (full) return <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: view.screen === "calendar" ? "none" : 1080, margin: "0 auto" }}>{isReadOnly() && <ReadOnlyBanner />}{full}</div></div>;
+    if (full) return <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: "none", margin: "0 auto" }}>{isReadOnly() && <ReadOnlyBanner />}{full}</div></div>;
     const sec = SECTIONS[sectionKey];
     if (!sec) return null;
     const { List, Detail } = sec;
