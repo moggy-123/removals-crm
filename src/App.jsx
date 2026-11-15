@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B217";
+const BUILD_NO = "B218";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1902,6 +1902,33 @@ function repairLabelValueLines(t) {
 // Only fills fields the form itself didn't already fill.
 const RM_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 const RM_NUMS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
+// The address written just before a postcode in a free-typed message:
+// "…Collection adresses Lorfords Hanger 2 Babdown Airfield, Tetbury Gloucestershire GL8 8YL"
+// → "Lorfords Hanger 2 Babdown Airfield, Tetbury". Returns "" when it doesn't look like an address.
+function addressBefore(chunk) {
+  let c = String(chunk || "").replace(/\s+/g, " ");
+  // start after the last sentence end or address cue word
+  const CUE = /(?:[.!?;](?:\s|$)|\b(?:ad+res+e?s?|address(?:es)?|collection|collect from|delivery|deliver to|drop off|pick ?up|located|moving from|moving to|move from|move to|going to|from|to|at|in|is|are|of)\b\s*:?)/gi;
+  let cut = 0, mm; while ((mm = CUE.exec(c))) cut = mm.index + mm[0].length;
+  c = c.slice(cut);
+  if (c.length > 110) c = c.slice(c.length - 110).replace(/^\S*\s/, "");
+  const PLACE = /^(?:uk|u\.k\.?|united kingdom|england|wales|scotland|gb|great britain|glos|gloucs|gloucestershire|somerset|north somerset|avon|wilts|wiltshire|devon|dorset|cornwall|hants|hampshire|berks|berkshire|oxon|oxfordshire|herefordshire|worcs|worcestershire|south glos|south gloucestershire|monmouthshire|gwent|glamorgan|south wales|greater london|middlesex|surrey|kent|essex)$/i;
+  // drop a leading country left over from the previous address, and trailing county / country
+  c = c.replace(/^[\s,]*(?:united kingdom|uk|england|wales)\b[\s,]*/i, "");
+  for (let k = 0; k < 4; k++) {
+    const t2 = c.replace(/[\s,.-]+$/, "");
+    const mw = t2.match(/(?:^|[\s,])((?:north |south |greater )?[A-Za-z.]+)$/);
+    if (mw && PLACE.test(mw[1].trim()) && t2.length > mw[1].length) c = t2.slice(0, t2.length - mw[1].length); else { c = t2; break; }
+  }
+  c = c.replace(/^[\s,:-]+|[\s,:-]+$/g, "");
+  const words = c.split(/\s+/).filter(Boolean);
+  if (!c || !(/\d/.test(c) || c.includes(",") || words.length >= 3) || words.length > 14) return "";
+  // no commas: treat the last word as the town ("…Knockdown Tetbury")
+  if (!c.includes(",") && words.length >= 4 && /^[A-Z]/.test(words[words.length - 1])) c = words.slice(0, -1).join(" ") + ", " + words[words.length - 1];
+  // SHOUTED ADDRESS → Title Case
+  c = c.split(",").map(part => part === part.toUpperCase() && /[A-Z]{3}/.test(part) ? part.toLowerCase().replace(/\b([a-z])/g, ch => ch.toUpperCase()) : part).join(",");
+  return c.trim();
+}
 function readMessage(t, out, opts) {
   const o = opts || {};
   const lines = [];
@@ -1916,20 +1943,25 @@ function readMessage(t, out, opts) {
   // Postcodes
   const pcs = [];
   const PCG = /\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/gi; let m;
-  while ((m = PCG.exec(msg))) pcs.push({ pc: m[0].toUpperCase().replace(/\s+/g, " ").replace(/^(\S+?)(\d[A-Z]{2})$/, "$1 $2"), side: side(msg.slice(Math.max(0, m.index - 140), m.index)) });
+  let prevEnd = 0;
+  while ((m = PCG.exec(msg))) { pcs.push({ pc: m[0].toUpperCase().replace(/\s+/g, " ").replace(/^(\S+?)(\d[A-Z]{2})$/, "$1 $2"), side: side(msg.slice(Math.max(0, m.index - 140), m.index)), addr: addressBefore(msg.slice(prevEnd, m.index)) }); prevEnd = m.index + m[0].length; }
   // a postcode with no cue of its own, straight after another address, belongs to the same side
   pcs.forEach((p, i) => { if (!p.side && i > 0 && pcs[i - 1].side) p.side = pcs[i - 1].side; });
   if (!o.lockPostcodes && pcs.length) {
     const f = pcs.find(p => p.side === "from"), to = pcs.find(p => p.side === "to");
     if (f || to) {
-      if (f) out.fromPostcode = f.pc;
-      if (to) out.toPostcode = to.pc;
+      // the address typed just before each postcode goes with it (only if the form didn't give one)
+      const useFrom = p => { out.fromPostcode = p.pc; if (p.addr && !out.fromAddress1) { out.fromAddress1 = p.addr; out.fromAddress2 = ""; } };
+      const useTo = p => { out.toPostcode = p.pc; if (p.addr && !out.toAddress1) { out.toAddress1 = p.addr; out.toAddress2 = ""; } };
+      if (f) useFrom(f);
+      if (to) useTo(to);
       const rest = pcs.filter(p => p !== f && p !== to);
-      if (!f && rest[0]) out.fromPostcode = rest.shift().pc;
-      if (!to && rest[0]) out.toPostcode = rest.shift().pc;
+      if (!f && rest[0]) useFrom(rest.shift());
+      if (!to && rest[0]) useTo(rest.shift());
       // more collection / delivery postcodes → extra stops
-      rest.filter(p => p.side === "from" && p.pc !== out.fromPostcode).forEach(p => { (out.extraFrom = out.extraFrom || []).push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), address1: "", town: "", postcode: p.pc, note: "" }); });
-      rest.filter(p => p.side === "to" && p.pc !== out.toPostcode).forEach(p => { (out.extraTo = out.extraTo || []).push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), address1: "", town: "", postcode: p.pc, note: "" }); });
+      const stop = p => { const a = tidyAddress(p.addr || "", "", "", p.pc); return { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), address1: [a.address1, a.address2].filter(Boolean).join(", "), town: a.town, postcode: p.pc, note: "" }; };
+      rest.filter(p => p.side === "from" && p.pc !== out.fromPostcode).forEach(p => { (out.extraFrom = out.extraFrom || []).push(stop(p)); });
+      rest.filter(p => p.side === "to" && p.pc !== out.toPostcode).forEach(p => { (out.extraTo = out.extraTo || []).push(stop(p)); });
     }
   }
 
