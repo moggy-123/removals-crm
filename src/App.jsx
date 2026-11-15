@@ -1183,7 +1183,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B257";
+const BUILD_NO = "B258";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -7512,6 +7512,9 @@ function parseTime(t){ if(!t) return null; const m=String(t).match(/(\d{1,2}):(\
 function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"am":"pm"; let H=hh%12; if(H===0)H=12; return mm?`${H}:${String(mm).padStart(2,"0")}${ap}`:`${H}${ap}`; }
 
 function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
+  const [vw, setVw] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 400));
+  const [vh, setVh] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
+  useEffect(() => { const r = () => { setVw(window.innerWidth); setVh(window.innerHeight); }; window.addEventListener("resize", r); window.addEventListener("orientationchange", r); return () => { window.removeEventListener("resize", r); window.removeEventListener("orientationchange", r); }; }, []);
   const [mode, setMode] = useState(initialMode || "agenda");
   // What to show — pick any mix of moves / surveys / servicing (remembered on this device)
   const CAL_TYPES = [["moves", "🚚 Moves"], ["surveys", "📋 Surveys"], ["servicing", "🔧 Servicing"]];
@@ -7811,6 +7814,11 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
 
       {mode==="month" && (() => {
         const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+        // Big screens (iPad / computer): bigger boxes filling the screen, larger 2-line text, more jobs per day
+        const big = vw >= 900;
+        const cellH = big ? Math.max(118, Math.floor((vh - 300) / 6)) : 92;
+        const maxS = big ? 3 : 2, maxM = big ? 6 : 3;
+        const txt = big ? { fontSize: 12.5, lineHeight: 1.25, whiteSpace: "normal", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", wordBreak: "break-word" } : {};
         const start = startOfWeek(first);
         const cells = [];
         for (let i=0;i<42;i++) {
@@ -7818,12 +7826,12 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           const evs = jobsOn(d); const svs = surveysOn(d); const mnt = maintOn(d);
           const total = evs.length + svs.length + mnt.length;
           cells.push(
-            <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:92, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
-              <div style={{ alignSelf:"flex-start", fontSize:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
-              {svs.slice(0,2).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color: isMissedSurvey(en) ? "#B91C1C" : "#92591A", background: isMissedSurvey(en) ? "#FEE2E2" : "#FFF6E6", borderLeft:`3px solid ${isMissedSurvey(en) ? "#DC2626" : AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>📋 {custName(data,en.customerId)}</div>)}
-              {evs.slice(0,3).map((m,ix) => <div key={ix} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(m)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data,m.job.customerId)}{m.stage.type?` · ${m.stage.type}`:""}</div>)}
-              {mnt.slice(0,2).map((mm,ix) => <div key={"m"+ix} style={{ fontSize:10.5, fontWeight:700, color:"#475569", background:"#EEF2F7", borderLeft:"3px solid #64748B", borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>🔧 {mm.v.name} · {mm.b.type}</div>)}
-              {total>5 && <div style={{ fontSize:10, color:"#94A4A0", fontWeight:700 }}>+{total-5} more</div>}
+            <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:cellH, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
+              <div style={{ alignSelf:"flex-start", fontSize:big?14:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
+              {svs.slice(0,maxS).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color: isMissedSurvey(en) ? "#B91C1C" : "#92591A", background: isMissedSurvey(en) ? "#FEE2E2" : "#FFF6E6", borderLeft:`3px solid ${isMissedSurvey(en) ? "#DC2626" : AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>📋 {custName(data,en.customerId)}</div>)}
+              {evs.slice(0,maxM).map((m,ix) => <div key={ix} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(m)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>{custName(data,m.job.customerId)}{m.stage.type?` · ${m.stage.type}`:""}</div>)}
+              {mnt.slice(0,maxS).map((mm,ix) => <div key={"m"+ix} style={{ fontSize:10.5, fontWeight:700, color:"#475569", background:"#EEF2F7", borderLeft:"3px solid #64748B", borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>🔧 {mm.v.name} · {mm.b.type}</div>)}
+              {total>(maxS+maxM) && <div style={{ fontSize:big?11.5:10, color:"#94A4A0", fontWeight:700 }}>+{total-Math.min(svs.length,maxS)-Math.min(evs.length,maxM)-Math.min(mnt.length,maxS)} more</div>}
             </div>
           );
         }
@@ -9999,7 +10007,7 @@ function MainApp() {
 
   function content() {
     const full = fullScreen();
-    if (full) return <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: 1080, margin: "0 auto" }}>{isReadOnly() && <ReadOnlyBanner />}{full}</div></div>;
+    if (full) return <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}><div style={{ padding: wide ? "24px 26px 40px" : "16px 16px 90px", maxWidth: view.screen === "calendar" ? "none" : 1080, margin: "0 auto" }}>{isReadOnly() && <ReadOnlyBanner />}{full}</div></div>;
     const sec = SECTIONS[sectionKey];
     if (!sec) return null;
     const { List, Detail } = sec;
