@@ -1183,7 +1183,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B256";
+const BUILD_NO = "B257";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1284,14 +1284,14 @@ function Card({ children, onClick, style: extra }) {
 function Modal({ title, onClose, children, wide }) {
   return (
     <div className="rm-modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(15,46,42,.45)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div className="rm-modal" style={{ background: "#fff", borderRadius: "22px 22px 0 0", width: "100%", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+      <div className="rm-modal" style={{ background: "#fff", borderRadius: "22px 22px 0 0", width: "100%", maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ padding: "20px 20px 0", flexShrink: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#10211E", letterSpacing: "-.01em" }}>{title}</h3>
             <button onClick={onClose} style={{ background: "#EEF3F2", border: "none", borderRadius: 99, width: 34, height: 34, cursor: "pointer", fontSize: 18, color: "#6A7B77" }}>×</button>
           </div>
         </div>
-        <div style={{ overflowY: "auto", padding: "0 20px 20px", flex: 1 }}>
+        <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 20px 20px", flex: 1, minHeight: 0 }}>
           {isReadOnly()
             ? <><div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", background: "#F3F4F6", borderRadius: 8, padding: "6px 10px", marginBottom: 12 }}>👁 View only</div><div className="rm-ro">{children}</div></>
             : children}
@@ -3049,9 +3049,9 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
       </Field>
       <Field label="General notes"><Textarea value={f.notes} onChange={v => set("notes", v.split("\n").slice(0, 8).join("\n"))} rows={8} /></Field>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 10, marginTop: 8, position: "sticky", bottom: -20, background: "#fff", padding: "10px 0 20px", marginBottom: -20, borderTop: "1px solid #EEF3F2", zIndex: 5 }}>
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
-        <Btn style={{ flex: 2 }} onClick={save}>{e.id ? "Save changes" : "Create enquiry"}</Btn>
+        <Btn style={{ flex: 2 }} onClick={() => { try { document.activeElement && document.activeElement.blur(); } catch {} save(); }}>{e.id ? "Save changes" : "Create enquiry"}</Btn>
       </div>
     </Modal>
   );
@@ -7934,7 +7934,7 @@ function ResponsiveStyles({ device }) {
   `;
   const wideCss = `
     .rm-modal-overlay{align-items:center!important}
-    .rm-modal{max-width:560px!important;border-radius:20px!important;margin:0 16px;max-height:88vh!important}
+    .rm-modal{max-width:560px!important;border-radius:20px!important;margin:0 16px;max-height:88vh!important;max-height:88dvh!important}
     .rm-company-grid{grid-template-columns:1fr 1fr!important;align-items:start}
     input,select,textarea{font-size:15px!important}
   `;
