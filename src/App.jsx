@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B216";
+const BUILD_NO = "B217";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1909,14 +1909,16 @@ function readMessage(t, out, opts) {
   const msg = (msgM ? msgM[2] : t.split("\n").filter(l => !/^\s*[A-Za-z][A-Za-z /]{0,30}:/.test(l)).join(" ")).replace(/\s+/g, " ").trim();
   if (!msg) return { lines, message: "" };
   const lastIdx = (s, re) => { let i = -1, m; const g = new RegExp(re.source, "gi"); while ((m = g.exec(s))) i = m.index + m[0].length; return i; };
-  const FROM_CUE = /(currently (live|living|reside|based)|we live|i live|live (in|at)|living (in|at)|moving from|move from|moving out of|our (current|existing) (home|house|property|address)|current (home|house|property|address)|selling|sold our|collect(ion)? from)/;
-  const TO_CUE = /(buying|bought|purchas\w*|moving to|move to|moving into|new (home|house|property|address|place)|relocat\w* to|going to|deliver\w* to|completing on)/;
+  const FROM_CUE = /(currently (live|living|reside|based)|we live|i live|live (in|at)|living (in|at)|moving from|move from|moving out of|our (current|existing) (home|house|property|address)|current (home|house|property|address)|selling|sold our|collect(ion)? from|collection (?:ad+res+e?s?|points?|from)|collect(?:ing)? (?:it )?from|pick ?up from)/;
+  const TO_CUE = /(buying|bought|purchas\w*|moving to|move to|moving into|new (home|house|property|address|place)|relocat\w* to|going to|deliver\w* to|delivery (?:ad+res+e?s?|to|point)|drop ?off|completing on)/;
   const side = before => { const f = lastIdx(before, FROM_CUE), tt = lastIdx(before, TO_CUE); return f < 0 && tt < 0 ? "" : f > tt ? "from" : "to"; };
 
   // Postcodes
   const pcs = [];
   const PCG = /\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/gi; let m;
   while ((m = PCG.exec(msg))) pcs.push({ pc: m[0].toUpperCase().replace(/\s+/g, " ").replace(/^(\S+?)(\d[A-Z]{2})$/, "$1 $2"), side: side(msg.slice(Math.max(0, m.index - 140), m.index)) });
+  // a postcode with no cue of its own, straight after another address, belongs to the same side
+  pcs.forEach((p, i) => { if (!p.side && i > 0 && pcs[i - 1].side) p.side = pcs[i - 1].side; });
   if (!o.lockPostcodes && pcs.length) {
     const f = pcs.find(p => p.side === "from"), to = pcs.find(p => p.side === "to");
     if (f || to) {
@@ -1925,6 +1927,9 @@ function readMessage(t, out, opts) {
       const rest = pcs.filter(p => p !== f && p !== to);
       if (!f && rest[0]) out.fromPostcode = rest.shift().pc;
       if (!to && rest[0]) out.toPostcode = rest.shift().pc;
+      // more collection / delivery postcodes → extra stops
+      rest.filter(p => p.side === "from" && p.pc !== out.fromPostcode).forEach(p => { (out.extraFrom = out.extraFrom || []).push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), address1: "", town: "", postcode: p.pc, note: "" }); });
+      rest.filter(p => p.side === "to" && p.pc !== out.toPostcode).forEach(p => { (out.extraTo = out.extraTo || []).push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), address1: "", town: "", postcode: p.pc, note: "" }); });
     }
   }
 
@@ -2056,9 +2061,32 @@ function nameFromReply(body, quoted) {
   return gr ? gr[1] : "";
 }
 
+// Website form notifications ("You have received a form submission…"): "Label<TAB>Value" lines.
+// Turn them into "Label: Value", call the free-text box the Message, and drop the
+// Timezone / Submission Date / URL lines (the URL only tells us it came via Google).
+function tidyFormSubmission(t) {
+  let source = "";
+  const keep = [];
+  for (const raw of t.split("\n")) {
+    let l = raw.replace(/\s+$/, "");
+    if (/^\s*you have received a form submission/i.test(l) || /^\s*please review the form details/i.test(l)) continue;
+    const tab = l.match(/^\s*([^\t:]{1,40}?)\s*\t+\s*(.*)$/);
+    if (tab) l = tab[1].trim() + ": " + tab[2];
+    const lab = (l.match(/^\s*([A-Za-z][A-Za-z ?']{0,40}?)\s*:/) || [])[1] || "";
+    if (/^(timezone|time zone|submission date|submitted|date submitted|url|page url|ip|ip address|user agent|referrer)$/i.test(lab.trim())) {
+      if (/^(url|page url|referrer)$/i.test(lab.trim())) source = /gclid|gad_source|gbraid|wbraid|google/i.test(l) ? "Google" : "Website";
+      continue;
+    }
+    if (/^\s*https?:\/\/\S+\s*$/.test(l)) { if (/gclid|gad_source|gbraid/i.test(l)) source = "Google"; continue; }
+    l = l.replace(/^\s*(how can we help\??|how can we help you\??|your message|tell us about your move|enquiry details|message details)\s*:/i, "Message:");
+    keep.push(l);
+  }
+  return { text: keep.join("\n"), source };
+}
 function parseEnquiryEmail(text) {
   let t = (text || "").replace(/\r/g, "");
   if (/<[a-z!\/][^>]*>/i.test(t)) t = stripEmailHtml(t);
+  const form = tidyFormSubmission(t); t = form.text;
   t = repairLabelValueLines(normalizeEmailLabels(t));
   const out = { referredBy: "", name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", fromAccess: "", fromPropertyType: "", fromBedrooms: "", toAddress1: "", toTown: "", toPostcode: "", toAccess: "", toPropertyType: "", preferredDate: "", moveMonth: "", dateFlexible: false, notes: "" };
   const PC = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i;
@@ -2123,6 +2151,15 @@ function parseEnquiryEmail(text) {
   const moveVal = fieldIn(topBlock, ["exact move date", "move date", "moving date", "preferred date", "preferred move date", "date"]);
   const dm = (moveVal || t).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
   if (dm) { let y = dm[3]; if (y.length === 2) y = "20" + y; out.preferredDate = `${y.padStart(4, "0")}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}`; }
+  if (!out.preferredDate) {
+    const wd = (moveVal || t).match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:[o0]f\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b,?\s*(\d{4})?/i);
+    if (wd && Number(wd[1]) >= 1 && Number(wd[1]) <= 31) {
+      const mi = RM_MONTHS.indexOf(wd[2].toLowerCase()); const now = new Date();
+      let y = wd[3] ? Number(wd[3]) : now.getFullYear();
+      if (!wd[3] && new Date(y, mi, Number(wd[1])) < new Date(now.getFullYear(), now.getMonth(), now.getDate())) y++;
+      out.preferredDate = `${y}-${String(mi + 1).padStart(2, "0")}-${String(wd[1]).padStart(2, "0")}`;
+    }
+  }
   if (!out.preferredDate) { const mm = (moveVal || "").match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i); if (mm) out.moveMonth = monthNameToYM(mm[1]); }
   if (!out.preferredDate && /\bno\b/i.test(moveVal)) out.dateFlexible = true;
 
@@ -2147,7 +2184,7 @@ function parseEnquiryEmail(text) {
   const add = (label, val) => { if (val && val.trim()) extras.push(`${label}: ${val.trim()}`); };
   add("Packing", fieldIn(topBlock, ["packing"]));
   add("Storage", fieldIn(topBlock, ["storage"]));
-  out.referredBy = fieldIn(topBlock, ["how did you here of us", "how did you hear of us", "how did you hear", "where did you hear about us", "source", "referral", "referred by"]);
+  out.referredBy = fieldIn(topBlock, ["how did you here of us", "how did you hear of us", "how did you hear", "where did you hear about us", "source", "referral", "referred by"]) || form.source;
   add("Special requirements", fieldIn(topBlock, ["special requirements", "special requirement", "requirements"]));
   const fromProp = [out.fromPropertyType, fromBeds ? `${fromBeds} bed` : "", fromFurn].filter(Boolean).join(", ");
   const toProp = [out.toPropertyType, toBeds ? `${toBeds} bed` : ""].filter(Boolean).join(", ");
@@ -2203,6 +2240,8 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
       preferredDate: p.preferredDate || prev.preferredDate, moveMonth: p.moveMonth || prev.moveMonth,
       dateFlexible: p.dateFlexible || prev.dateFlexible,
       notes: prev.notes ? prev.notes : p.notes,
+      extraFrom: (p.extraFrom && p.extraFrom.length && !(prev.extraFrom || []).length) ? p.extraFrom : prev.extraFrom,
+      extraTo: (p.extraTo && p.extraTo.length && !(prev.extraTo || []).length) ? p.extraTo : prev.extraTo,
     }));
     setPickerKey(k => k + 1);
     setPasteOpen(false);
