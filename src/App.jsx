@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B218";
+const BUILD_NO = "B219";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1411,6 +1411,7 @@ function Dashboard({ data, setView, setData }) {
         <Stat label="Booked (month)" value={`${convRate}%`} color="#059669" onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })} />
       </div>
 
+      <WebLeadsTray setView={setView} />
       <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 18px", borderRadius: 10, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
         <Icon name="plus" size={15} /> New Enquiry
       </button>
@@ -1718,6 +1719,7 @@ function EnquiriesList({ data, setView, initialFilter }) {
       <div className="rm-page-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>Enquiries</h2>
       </div>
+      <WebLeadsTray setView={setView} />
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: "#6A7B77" }}>Survey date</span>
         <select value={period} onChange={e => setPeriod(e.target.value)} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1.5px solid #D9E2E0", background: "#fff", fontSize: 15, fontWeight: 700, color: "#10211E" }}>
@@ -2227,6 +2229,74 @@ function parseEnquiryEmail(text) {
   return out;
 }
 
+// ── Website leads (Forminator → /api/lead → Supabase web_leads) ─────────────
+const WL_DONE_KEY = "removals_web_leads_done";
+function wlDone() { try { return JSON.parse(localStorage.getItem(WL_DONE_KEY) || "{}"); } catch { return {}; } }
+async function markWebLead(id, status, enquiryId) {
+  try { const d = wlDone(); d[id] = { status, enquiryId: enquiryId || "" }; localStorage.setItem(WL_DONE_KEY, JSON.stringify(d)); } catch {}
+  try {
+    const q = supabase.from("web_leads").update({ status, enquiry_id: enquiryId || null, handled_at: new Date().toISOString() }).eq("id", id);
+    const { error } = await Promise.race([q, new Promise(r => setTimeout(() => r({ error: "timeout" }), 4000))]);
+    if (!error) { const d = wlDone(); delete d[id]; localStorage.setItem(WL_DONE_KEY, JSON.stringify(d)); }
+  } catch {}
+}
+async function loadWebLeads() {
+  // retry any "added / dismissed" that didn't reach the cloud last time
+  const pending = wlDone();
+  for (const id of Object.keys(pending)) await markWebLead(id, pending[id].status, pending[id].enquiryId);
+  const { data: rows, error } = await supabase.from("web_leads").select("id,created_at,text,source,status").eq("status", "new").order("created_at", { ascending: false }).limit(50);
+  if (error) return [];
+  const done = wlDone();
+  return (rows || []).filter(r => !done[r.id]);
+}
+function WebLeadsTray({ setView }) {
+  const [leads, setLeads] = useState([]);
+  const [open, setOpen] = useState(false);
+  const role = CURRENT_USER.role;
+  useEffect(() => {
+    if (role === "viewer" || role === "crew") return;
+    let live = true;
+    const go = () => loadWebLeads().then(r => { if (live) setLeads(r); }).catch(() => {});
+    go();
+    const t = setInterval(go, 120000);
+    const vis = () => { if (document.visibilityState === "visible") go(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { live = false; clearInterval(t); document.removeEventListener("visibilitychange", vis); };
+  }, [role]);
+  if (!leads.length || role === "viewer" || role === "crew") return null;
+  const add = l => { try { sessionStorage.setItem("removals_web_lead", JSON.stringify({ id: l.id, text: l.text })); } catch {} setView({ screen: "newEnquiry" }); };
+  const dismiss = async l => { if (!window.confirm("Dismiss this lead? (e.g. spam or already added)")) return; setLeads(x => x.filter(y => y.id !== l.id)); await markWebLead(l.id, "dismissed"); };
+  const when = iso => { try { const d = new Date(iso); return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  return (
+    <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 14, padding: "10px 12px", marginBottom: 14 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ width: "100%", background: "none", border: "none", padding: 0, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontFamily: "inherit" }}>
+        <span style={{ fontWeight: 800, fontSize: 15, color: "#92400E" }}>📥 {leads.length} new website lead{leads.length === 1 ? "" : "s"}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#B45309" }}>{open ? "Hide ▲" : "Show ▼"}</span>
+      </button>
+      {open && leads.map(l => {
+        let p = {}; try { p = parseEnquiryEmail(l.text || ""); } catch {}
+        const route = [p.fromTown || p.fromPostcode, p.toTown || p.toPostcode].filter(Boolean).join(" → ");
+        const msg = String(l.text || "").match(/^Message:\s*([\s\S]*)$/im);
+        return (
+          <div key={l.id} style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", marginTop: 8, border: "1px solid #FDE68A" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 14.5, color: "#111827" }}>{p.name || "Unknown name"}</div>
+              <div style={{ fontSize: 12, color: "#6B7280", whiteSpace: "nowrap" }}>{when(l.created_at)}</div>
+            </div>
+            <div style={{ fontSize: 12.5, color: "#374151", marginTop: 2 }}>{[p.phone, p.email].filter(Boolean).join(" · ")}</div>
+            {route ? <div style={{ fontSize: 12.5, color: "#374151", marginTop: 2 }}>{route}{p.preferredDate ? ` · ${fmtDate(p.preferredDate)}` : ""}</div> : null}
+            {msg ? <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{msg[1].trim()}</div> : null}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <Btn size="sm" variant="amber" style={{ flex: 2 }} onClick={() => add(l)}>Add as enquiry</Btn>
+              <Btn size="sm" variant="grey" style={{ flex: 1 }} onClick={() => dismiss(l)}>Dismiss</Btn>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) {
   const e = editEnquiry || {};
   const [customerId, setCustomerId] = useState(e.customerId || initialCustomerId || "");
@@ -2254,8 +2324,16 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [pickerKey, setPickerKey] = useState(0);
-  const autofill = () => {
-    const p = parseEnquiryEmail(pasteText);
+  const [webLeadId, setWebLeadId] = useState("");
+  // Opened from the Web leads tray → fill the form straight from that lead
+  useEffect(() => {
+    if (e.id) return;
+    let wl = null; try { wl = JSON.parse(sessionStorage.getItem("removals_web_lead") || "null"); sessionStorage.removeItem("removals_web_lead"); } catch {}
+    if (wl && wl.text) { setWebLeadId(wl.id || ""); setPasteText(wl.text); autofill(wl.text); }
+    /* eslint-disable-next-line */
+  }, []);
+  const autofill = (txt) => {
+    const p = parseEnquiryEmail(typeof txt === "string" ? txt : pasteText);
     // Already a customer? (same email or mobile, or the only customer with that name) → use them, don't duplicate.
     const digits = x => String(x || "").replace(/\D/g, "");
     const custs = data.customers || [];
@@ -2342,11 +2420,13 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen }) 
     };
     data2 = upsertLocal(data2, "enquiries", rec);
     try { sessionStorage.setItem("removals_view", JSON.stringify(e.id ? { screen: "enquiryDetail", id: e.id } : { screen: "dashboard" })); } catch {}
+    if (webLeadId) await markWebLead(webLeadId, "added", rec.id);
     await saveAndReload(data2);
   }
 
   return (
     <Modal title={reopen ? "Rebook survey" : e.id ? "Edit Enquiry" : "New Enquiry"} onClose={onClose}>
+      {webLeadId ? <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "9px 12px", marginBottom: 10, fontSize: 13, fontWeight: 600, color: "#92400E" }}>📥 Filled in from a website lead — check the details, then save.</div> : null}
       {!e.id && (
         <Field label="Customer" required>
           {!pasteOpen
