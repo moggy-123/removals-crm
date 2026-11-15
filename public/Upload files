@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Get the R&amp;J Removals app</title>
+<meta name="theme-color" content="#0F766E" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Removals CRM" />
+<!-- The preview card shown when this link is sent by WhatsApp, text or email -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Get the R&amp;J Removals team app" />
+<meta property="og:description" content="Jobs, surveys &amp; the calendar on your phone. Tap to install." />
+<meta property="og:image" content="https://removals-crm-q56x.vercel.app/og-install.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:url" content="https://removals-crm-q56x.vercel.app/install.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;color:#10211E;
+    background:radial-gradient(1200px 600px at 100% -10%,#14857b 0%,transparent 60%),linear-gradient(160deg,#0F766E 0%,#0B3B36 70%);
+    min-height:100vh;display:flex;justify-content:center;padding:28px 18px calc(28px + env(safe-area-inset-bottom))}
+  .wrap{width:100%;max-width:460px}
+  .hero{text-align:center;color:#fff;padding:18px 0 22px}
+  .icon{width:108px;height:108px;border-radius:26px;background:#fff;display:inline-flex;align-items:center;justify-content:center;
+    box-shadow:0 18px 40px rgba(0,0,0,.28);animation:pop .7s cubic-bezier(.2,1.4,.4,1) both}
+  .icon svg{width:72px;height:72px}
+  @keyframes pop{from{transform:scale(.4) rotate(-8deg);opacity:0}to{transform:none;opacity:1}}
+  @keyframes rise{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
+  .kicker{margin-top:20px;font-size:13px;font-weight:800;letter-spacing:.14em;color:#FCD34D;animation:rise .6s .15s both}
+  h1{font-size:32px;line-height:1.1;font-weight:800;margin-top:8px;animation:rise .6s .25s both}
+  .sub{font-size:16px;color:#CDE7E3;margin-top:10px;line-height:1.45;animation:rise .6s .35s both}
+  .card{background:#fff;border-radius:22px;padding:22px 20px;box-shadow:0 20px 50px rgba(0,0,0,.25);animation:rise .6s .45s both}
+  .card h2{font-size:17px;font-weight:800;margin-bottom:14px}
+  .step{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-top:1px solid #EEF3F2}
+  .step:first-of-type{border-top:none;padding-top:0}
+  .num{flex-shrink:0;width:30px;height:30px;border-radius:50%;background:#0F766E;color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center}
+  .step b{font-weight:800}
+  .step p{font-size:15.5px;line-height:1.45;padding-top:4px}
+  .pill{display:inline-flex;align-items:center;gap:5px;background:#EEF3F2;border-radius:8px;padding:1px 8px;font-weight:700;white-space:nowrap}
+  .pill svg{width:16px;height:16px}
+  .btn{display:block;width:100%;text-align:center;border:none;border-radius:16px;padding:16px;font-size:17px;font-weight:800;
+    cursor:pointer;text-decoration:none;font-family:inherit;margin-top:16px}
+  .btn-amber{background:#F59E0B;color:#fff;box-shadow:0 10px 24px rgba(245,158,11,.35)}
+  .btn-ghost{background:#EEF3F2;color:#0F766E}
+  .note{font-size:13.5px;color:#6A7B77;line-height:1.5;margin-top:14px}
+  .warn{background:#FFF7E8;border:1px solid #FCD34D;color:#92400E;border-radius:12px;padding:12px 14px;font-size:14.5px;line-height:1.45;margin-bottom:14px;font-weight:600}
+  .arrow{position:fixed;left:50%;bottom:calc(10px + env(safe-area-inset-bottom));transform:translateX(-50%);color:#fff;font-weight:800;font-size:14px;
+    text-align:center;animation:bob 1.2s ease-in-out infinite;display:none;text-shadow:0 2px 8px rgba(0,0,0,.4)}
+  .arrow span{display:block;font-size:30px;line-height:1}
+  @keyframes bob{50%{transform:translate(-50%,8px)}}
+  .foot{text-align:center;color:#A7D3CD;font-size:12.5px;margin-top:18px}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="icon">
+      <svg viewBox="0 0 64 64"><g fill="none" stroke="#0F766E" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 40V20a2 2 0 0 1 2-2h20a2 2 0 0 1 2 2v20"/><path d="M36 26h8.5a2 2 0 0 1 1.5.7l5 5.8a2 2 0 0 1 .5 1.3V40a2 2 0 0 1-2 2h-3"/>
+        <circle cx="21" cy="44" r="4" fill="#fff"/><circle cx="44" cy="44" r="4" fill="#fff"/><path d="M12 42h5m8 0h15"/></g></svg>
+    </div>
+    <div class="kicker">R&amp;J REMOVALS &amp; STORAGE</div>
+    <h1>Get the team app</h1>
+    <div class="sub">Your jobs, surveys and the calendar, right on your home screen. Takes 20 seconds.</div>
+  </div>
+
+  <!-- iPhone / iPad in Safari -->
+  <div class="card hide" id="ios">
+    <h2>Add it to your iPhone</h2>
+    <div class="step"><div class="num">1</div><p>Tap the <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="#0F766E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>Share</span> button<span id="ios-where"> at the bottom of the screen</span>.</p></div>
+    <div class="step"><div class="num">2</div><p>Scroll down and tap <b>Add to Home Screen</b> <span class="pill">⊞</span></p></div>
+    <div class="step"><div class="num">3</div><p>Tap <b>Add</b>. The <b>Removals CRM</b> icon appears on your home screen. Open it from there.</p></div>
+    <p class="note">Then sign in with the email and password you were given.</p>
+  </div>
+
+  <!-- iPhone but NOT in Safari (WhatsApp / Gmail / Chrome browser) -->
+  <div class="card hide" id="ios-other">
+    <div class="warn">This page needs to be open in <b>Safari</b> to install the app.</div>
+    <div class="step"><div class="num">1</div><p>Tap <b>Copy link</b> below.</p></div>
+    <div class="step"><div class="num">2</div><p>Open <b>Safari</b>, paste it into the address bar and go.</p></div>
+    <div class="step"><div class="num">3</div><p>Follow the steps on this page again.</p></div>
+    <button class="btn btn-amber" id="copy">Copy link</button>
+  </div>
+
+  <!-- Android (Chrome) -->
+  <div class="card hide" id="android">
+    <h2>Install on your Android phone</h2>
+    <button class="btn btn-amber hide" id="install">⬇ Install the app</button>
+    <div id="android-manual">
+      <div class="step"><div class="num">1</div><p>Tap the <span class="pill">⋮</span> menu at the top right of Chrome.</p></div>
+      <div class="step"><div class="num">2</div><p>Tap <b>Install app</b> (or <b>Add to Home screen</b>).</p></div>
+      <div class="step"><div class="num">3</div><p>Tap <b>Install</b>. Open <b>Removals CRM</b> from your home screen.</p></div>
+    </div>
+    <p class="note">Then sign in with the email and password you were given.</p>
+  </div>
+
+  <!-- Computer -->
+  <div class="card hide" id="desktop">
+    <h2>On a computer</h2>
+    <p class="note" style="margin-top:0;font-size:15px;color:#10211E">Just open the app in your browser. In Chrome or Edge you can also click the <b>install</b> icon at the right of the address bar to keep it in your dock or taskbar.</p>
+    <button class="btn btn-amber hide" id="install-d">⬇ Install the app</button>
+  </div>
+
+  <!-- Already installed -->
+  <div class="card hide" id="done">
+    <h2>✅ You've got it</h2>
+    <p class="note" style="margin-top:0;font-size:15px;color:#10211E">The app is installed. Open it from your home screen.</p>
+  </div>
+
+  <a class="btn btn-ghost" href="/" style="background:rgba(255,255,255,.14);color:#fff">Open the app in the browser ›</a>
+  <div class="foot">R&amp;J Removals &amp; Storage · staff only</div>
+</div>
+<div class="arrow" id="arrow">Tap Share below<span>⬇</span></div>
+
+<script>
+(function () {
+  var ua = navigator.userAgent || "";
+  var isIPad = /iPad/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var isIOS = /iPhone|iPod/.test(ua) || isIPad;
+  var isAndroid = /Android/i.test(ua);
+  var standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  // Safari only — not Chrome/Firefox/Edge for iOS or an in-app browser (WhatsApp, Facebook, Gmail…)
+  var iosSafari = isIOS && /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|GSA|FBAN|FBAV|Instagram|Line|WhatsApp/i.test(ua);
+  var show = function (id) { document.getElementById(id).classList.remove("hide"); };
+
+  if (standalone) show("done");
+  else if (isIOS && iosSafari) {
+    show("ios");
+    if (isIPad) document.getElementById("ios-where").textContent = " at the top right, next to the address bar";
+    else document.getElementById("arrow").style.display = "block";
+  }
+  else if (isIOS) show("ios-other");
+  else if (isAndroid) show("android");
+  else show("desktop");
+
+  var copy = document.getElementById("copy");
+  copy && copy.addEventListener("click", function () {
+    var url = location.origin + "/install.html";
+    var ok = function () { copy.textContent = "✓ Copied: now open Safari"; };
+    if (navigator.clipboard) navigator.clipboard.writeText(url).then(ok, function () { prompt("Copy this link:", url); });
+    else prompt("Copy this link:", url);
+  });
+
+  // Android / desktop Chrome: real one-tap install button when the browser allows it
+  var deferred = null;
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault(); deferred = e;
+    ["install", "install-d"].forEach(function (id) { document.getElementById(id).classList.remove("hide"); });
+    var m = document.getElementById("android-manual"); if (m) m.style.display = "none";
+  });
+  ["install", "install-d"].forEach(function (id) {
+    document.getElementById(id).addEventListener("click", function () {
+      if (!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.then(function (r) { if (r && r.outcome === "accepted") { document.querySelectorAll(".card").forEach(function (c) { c.classList.add("hide"); }); show("done"); } });
+      deferred = null;
+    });
+  });
+  window.addEventListener("appinstalled", function () { document.querySelectorAll(".card").forEach(function (c) { c.classList.add("hide"); }); show("done"); });
+
+  // the service worker (which makes the app work offline and installable) is registered here too
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(function () {});
+})();
+</script>
+</body>
+</html>
