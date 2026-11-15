@@ -1183,7 +1183,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B259";
+const BUILD_NO = "B260";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1320,6 +1320,15 @@ function custName(data, id) {
   if (!c) return "Unknown";
   const base = c.company ? `${c.name} (${c.company})` : c.name;
   return c.ref ? `#${c.ref} ${base}` : base;
+}
+// Calendar label for a quote / survey: "62781 (BS16) Mr Smith" — ref, then the first half of the collection postcode
+function calQuoteName(data, en) {
+  const c = (data.customers || []).find(x => x.id === (en && en.customerId));
+  if (!c) return "Unknown";
+  const pc = String((en && en.fromPostcode) || c.postcode || "").trim().toUpperCase();
+  const out = (pc.match(/^([A-Z]{1,2}\d[A-Z\d]?)(?=\s*\d[A-Z]{2}$|\s|$)/) || [])[1] || pc.split(/\s+/)[0] || "";
+  const base = c.company ? `${c.name} (${c.company})` : c.name;
+  return [c.ref ? String(c.ref) : "", out ? `(${out})` : "", base].filter(Boolean).join(" ");
 }
 function moveSeqOf(data, job) {
   const sib = (data.jobs || []).filter(j => j.customerId === job.customerId).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "") || (a.id || "").localeCompare(b.id || ""));
@@ -7612,7 +7621,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
     <div onClick={() => setView({ screen:"enquiryDetail", id:en.id })}
       style={{ background: bg, border:`1px solid ${bd}`, borderLeft:`4px solid ${bar}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
       <div style={{ fontSize: big?11:9.5, fontWeight:800, color: tc, textTransform:"uppercase", letterSpacing:".05em" }}>{missed ? "⚠️ Missed survey" : done ? "✓ Surveyed" : "Survey"}{en.surveyTime ? ` · ${en.surveyTime}` : ""}</div>
-      <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, en.customerId)}</div>
+      <div style={{ fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{calQuoteName(data, en)}</div>
       <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:1, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{en.fromTown || "—"} → {en.toTown || "—"}</div>
       <AltNote data={data} e={en} small={!big} />
       <ReasonLine e={en} small={!big} />
@@ -7822,7 +7831,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           cells.push(
             <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:cellH, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
               <div style={{ alignSelf:"flex-start", fontSize:big?14:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
-              {svs.slice(0,maxS).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color: isMissedSurvey(en) ? "#B91C1C" : "#92591A", background: isMissedSurvey(en) ? "#FEE2E2" : "#FFF6E6", borderLeft:`3px solid ${isMissedSurvey(en) ? "#DC2626" : AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>📋 {custName(data,en.customerId)}</div>)}
+              {svs.slice(0,maxS).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color: isMissedSurvey(en) ? "#B91C1C" : "#92591A", background: isMissedSurvey(en) ? "#FEE2E2" : "#FFF6E6", borderLeft:`3px solid ${isMissedSurvey(en) ? "#DC2626" : AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>📋 {calQuoteName(data, en)}</div>)}
               {evs.slice(0,maxM).map((m,ix) => <div key={ix} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(m)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>{custName(data,m.job.customerId)}{m.stage.type?` · ${m.stage.type}`:""}</div>)}
               {mnt.slice(0,maxS).map((mm,ix) => <div key={"m"+ix} style={{ fontSize:10.5, fontWeight:700, color:"#475569", background:"#EEF2F7", borderLeft:"3px solid #64748B", borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>🔧 {mm.v.name} · {mm.b.type}</div>)}
               {total>(maxS+maxM) && <div style={{ fontSize:big?11.5:10, color:"#94A4A0", fontWeight:700 }}>+{total-Math.min(svs.length,maxS)-Math.min(evs.length,maxM)-Math.min(mnt.length,maxS)} more</div>}
