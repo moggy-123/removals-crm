@@ -895,7 +895,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B214";
+const BUILD_NO = "B215";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1201,6 +1201,14 @@ function quoteChaseText(q) {
   return sent + (q.lastCall ? ` · last called ${fmtDateShort(q.lastCall.slice(0, 10))}` : " · not called yet");
 }
 // Who to ring: a contact ticked "Call this person first" wins, otherwise the customer's own number.
+function quoteEmails(cust) {
+  const out = [];
+  const add = e => { const v = String(e || "").trim(); if (v && !out.some(x => x.toLowerCase() === v.toLowerCase())) out.push(v); };
+  add(cust && cust.email);
+  ((cust && cust.contacts) || []).forEach(x => { if (x && x.emailQuotes) add(x.email); });
+  return out;
+}
+function quoteMailTo(cust) { return quoteEmails(cust).map(e => encodeURIComponent(e)).join(","); }
 function callFirst(cust) {
   const c = ((cust && cust.contacts) || []).find(x => x && x.preferred && x.phone);
   return c || null;
@@ -3057,7 +3065,7 @@ function QuoteModal({ data, enquiry, onClose }) {
       `This quote is valid for 30 days. To book, just reply to this email.\n\nKind regards`
     );
     const subject = encodeURIComponent("Your removal quote");
-    window.location.href = `mailto:${customer?.email || ""}?subject=${subject}&body=${body}`;
+    window.location.href = `mailto:${quoteMailTo(customer)}?subject=${subject}&body=${body}`;
     setTimeout(() => window.location.reload(), 600);
   }
 
@@ -3580,7 +3588,7 @@ function QuotePdfView({ data, id, setView }) {
     const ref = c?.ref ? String(c.ref) : "";
     const subject = `Your removals quotation${ref ? ` – ref ${ref}` : ""}`;
     const body = `Hi ${firstName},\n\nPlease find your removals quotation attached${ref ? ` (ref ${ref})` : ""}. Any questions just let us know.\n\nR&J Removals & Storage`;
-    window.location.href = `mailto:${encodeURIComponent(c?.email || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = `mailto:${quoteMailTo(c)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
   return (
@@ -3593,7 +3601,7 @@ function QuotePdfView({ data, id, setView }) {
         <div style={{ fontSize: 13, color: "#374151", marginBottom: 12 }}>This fills your R&J quotation template with {c?.name || "the customer"}'s details and quote, ready to send.</div>
         <Btn style={{ marginTop: 12 }} disabled={busy} onClick={share}><Icon name="quote" size={16} /> {busy ? "Building…" : "Create & send quote"}</Btn>
         <Btn variant="grey" style={{ marginTop: 8 }} disabled={busy} onClick={download}><Icon name="quote" size={14} /> Download PDF only</Btn>
-        {c?.email ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> Email {firstName} (pre-addressed)</Btn> : null}
+        {quoteEmails(c).length ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> {quoteEmails(c).length > 1 ? `Email ${firstName} + ${quoteEmails(c).length - 1} more (pre-addressed)` : `Email ${firstName} (pre-addressed)`}</Btn> : null}
         {(c?.email || c?.phone) && (
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             {c?.email && <Btn size="sm" variant="grey" onClick={() => copy("email", c.email)}>{copied === "email" ? "Copied ✓" : "Copy email"}</Btn>}
@@ -3866,7 +3874,7 @@ function SurveyPdfView({ data, id, setView }) {
   const emailCustomer = () => {
     const subject = "Your survey & move plan";
     const body = `Hi ${firstName},\n\nPlease find your survey and move plan attached. Have a look through and let us know if anything needs changing.\n\nR&J Removals & Storage`;
-    window.location.href = `mailto:${encodeURIComponent(c?.email || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = `mailto:${quoteMailTo(c)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
   return (
     <div style={{ maxWidth: 560, margin: "0 auto" }}>
@@ -3887,7 +3895,7 @@ function SurveyPdfView({ data, id, setView }) {
         </div>
         <Btn style={{ marginTop: 4 }} disabled={busy} onClick={share}><Icon name="quote" size={16} /> {busy ? "Building…" : (staff ? "Create staff copy" : "Create & send")}</Btn>
         <Btn variant="grey" style={{ marginTop: 8 }} disabled={busy} onClick={download}><Icon name="quote" size={14} /> Download PDF only</Btn>
-        {!staff && c?.email ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> Email {firstName} (pre-addressed)</Btn> : null}
+        {!staff && quoteEmails(c).length ? <Btn variant="grey" style={{ marginTop: 8 }} onClick={emailCustomer}><Icon name="mail" size={14} /> {quoteEmails(c).length > 1 ? `Email ${firstName} + ${quoteEmails(c).length - 1} more (pre-addressed)` : `Email ${firstName} (pre-addressed)`}</Btn> : null}
         {(c?.email || c?.phone) && (
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             {c?.email && <Btn size="sm" variant="grey" onClick={() => copy("email", c.email)}>{copied === "email" ? "Copied ✓" : "Copy email"}</Btn>}
@@ -4639,14 +4647,19 @@ function ContactsEditor({ contacts, onChange }) {
             <div style={{ flex: 1, minWidth: 0 }}><Input value={c.email} onChange={v => upd(i, "email", v)} placeholder="Email (optional)" type="email" /></div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <label style={{ fontSize: 13, color: "#374151", display: "flex", gap: 7, alignItems: "center", cursor: "pointer" }}>
               <input type="checkbox" checked={!!c.preferred} onChange={e => upd(i, "preferred", e.target.checked)} style={{ width: 18, height: 18 }} /> Call this person first
             </label>
+            <label style={{ fontSize: 13, color: c.email ? "#374151" : "#9CA3AF", display: "flex", gap: 7, alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={!!c.emailQuotes} onChange={e => upd(i, "emailQuotes", e.target.checked)} style={{ width: 18, height: 18 }} /> Email quotes to this person too{!c.email && c.emailQuotes ? " (add their email)" : ""}
+            </label>
+            </div>
             <button type="button" onClick={() => onChange(list.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#B91C1C", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Remove</button>
           </div>
         </div>
       ))}
-      <Btn size="sm" variant="grey" onClick={() => onChange([...list, { id: uid(), name: "", relation: "", phone: "", email: "", preferred: false }])}>+ Add contact</Btn>
+      <Btn size="sm" variant="grey" onClick={() => onChange([...list, { id: uid(), name: "", relation: "", phone: "", email: "", preferred: false, emailQuotes: false }])}>+ Add contact</Btn>
     </div>
   );
 }
@@ -4660,7 +4673,7 @@ function OtherContacts({ customer, onLog }) {
         <div key={c.id || c.phone} style={{ background: c.preferred ? "#FFF9EE" : "#fff", border: `1px solid ${c.preferred ? "#FBD9A0" : "#E3E9E8"}`, borderRadius: 12, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#1F2D2A" }}>{c.name || "Other contact"}{c.relation ? <span style={{ fontWeight: 600, color: "#6A7B77" }}> · {c.relation}</span> : null}</div>
-            <div style={{ fontSize: 12.5, color: "#6A7B77", overflow: "hidden", textOverflow: "ellipsis" }}>{[c.phone, c.email].filter(Boolean).join(" · ")}{c.preferred ? <b style={{ color: AMBER }}> · Call first</b> : null}</div>
+            <div style={{ fontSize: 12.5, color: "#6A7B77", overflow: "hidden", textOverflow: "ellipsis" }}>{[c.phone, c.email].filter(Boolean).join(" · ")}{c.preferred ? <b style={{ color: AMBER }}> · Call first</b> : null}{c.emailQuotes && c.email ? <b style={{ color: "#0F766E" }}> · Gets quotes</b> : null}</div>
           </div>
           {c.phone && <Btn size="sm" variant="grey" onClick={() => { if (onLog) onLog({ type: "Call", note: `Called ${c.name || "other contact"}${c.relation ? ` (${c.relation.toLowerCase()})` : ""}` }); window.location.href = `tel:${tel(c.phone)}`; }}>📞 Call</Btn>}
           {c.phone && <Btn size="sm" variant="grey" onClick={() => { window.location.href = `sms:${tel(c.phone)}`; }}>💬 Text</Btn>}
