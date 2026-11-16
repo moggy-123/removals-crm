@@ -1192,7 +1192,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B264";
+const BUILD_NO = "B265";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4930,6 +4930,45 @@ function FmSeg({ items, value, onChange, big }) {
     </div>
   );
 }
+// Booking a move: choose Provisional or Confirmed and set the date for every day (from the move plan).
+function BookMoveModal({ e, initial, onClose, onBook }) {
+  const planned = Array.isArray(e.stages) && e.stages.length ? e.stages : [{ type: "Move", date: "" }];
+  const [status, setStatus] = useState(initial === "Confirmed" ? "Confirmed" : "Provisional");
+  const [dates, setDates] = useState(planned.map(d => d.date || ""));
+  const [noDate, setNoDate] = useState(false);
+  const price = Number(e.quoteTotal) || 0;
+  const missing = dates.map((d, i) => d ? null : i + 1).filter(Boolean);
+  const go = () => {
+    if (!(status === "Provisional" && noDate) && missing.length) { alert(`Pick a date for ${planned.length > 1 ? `day ${missing.join(", ")}` : "the move"} first.`); return; }
+    onBook(status, status === "Provisional" && noDate ? planned.map(() => "") : dates);
+  };
+  const seg = on => ({ flex: 1, padding: "11px 8px", borderRadius: 10, border: on ? `2px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : "#fff", color: on ? TEAL_D : "#43534F", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" });
+  return (
+    <Modal title="Book this move" onClose={onClose}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+        <button style={seg(status === "Provisional")} onClick={() => setStatus("Provisional")}>Provisional</button>
+        <button style={seg(status === "Confirmed")} onClick={() => setStatus("Confirmed")}>Confirmed</button>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? "The date is definite. Deposit is marked as paid (60%) — change it on the move if not." : "Pencilled in — the customer hasn't fully committed yet."}</div>
+      {planned.map((d, i) => (
+        <Field key={i} label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate)}>
+          <Input type="date" value={dates[i]} onChange={v => setDates(a => a.map((x, k) => k === i ? v : x))} />
+        </Field>
+      ))}
+      {e.preferredDate ? <div style={{ fontSize: 12, color: "#94A4A0", marginTop: -4, marginBottom: 10 }}>Enquiry said around {fmtDate(e.preferredDate)} — just a heads-up, not used.</div> : null}
+      {status === "Provisional" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "#374151", cursor: "pointer", marginBottom: 10 }}>
+          <input type="checkbox" checked={noDate} onChange={ev => setNoDate(ev.target.checked)} style={{ width: 18, height: 18 }} /> Customer has no date yet (No date provisional)
+        </label>
+      )}
+      {!price && <div style={{ fontSize: 12.5, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 9, padding: "8px 11px", marginBottom: 10 }}>No quote price yet — the move will be booked at £0. Add the price on the move later.</div>}
+      <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
+        <Btn variant={status === "Confirmed" ? undefined : "amber"} style={{ flex: 2 }} onClick={go}><Icon name="check" size={15} /> Book {status.toLowerCase()} move</Btn>
+      </div>
+    </Modal>
+  );
+}
 function BookedNoMove({ data, e, linkedJob, onCreate }) {
   // A "Booked" (Won) enquiry with no move behind it — e.g. brought over from Mover, or its
   // move was removed. Without a move there's nothing to change, so offer to set one up.
@@ -5172,6 +5211,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   const [showCrew, setShowCrew] = useState(false);
   const [showSignOff, setShowSignOff] = useState(false);
   const [rebook, setRebook] = useState(false);
+  const [bookOpen, setBookOpen] = useState(null); // "Provisional" | "Confirmed" while the booking dialog is open
   const [showResched, setShowResched] = useState(false);
   const [showChaseDate, setShowChaseDate] = useState(false);
   useEffect(() => {
@@ -5189,9 +5229,10 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   async function setStatus(status, extra = {}) {
     await saveAndReload(upsertLocal(data, "enquiries", { ...e, status, ...extra }));
   }
-  async function markWon(newStatus = "Provisional") {
+  async function markWon(newStatus = "Provisional", opts = {}) {
     if (typeof newStatus !== "string") newStatus = "Provisional";
     const existing = (data.jobs || []).find(j => j.enquiryId === e.id);
+    if (!existing && !opts.fromDialog) { setBookOpen(newStatus); return; } // always pick the date(s) first
     if (existing) {
       // Re-booking an enquiry that already has a move: don't create a second job.
       let d0 = upsertLocal(data, "jobs", { ...existing, status: existing.status === "Completed" ? "Provisional" : existing.status });
@@ -5210,8 +5251,8 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
     const planned = Array.isArray(e.stages) ? e.stages : [];
     const stages = planned.length
       // Dates come from the move plan only — the enquiry's date is just a heads-up. No plan date = "No date provisional".
-      ? planned.map(d => ({ id: uid(), type: d.type || "Move", date: d.date || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
-      : [{ id: uid(), type: "Move", date: "", time: "", vehicleIds: [], crew: [], notes: "" }];
+      ? planned.map((d, i) => ({ id: uid(), type: d.type || "Move", date: (opts.dates && opts.dates[i]) || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
+      : [{ id: uid(), type: "Move", date: (opts.dates && opts.dates[0]) || "", time: "", vehicleIds: [], crew: [], notes: "" }];
     const job = {
       id: jid, customerId: e.customerId, enquiryId: e.id,
       startTime: "",
@@ -5221,11 +5262,14 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       stages,
       moveDate: stages.map(st => st.date).filter(Boolean).sort()[0] || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
-      price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
+      price: e.quoteTotal || 0,
+      deposit: newStatus === "Confirmed" ? Math.round((Number(e.quoteTotal) || 0) * 0.6) : 0, depositPaid: newStatus === "Confirmed", balancePaid: false,
       status: newStatus, notes: "", createdAt: new Date().toISOString(),
     };
     let d2 = upsertLocal(data, "jobs", job);
-    d2 = upsertLocal(d2, "enquiries", { ...e, status: "Won", quoteStatus: "Accepted" });
+    // keep the enquiry's move plan dates in step with the booking
+    const planWithDates = planned.length ? planned.map((d, i) => ({ ...d, date: (opts.dates && opts.dates[i]) || "" })) : e.stages;
+    d2 = upsertLocal(d2, "enquiries", { ...e, stages: planWithDates, status: "Won", quoteStatus: "Accepted" });
     // The customer picked this option, so the other alternative quotes close themselves.
     altGroup(data, e).filter(x => x.id !== e.id && !(data.jobs || []).some(j => j.enquiryId === x.id)).forEach(x => {
       d2 = upsertLocal(d2, "enquiries", { ...x, status: "Not quoted", altClosed: true });
@@ -5268,6 +5312,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   const modals = (
     <>
       {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
+      {bookOpen && <BookMoveModal e={e} initial={bookOpen} onClose={() => setBookOpen(null)} onBook={(st, dates) => { setBookOpen(null); markWon(st, { fromDialog: true, dates }); }} />}
       {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
       {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
@@ -5431,7 +5476,10 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {!isReadOnly() && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <Btn onClick={() => markWon()} style={{ flex: 1 }}><Icon name="check" size={16} /> Create provisional move</Btn>}
+        {!isReadOnly() && !linkedJob && !["Won", "Lost", "Not quoted"].includes(e.status) && <>
+          <Btn variant="amber" onClick={() => markWon("Provisional")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book provisional</Btn>
+          <Btn onClick={() => markWon("Confirmed")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book confirmed</Btn>
+        </>}
       </div>
       {(() => {
         const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
