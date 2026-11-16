@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { pullFromCloud, pushToCloud, pushOne, pushMany, deleteMany, deleteRecord as deleteRecordRaw, supabase, loadCatalog, saveCatalog, uploadStorageSheet, setCustomerRefStart, dbSig } from "./supabase";
 import { FURNITURE, ROOMS, BOX_ITEMS, WARDROBE_BOX_ID, recommendVehicle } from "./furniture";
@@ -336,6 +336,15 @@ function staffOffOn(s, dateISO) {
   const b = (s && s.away) || [];
   return b.some(x => { if (!x.start) return false; const end = isoAdd(x.start, { days: Math.max(1, Number(x.days) || 1) - 1 }); return dateISO >= x.start && dateISO <= end; });
 }
+// Casual workers: not counted as free crew unless they've said yes for that day
+function isCasual(s) { return !!(s && s.casual); }
+function casualYes(s, dateISO) { return !!(s && Array.isArray(s.availDays) && s.availDays.includes(dateISO)); }
+function crewOptions(data) {
+  const act = (data.staff || []).filter(s => s.active !== false);
+  return [...act.filter(s => !isCasual(s)), ...act.filter(isCasual)].map(s => ({ id: s.name, label: s.name, casual: isCasual(s) }));
+}
+// "3 crew free + 2 casual"
+function crewFreeText(reg, cas) { return `${reg} crew free${cas ? ` + ${cas} casual` : ""}`; }
 function staffAwayReason(s, dateISO) {
   const b = (s && s.away) || [];
   const hit = b.find(x => { if (!x.start) return false; const end = isoAdd(x.start, { days: Math.max(1, Number(x.days) || 1) - 1 }); return dateISO >= x.start && dateISO <= end; });
@@ -1183,7 +1192,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B262";
+const BUILD_NO = "B263";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3782,7 +3791,7 @@ function Row({ label, value }) {
 function MovePlanModal({ data, enquiry, onClose }) {
   const linkedJob = (data.jobs || []).find(j => j.enquiryId === enquiry.id);
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
-  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
+  const crewOpts = crewOptions(data);
   const vname = id => ((data.vehicles || []).find(v => v.id === id) || {}).name;
   const [days, setDays] = useState(() => (Array.isArray(enquiry.stages) ? enquiry.stages : []).map((d, i) => {
     const js = linkedJob ? (linkedJob.stages || [])[i] : null;
@@ -4600,7 +4609,7 @@ function MoveManageModal({ data, job, onClose }) {
   const [changing, setChanging] = useState(false); // change crew / vans on a confirmed move (sickness, van off road…)
   const [shortWarn, setShortWarn] = useState(null); // list of short days, shown as a banner before saving
   const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", staffCount: st.staffCount || "", vehTypes: st.vehTypes || {}, crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "" })));
-  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
+  const crewOpts = crewOptions(data);
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const bookedOn = date => {
     const veh = new Set(), crew = new Set();
@@ -7148,7 +7157,7 @@ function VehicleForm({ data, onClose, editVehicle }) {
 
 function StaffForm({ data, onClose, editStaff }) {
   const s = editStaff || {};
-  const [f, setF] = useState({ name: s.name || "", role: s.role || "", phone: s.phone || "", active: s.active !== false });
+  const [f, setF] = useState({ name: s.name || "", role: s.role || "", phone: s.phone || "", active: s.active !== false, casual: !!s.casual });
   const [away, setAway] = useState(Array.isArray(s.away) ? s.away : []);
   const [awStart, setAwStart] = useState("");
   const [awDays, setAwDays] = useState("1");
@@ -7159,7 +7168,7 @@ function StaffForm({ data, onClose, editStaff }) {
   const rmAway = id => setAway(a => a.filter(x => x.id !== id));
   async function save() {
     if (!f.name.trim()) { alert("Enter a name."); return; }
-    const rec = { id: s.id || uid(), name: f.name.trim(), role: f.role, phone: f.phone, active: f.active, away, createdAt: s.createdAt || new Date().toISOString() };
+    const rec = { ...s, id: s.id || uid(), name: f.name.trim(), role: f.role, phone: f.phone, active: f.active, casual: f.casual, availDays: Array.isArray(s.availDays) ? s.availDays.filter(d => d >= todayISO()) : [], away, createdAt: s.createdAt || new Date().toISOString() };
     await saveAndReload(upsertLocal(data, "staff", rec));
   }
   async function del() {
@@ -7177,6 +7186,9 @@ function StaffForm({ data, onClose, editStaff }) {
       <Field label="Active">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
           <input type="checkbox" checked={f.active} onChange={e => set("active", e.target.checked)} style={{ width: 18, height: 18 }} /> Currently working (show when assigning crew)
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer", marginTop: 8 }}>
+          <input type="checkbox" checked={f.casual} onChange={e => set("casual", e.target.checked)} style={{ width: 18, height: 18 }} /> Casual worker (ring to check before booking)
         </label>
       </Field>
 
@@ -7267,15 +7279,19 @@ function PickChips({ options, selectedIds, takenIds, onToggle, empty, takenReaso
   if (!options.length) return <div style={{ fontSize: 13, color: "#94A4A0", padding: "4px 0" }}>{empty}</div>;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-      {options.map(o => {
+      {options.map((o, oi) => {
         const on = selectedIds.includes(o.id);
+        const casHead = o.casual && !(options[oi - 1] && options[oi - 1].casual);
         const taken = !on && takenIds.has(o.id);
         const reason = taken ? ((takenReasons && takenReasons[o.id]) || "booked") : "";
         return (
-          <button key={o.id} onClick={() => !taken && onToggle(o.id)} disabled={taken} title={taken ? reason : ""}
+          <Fragment key={o.id}>
+          {casHead && <div style={{ width: "100%", fontSize: 11, fontWeight: 800, color: "#94A4A0", textTransform: "uppercase", letterSpacing: ".05em", marginTop: 4 }}>Casual · ring to check</div>}
+          <button onClick={() => !taken && onToggle(o.id)} disabled={taken} title={taken ? reason : ""}
             style={{ border: on ? `1.5px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : taken ? "#F2F5F4" : "#fff", color: on ? TEAL_D : taken ? "#B7C3C0" : "#43534F", borderRadius: 99, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: taken ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 5, textDecoration: taken ? "line-through" : "none" }}>
             {on && <Icon name="check" size={12} color={TEAL} />}{o.label}{taken ? ` · ${reason}` : ""}
           </button>
+          </Fragment>
         );
       })}
     </div>
@@ -7388,7 +7404,7 @@ function JobDetailScreen({ data, j, setView }) {
   }
   const balance = (Number(f.price) || 0) - (Number(f.deposit) || 0);
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
-  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
+  const crewOpts = crewOptions(data);
 
   return (
     <div>
@@ -7518,6 +7534,29 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const [vw, setVw] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 400));
   const [vh, setVh] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
   const [selDay, setSelDay] = useState(null); // iPhone month view: the day tapped
+  const [casYes, setCasYes] = useState({}); // casual "said yes" ticks made on this screen: { "staffId|date": true/false }
+  const casualOk = (st, iso) => { const k = st.id + "|" + iso; return k in casYes ? casYes[k] : casualYes(st, iso); };
+  const toggleCasual = (st, iso) => {
+    if (isReadOnly()) return;
+    const now = !casualOk(st, iso);
+    setCasYes(m => ({ ...m, [st.id + "|" + iso]: now }));
+    try {
+      const cur = loadData();
+      const rec = (cur.staff || []).find(x => x.id === st.id) || st;
+      const days = new Set((Array.isArray(rec.availDays) ? rec.availDays : []).filter(d => d >= todayISO()));
+      if (now) days.add(iso); else days.delete(iso);
+      const stamped = stampData(upsertLocal(cur, "staff", { ...rec, availDays: [...days].sort(), updatedAt: Date.now() }));
+      setDB(JSON.stringify(stamped));
+      pushChangedOnly(stamped).catch(() => {});
+    } catch (_e) {}
+  };
+  // free crew on a day: regulars (+ casuals who've said yes) and casuals still to ring
+  const freeCrew = (d, bs) => {
+    const iso = isoOf(d);
+    const act = (data.staff || []).filter(x => x.active !== false && !bs.has(x.name));
+    const reg = act.filter(x => !isCasual(x) || casualOk(x, iso)).length;
+    return { reg, cas: act.length - reg };
+  };
   useEffect(() => { const r = () => { setVw(window.innerWidth); setVh(window.innerHeight); }; window.addEventListener("resize", r); window.addEventListener("orientationchange", r); return () => { window.removeEventListener("resize", r); window.removeEventListener("orientationchange", r); }; }, []);
   const [mode, setMode] = useState(initialMode || "agenda");
   // What to show — pick any mix of moves / surveys / servicing (remembered on this device)
@@ -7619,8 +7658,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
     if (!showMoves || !((data.vehicles||[]).length || (data.staff||[]).filter(s=>s.active!==false).length)) return null;
     const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
     const freeV = (data.vehicles||[]).filter(v=>!bv.has(v.id)).length;
-    const freeS = (data.staff||[]).filter(s=>s.active!==false && !bs.has(s.name)).length;
-    return <span style={{ fontSize:12, fontWeight:700, color: (freeV||freeS) ? "#3f817a" : "#C4D0CD", whiteSpace:"nowrap" }}>{freeV} van{freeV!==1?"s":""} · {freeS} crew free</span>;
+    const fc = freeCrew(d, bs);
+    return <span style={{ fontSize:12, fontWeight:700, color: (freeV||fc.reg||fc.cas) ? "#3f817a" : "#C4D0CD", whiteSpace:"nowrap" }}>{freeV} van{freeV!==1?"s":""} · {crewFreeText(fc.reg, fc.cas)}</span>;
   };
   const SurveyCard = ({ en, big }) => {
     const done = en.surveyDone || en.status === "Surveyed";
@@ -7644,6 +7683,29 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       <span style={{ width:8, height:8, borderRadius:99, background: booked ? "#C4D0CD" : "#22C55E" }} />{label}{booked && !label.includes(" · ") ? " · booked" : ""}
     </span>
   );
+  // Casual workers' row: tap a name to mark "said yes" for that day
+  const casualChips = (list, iso, bs) => {
+    if (!list.length) return null;
+    const ro = isReadOnly();
+    return (
+      <div style={{ marginTop: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 6 }}>Casual · ring to check{ro ? "" : " — tap when they say yes"}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {list.map(st => {
+            const off = staffAwayReason(st, iso), booked = bs.has(st.name), yes = casualOk(st, iso);
+            if (off || booked) return <span key={st.id}>{availChip(off ? `${st.name} · ${off}` : st.name, true)}</span>;
+            return (
+              <button key={st.id} onClick={() => toggleCasual(st, iso)} disabled={ro}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 99, fontSize: 12.5, fontWeight: 700, cursor: ro ? "default" : "pointer", fontFamily: "inherit",
+                  background: yes ? "#E7F2F0" : "#fff", color: yes ? TEAL_D : "#6A7B77", border: yes ? "1px solid #CDE7E2" : "1px dashed #C4D0CD" }}>
+                {yes ? "✓ " : ""}{st.name}{yes ? " · said yes" : ""}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
   const AvailPanel = ({ d }) => {
     if (!showMoves) return null;
     const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
@@ -7659,7 +7721,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         </>}
         {staffActive.length>0 && <>
           <div style={{ fontSize:12, fontWeight:700, color:"#6A7B77", marginBottom:6 }}>Staff</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>{staffActive.map(s => { const off = staffAwayReason(s, isoOf(d)); return <span key={s.id}>{availChip(off ? `${s.name} · ${off}` : s.name, bs.has(s.name))}</span>; })}</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>{staffActive.filter(s => !isCasual(s)).map(s => { const off = staffAwayReason(s, isoOf(d)); return <span key={s.id}>{availChip(off ? `${s.name} · ${off}` : s.name, bs.has(s.name))}</span>; })}</div>
+          {casualChips(staffActive.filter(isCasual), isoOf(d), bs)}
         </>}
       </div>
     );
@@ -7681,14 +7744,14 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
     const staffActive = (data.staff || []).filter(s => s.active !== false);
     if (!vehicles.length && !staffActive.length) return null;
     const freeV = vehicles.filter(v => !bv.has(v.id)).length;
-    const freeS = staffActive.filter(s => !bs.has(s.name)).length;
+    const fc = freeCrew(d, bs);
     const step = n => setAvailPick(isoOf(addDays(d, n)));
     return (
       <div style={{ background: "#fff", border: "1px solid #E9EEED", borderRadius: 12, marginBottom: 14, boxShadow: "0 1px 2px rgba(16,33,30,.05)", overflow: "hidden" }}>
         <button onClick={() => setAvailOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
           <span style={{ fontSize: 14, fontWeight: 800, color: "#10211E" }}>Staff & vehicle availability</span>
           <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            {!availOpen && <span style={{ fontSize: 12, fontWeight: 700, color: (freeV || freeS) ? TEAL_D : "#B7C3C0" }}>{freeV} van{freeV !== 1 ? "s" : ""} · {freeS} crew free</span>}
+            {!availOpen && <span style={{ fontSize: 12, fontWeight: 700, color: (freeV || fc.reg || fc.cas) ? TEAL_D : "#B7C3C0" }}>{freeV} van{freeV !== 1 ? "s" : ""} · {crewFreeText(fc.reg, fc.cas)}</span>}
             <span style={{ color: "#9CA3AF" }}>{availOpen ? "▾" : "▸"}</span>
           </span>
         </button>
@@ -7705,7 +7768,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
             </>}
             {staffActive.length > 0 && <>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#6A7B77", marginBottom: 6 }}>Staff</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{staffActive.map(s => { const off = staffAwayReason(s, availIso); return <span key={s.id}>{availChip(off ? `${s.name} · ${off}` : s.name, bs.has(s.name))}</span>; })}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{staffActive.filter(s => !isCasual(s)).map(s => { const off = staffAwayReason(s, availIso); return <span key={s.id}>{availChip(off ? `${s.name} · ${off}` : s.name, bs.has(s.name))}</span>; })}</div>
+              {casualChips(staffActive.filter(isCasual), availIso, bs)}
             </>}
           </div>
         )}
@@ -7962,8 +8026,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
                     {showMoves && ((data.vehicles||[]).length>0 || (data.staff||[]).filter(s=>s.active!==false).length>0) && (() => {
                       const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
                       const freeV = (data.vehicles||[]).filter(v=>!bv.has(v.id)).length;
-                      const freeS = (data.staff||[]).filter(s=>s.active!==false && !bs.has(s.name)).length;
-                      return <div style={{ borderTop:"1px solid #F2F5F4", padding:"6px 7px", fontSize:10.5, fontWeight:700, color: (freeV||freeS)?"#3f817a":"#C4D0CD", textAlign:"center" }}>{freeV} van{freeV!==1?"s":""} · {freeS} crew free</div>;
+                      const fc = freeCrew(d, bs);
+                      return <div style={{ borderTop:"1px solid #F2F5F4", padding:"6px 7px", fontSize:10.5, fontWeight:700, color: (freeV||fc.reg||fc.cas)?"#3f817a":"#C4D0CD", textAlign:"center" }}>{freeV} van{freeV!==1?"s":""} · {crewFreeText(fc.reg, fc.cas)}</div>;
                     })()}
                   </div>
                 );
@@ -8513,7 +8577,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
     else setReadyToSave(true);
   }
 
-  const crewOpts = (data.staff || []).filter(s => s.active !== false).map(s => ({ id: s.name, label: s.name }));
+  const crewOpts = crewOptions(data);
   const setContainerNo = (ci, v) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, number: v } : c));
   const addContainer = () => setContainers(cs => [...cs, { id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] }]);
   const removeContainer = ci => setContainers(cs => cs.length > 1 ? cs.filter((_, i) => i !== ci) : cs);
