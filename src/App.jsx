@@ -663,7 +663,7 @@ function logDeletedLines(table, r) {
   const L = [];
   const add = (field, v) => { if (v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length)) L.push({ field, to: String(v) }); };
   if (table === "customers") {
-    add("Customer", [r.ref ? `#${r.ref}` : "", r.name].filter(Boolean).join(" "));
+    add("Customer", [r.ref ? `${r.ref}` : "", r.name].filter(Boolean).join(" "));
     add("Mobile", r.phone); add("Home phone", r.homePhone); add("Email", r.email);
     add("Address", ad(r.address1, r.address2, r.town, r.postcode));
     add("Other contacts", (r.contacts || []).filter(c => c && (c.name || c.phone)).map(logContact).join("; "));
@@ -877,7 +877,7 @@ function HistoryList({ customerId, title = "History", startOpen = false }) {
                 <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: ch.length ? 4 : 0 }}>
                   {(() => {
                     const c = r.customer_id && refOf(r.customer_id);
-                    const label = c ? [c.ref ? `#${c.ref}` : "", c.name || ""].filter(Boolean).join(" ") : "";
+                    const label = c ? [c.ref ? `${c.ref}` : "", c.name || ""].filter(Boolean).join(" ") : "";
                     return label ? <><b style={{ color: TEAL }}>{label}</b> · </> : null;
                   })()}
                   {(() => {
@@ -1154,7 +1154,7 @@ async function pushChangedOnly(data) {
     results.forEach((r, k) => {
       const x = slice[k];
       if (r.status === "fulfilled") { newSigs[x.rec.id] = x.sig; }
-      else { failed++; lastError = (r.reason && r.reason.message) || String(r.reason); failInfo = `${x.name} ${x.rec.ref ? "#" + x.rec.ref : (x.rec.name || x.rec.id)}`; if (sigs[x.rec.id]) newSigs[x.rec.id] = sigs[x.rec.id]; }
+      else { failed++; lastError = (r.reason && r.reason.message) || String(r.reason); failInfo = `${x.name} ${x.rec.ref ? String(x.rec.ref) : (x.rec.name || x.rec.id)}`; if (sigs[x.rec.id]) newSigs[x.rec.id] = sigs[x.rec.id]; }
     });
   }
   try { localStorage.setItem(SIG_KEY, JSON.stringify(newSigs)); } catch {}
@@ -1183,7 +1183,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B260";
+const BUILD_NO = "B261";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1319,7 +1319,7 @@ function custName(data, id) {
   const c = (data.customers || []).find(x => x.id === id);
   if (!c) return "Unknown";
   const base = c.company ? `${c.name} (${c.company})` : c.name;
-  return c.ref ? `#${c.ref} ${base}` : base;
+  return c.ref ? `${c.ref} ${base}` : base;
 }
 // Calendar label for a quote / survey: "62781 (BS16) Mr Smith" — ref, then the first half of the collection postcode
 function calQuoteName(data, en) {
@@ -1424,7 +1424,7 @@ const volText = (data, j) => { const v = jobVolume(data, j); return v ? `${v.toL
 function moveRef(data, job) {
   const c = (data.customers || []).find(x => x.id === job.customerId);
   const seq = moveSeqOf(data, job);
-  return (c && c.ref) ? `#${c.ref}/${seq}` : `Move ${seq}`;
+  return (c && c.ref) ? `${c.ref}/${seq}` : `Move ${seq}`;
 }
 // Mark an enquiry lost (the reason shows on the customer screen under that enquiry).
 function withLost(d, en, reason) {
@@ -2241,7 +2241,7 @@ function CustomerPicker({ data, customerId, onPick, newCust, setNewCust }) {
   const jumpTo = L => { const el = listRef.current && listRef.current.querySelector(`[data-letter="${L}"]`); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); };
   const Row = ({ c }) => (
     <div onClick={() => { onPick(c.id); setQ(""); }} style={{ padding: "9px 11px", borderRadius: 8, cursor: "pointer", background: "#fff", border: "1px solid #EFF2F1", marginBottom: 6 }}>
-      <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}</div>
+      <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>{c.ref} </span> : ""}{c.name}</div>
       <div style={{ fontSize: 12, color: "#9CA3AF" }}>{[c.company, c.phone, c.town, c.postcode].filter(Boolean).join(" · ") || "—"}</div>
     </div>
   );
@@ -5465,7 +5465,7 @@ function buildCustomerSearch(data) {
   const map = {};
   (data.customers || []).forEach(c => {
     const bits = []; searchBits(c, bits, 0);
-    if (c.ref) bits.push("#" + c.ref);
+    if (c.ref) bits.push(String(c.ref));
     const text = (bits.join(" ") + " " + (extra[c.id] || []).join(" ")).toLowerCase();
     map[c.id] = text + " " + text.replace(/\s+/g, ""); // squashed copy so "BS11AA" finds "BS1 1AA"
   });
@@ -5543,7 +5543,7 @@ function CustomersList({ data, setView }) {
           <Card key={c.id} onClick={() => setView({ screen: "customerDetail", id: c.id })}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 700, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}{c.company ? ` · ${c.company}` : ""}</div>
+                <div style={{ fontWeight: 700, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>{c.ref} </span> : ""}{c.name}{c.company ? ` · ${c.company}` : ""}</div>
                 <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>{[c.phone, c.town].filter(Boolean).join(" · ") || "—"}</div>
                 {!activeMove && latestEnq && <ReasonLine e={latestEnq} />}
               </div>
@@ -5840,11 +5840,11 @@ function CustomerDetail({ data, id, setView }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 14px" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D }}>#{c.ref} </span> : ""}{c.name}</h2>
+        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111827" }}>{c.ref ? <span style={{ color: TEAL_D }}>{c.ref} </span> : ""}{c.name}</h2>
         <StatusBadge status={c.custType} />
       </div>
       <Card>
-        <Row label="Reference" value={c.ref ? `#${c.ref}` : "Pending — assigned on next sync"} />
+        <Row label="Reference" value={c.ref ? `${c.ref}` : "Pending — assigned on next sync"} />
         <Row label="Mobile" value={c.phone} />
         {c.homePhone && <Row label="Home phone" value={c.homePhone} />}
         <Row label="Email" value={c.email} />
@@ -6163,9 +6163,9 @@ function RefStartControl({ data }) {
     setMsg("");
     const n = parseInt(val, 10);
     if (!n || n < 1) { setMsg("Enter a whole number of 1 or more."); return; }
-    if (maxRef && n <= maxRef && !confirm(`Your highest existing reference is #${maxRef}. Starting at ${n} could clash with existing numbers. Continue anyway?`)) return;
+    if (maxRef && n <= maxRef && !confirm(`Your highest existing reference is ${maxRef}. Starting at ${n} could clash with existing numbers. Continue anyway?`)) return;
     setBusy(true);
-    try { await setCustomerRefStart(n); setMsg(`Done — the next new customer will be #${n}.`); }
+    try { await setCustomerRefStart(n); setMsg(`Done — the next new customer will be ${n}.`); }
     catch (e) { setMsg("Couldn't set it: " + ((e && e.message) || e) + ". Make sure the database function is installed."); }
     setBusy(false);
   }
@@ -6176,7 +6176,7 @@ function RefStartControl({ data }) {
         <div style={{ width: 130 }}><input type="number" inputMode="numeric" value={val} onChange={e => setVal(e.target.value)} style={inp} /></div>
         <Btn size="sm" disabled={busy} onClick={apply}>{busy ? "Setting…" : "Set"}</Btn>
       </div>
-      <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 6 }}>Highest reference so far: {maxRef ? `#${maxRef}` : "none yet"}. The next new customer that syncs will take the number you set.</div>
+      <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 6 }}>Highest reference so far: {maxRef ? `${maxRef}` : "none yet"}. The next new customer that syncs will take the number you set.</div>
       {msg && <div style={{ fontSize: 12.5, color: msg.startsWith("Done") ? "#15803D" : "#B45309", marginTop: 6 }}>{msg}</div>}
     </div>
   );
@@ -8520,7 +8520,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
         <Field label="Customer">
           <select value={customerId} disabled={!!editRec} onChange={e => pickCustomer(e.target.value)} style={{ ...inp, appearance: "none", cursor: editRec ? "default" : "pointer", opacity: editRec ? 0.7 : 1 }}>
             <option value="">Select customer…</option>
-            {[...(data.customers || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map(c => <option key={c.id} value={c.id}>{c.ref ? `#${c.ref} ` : ""}{c.name}</option>)}
+            {[...(data.customers || [])].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map(c => <option key={c.id} value={c.id}>{c.ref ? `${c.ref} ` : ""}{c.name}</option>)}
           </select>
         </Field>
         {prefillMsg && <div style={{ fontSize: 12, color: "#15803D", background: "#F1F9F4", border: "1px solid #BBE6C9", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>✓ {prefillMsg}</div>}
@@ -9028,7 +9028,7 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       <button onClick={() => setView({ screen: "storage" })} style={{ display: "inline-flex", alignItems: "center", background: "#EEF3F2", border: "1px solid #DCE5E3", borderRadius: 10, color: NAVY, fontSize: 15.5, fontWeight: 800, cursor: "pointer", padding: "10px 16px", marginBottom: 10 }}>‹ Storage</button>
       <h2 style={{ margin: "0 0 2px", fontSize: 20, fontWeight: 800, color: "#10211E" }}>{job ? (job.location || "Storage job") : "Storage job"}</h2>
-      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 14 }} onClick={() => setView({ screen: "customerDetail", id: c.id })}>{c.ref ? `#${c.ref} · ` : ""}<span style={{ color: TEAL, fontWeight: 700 }}>{c.name}</span></div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 14 }} onClick={() => setView({ screen: "customerDetail", id: c.id })}>{c.ref ? `${c.ref} · ` : ""}<span style={{ color: TEAL, fontWeight: 700 }}>{c.name}</span></div>
 
       {job && (
         <Card>
@@ -9150,7 +9150,7 @@ function StorageView({ data, setView }) {
               <Card key={c.id + (j.id || "")} onClick={() => setView({ screen: "storageJob", customerId: c.id, jobId: j.id })} style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: "#10211E" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>#{c.ref} </span> : ""}{c.name}</div>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{c.ref ? <span style={{ color: TEAL_D, fontWeight: 800 }}>{c.ref} </span> : ""}{c.name}</div>
                     <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2 }}>
                       {jobContainerCount(c, j)} container{jobContainerCount(c, j) !== 1 ? "s" : ""}
                       {jobContainerNos(c, j).length ? ` · ${jobContainerNos(c, j).join(", ")}` : ""}
@@ -9916,7 +9916,7 @@ function MainApp() {
   useEffect(() => {
     let m = null;
     try { m = sessionStorage.getItem("restoreMsg"); if (m) sessionStorage.removeItem("restoreMsg"); } catch {}
-    try { const r = sessionStorage.getItem("importRefMsg"); if (r) { sessionStorage.removeItem("importRefMsg"); if (m) m += `\n\nThe next new customer will be #${r}.`; } } catch {}
+    try { const r = sessionStorage.getItem("importRefMsg"); if (r) { sessionStorage.removeItem("importRefMsg"); if (m) m += `\n\nThe next new customer will be ${r}.`; } } catch {}
     if (m) setTimeout(() => alert(m), 400);
   }, []);
 
