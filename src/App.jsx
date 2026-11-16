@@ -124,6 +124,18 @@ const JOB_STATUSES = ["Provisional", "Telephone Confirmed", "Confirmed", "Comple
 // Customer has rung to say it's definite, deposit not in yet
 const TEL_CONF = "Telephone Confirmed";
 const isPencilled = st => st === "Provisional" || st === TEL_CONF; // booked but not yet confirmed (no deposit)
+// Telephone confirmed and confirmed moves have their crew & vans named, and hold them in availability
+const RES_STATUSES = ["Telephone Confirmed", "Confirmed", "Completed"];
+const holdsResources = st => RES_STATUSES.includes(st);
+// What's already taken on a date (other moves holding resources, servicing, staff off)
+function takenOnDate(data, date, exceptJobId) {
+  const veh = new Set(), crew = new Set();
+  if (!date) return { veh, crew };
+  (data.jobs || []).filter(x => x.id !== exceptJobId && holdsResources(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+  (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); });
+  (data.staff || []).forEach(st => { if (staffOffOn(st, date)) crew.add(st.name); });
+  return { veh, crew };
+}
 // Calendar colours (all views): quotes red, provisional yellow, telephone confirmed purple, confirmed blue, vehicle green, staff holiday orange
 const CAL_COL = { quote: "#DC2626", Provisional: "#EAB308", "Telephone Confirmed": "#7C3AED", Confirmed: "#2563EB", Completed: "#94A3B8", vehicle: "#16A34A", staff: "#EA580C" };
 const PROPERTY_TYPES = ["Detached house", "Semi-detached house", "Terraced house", "End of terrace house", "Townhouse", "Cottage", "House",
@@ -361,7 +373,7 @@ function crewReasonsOn(data, date, exceptJobId) {
   const m = {};
   if (!date) return m;
   (data.staff || []).forEach(s => { const r = staffAwayReason(s, date); if (r) m[s.name] = r; });
-  (data.jobs || []).filter(x => x.id !== exceptJobId && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) (st.crew || []).forEach(c => { if (!m[c]) m[c] = "booked"; }); }));
+  (data.jobs || []).filter(x => x.id !== exceptJobId && RES_STATUSES.includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) (st.crew || []).forEach(c => { if (!m[c]) m[c] = "booked"; }); }));
   return m;
 }
 function fmtMonth(ym) {
@@ -1198,7 +1210,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B266";
+const BUILD_NO = "B267";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1925,7 +1937,7 @@ function Dashboard({ data, setView, setData }) {
           <>
             <CollapseBar title="Today's moves" count={tMoves.length} open={tmOpen} onToggle={toggleTm} color={TEAL} emptyText="None today" />
             {tmOpen && tMoves.map(({ j, st }, ix) => {
-              const provisional = !["Confirmed", "Completed"].includes(j.status);
+              const provisional = !RES_STATUSES.includes(j.status);
               const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
               const resLine = provisional
                 ? `${vehTypesSummary(st.vehTypes) || "Vehicle TBC"} · ${Number(st.staffCount) || "—"} crew (planned)`
@@ -2027,7 +2039,7 @@ function Dashboard({ data, setView, setData }) {
         <>
           <CollapseBar title="Moves · next 2 weeks" count={list.length} open={umOpen} onToggle={toggleUm} color={TEAL} emptyText="None booked" />
           {!umOpen ? null : list.map(({ j, st }, ix) => {
-            const provisional = !["Confirmed", "Completed"].includes(j.status);
+            const provisional = !RES_STATUSES.includes(j.status);
             const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
             const resLine = provisional
               ? `${vehTypesSummary(st.vehTypes) || "Vehicle TBC"} · ${Number(st.staffCount) || "—"} crew (planned)`
@@ -3817,14 +3829,14 @@ function MovePlanModal({ data, enquiry, onClose }) {
   function bookedOn(date, exceptIdx) {
     const veh = new Set(), crew = new Set();
     if (!date) return { veh, crew };
-    (data.jobs || []).filter(x => (!linkedJob || x.id !== linkedJob.id) && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    (data.jobs || []).filter(x => (!linkedJob || x.id !== linkedJob.id) && RES_STATUSES.includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     days.forEach((st, ix) => { if (ix !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
     if (date) (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); }); if (date) (data.staff || []).forEach(s => { if (staffOffOn(s, date)) crew.add(s.name); });
     return { veh, crew };
   }
   const [shortWarn, setShortWarn] = useState(null);
   async function save(force) {
-    if (force !== true && linkedJob && ["Confirmed", "Completed"].includes(linkedJob.status)) {
+    if (force !== true && linkedJob && RES_STATUSES.includes(linkedJob.status)) {
       // Fewer staff / vans than planned or than were booked before: warn, but let them make do.
       const before = (linkedJob.stages || []).map((st, i) => ({ ...st, id: "d" + i }));
       const short = shortDays(days.map((d, i) => ({ ...d, id: "d" + i })), before);
@@ -3873,7 +3885,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
           </div>
           <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
           <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
-          {linkedJob && ["Confirmed", "Completed"].includes(linkedJob.status) ? (
+          {linkedJob && RES_STATUSES.includes(linkedJob.status) ? (
             <>
               <div style={{ fontSize: 12, background: "#EAF4F2", borderRadius: 9, padding: "7px 11px", marginBottom: 10 }}>
                 <span style={{ color: TEAL_D, fontWeight: 700 }}>Planned:</span> <span style={{ color: "#10211E" }}>{d.staffCount ? `${d.staffCount} staff` : "staff —"}{vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : ""}</span>
@@ -4619,7 +4631,7 @@ function MoveManageModal({ data, job, onClose }) {
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const bookedOn = date => {
     const veh = new Set(), crew = new Set();
-    (data.jobs || []).filter(x => x.id !== job.id && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    (data.jobs || []).filter(x => x.id !== job.id && RES_STATUSES.includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     if (date) (data.vehicles || []).forEach(v => { if (vehOutOn(v, date)) veh.add(v.id); });
     if (date) (data.staff || []).forEach(s => { if (staffOffOn(s, date)) crew.add(s.name); });
     return { veh, crew };
@@ -4638,19 +4650,21 @@ function MoveManageModal({ data, job, onClose }) {
     (d.vehicleIds || []).forEach(vid => { const v = (data.vehicles || []).find(x => x.id === vid); if (v && vehOutOn(v, d.date)) out.push(`${[v.name, v.reg].filter(Boolean).join(" ")} is off the road on ${fmtDate(d.date)}`); });
     return out;
   });
-  const confirmMove = () => {
-    if (!assign) { setAssign(true); return; }
+  const [target, setTarget] = useState("Confirmed");
+  const confirmMove = (to = "Confirmed") => {
+    if (typeof to !== "string") to = "Confirmed";
+    if ((!assign && f.status !== TEL_CONF) || target !== to) { setTarget(to); setAssign(true); return; }
     const noDate = days.map((st, i) => st.date ? null : i + 1).filter(Boolean);
-    if (days.length && noDate.length) { alert(`Set the date for every day in the move plan before confirming.\n\nNo date on day ${noDate.join(", ")}.`); return; }
+    if (days.length && noDate.length) { alert(`Set the date for every day in the move plan first.\n\nNo date on day ${noDate.join(", ")}.`); return; }
     const bad = days.map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
-    if (!days.length || bad.length) { alert(`Assign at least one staff member and one vehicle to every day before confirming.\n\nStill needed on day ${bad.join(", ")}.`); return; }
+    if (!days.length || bad.length) { alert(`Book the crew and at least one vehicle for every day first.\n\nStill needed on day ${bad.join(", ")}.`); return; }
     const shortfalls = days.map((d, i) => {
       const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
       const ss = Math.max(0, ps - (d.crew || []).length), vs = Math.max(0, pv - (d.vehicleIds || []).length);
       return (ss || vs) ? `Day ${i + 1}:${ss ? ` ${ss} more staff` : ""}${ss && vs ? " and" : ""}${vs ? ` ${vs} more vehicle${vs !== 1 ? "s" : ""}` : ""}` : null;
     }).filter(Boolean);
-    if (shortfalls.length && !confirm(`This move is below the planned resources:\n\n${shortfalls.join("\n")}\n\nConfirm anyway?`)) return;
-    persist({ stages: days, status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true });
+    if (shortfalls.length && !confirm(`This move is below the planned resources:\n\n${shortfalls.join("\n")}\n\nCarry on anyway?`)) return;
+    persist(to === "Confirmed" ? { stages: days, status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true } : { stages: days, status: to });
   };
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
   const letGoMove = async () => {
@@ -4697,7 +4711,7 @@ function MoveManageModal({ data, job, onClose }) {
           <Btn variant="grey" style={{ width: "100%" }} onClick={() => setChanging(true)}>👷 Change crew / vehicles</Btn>
         </div>
       )}
-      {((assign && isPencilled(f.status)) || (changing && f.status === "Confirmed")) && (
+      {(((assign || f.status === TEL_CONF) && isPencilled(f.status)) || (changing && f.status === "Confirmed")) && (
         <div style={{ marginBottom: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>{changing ? "Change who's on each day: tap a name or van to take it off, tap another to put it on, then press Save." : "Assign named staff and a vehicle to each day, then press Confirm again."}</div>
           {days.map((d, i) => {
@@ -4724,8 +4738,8 @@ function MoveManageModal({ data, job, onClose }) {
         </div>
       )}
 
-      {f.status === "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={() => persist({ status: TEL_CONF })}>📞 Telephone confirmed — awaiting deposit</Btn>}
-      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}><Icon name="check" size={16} /> {assign ? `Confirm — take 60% deposit (${gbp(Math.round(price * 0.6))})` : "Confirm — assign crew & vehicles"}</Btn>}
+      {f.status === "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={() => confirmMove(TEL_CONF)}>📞 {assign && target === TEL_CONF ? "Save as telephone confirmed" : "Telephone confirmed — book crew & vehicles"}</Btn>}
+      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}><Icon name="check" size={16} /> {(assign && target === "Confirmed") || f.status === TEL_CONF ? `Confirm — take 60% deposit (${gbp(Math.round(price * 0.6))})` : "Confirm — book crew & vehicles"}</Btn>}
       {f.status === "Confirmed" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={completeMove}><Icon name="check" size={16} /> Mark move complete</Btn>}
       {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
       {f.status !== "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
@@ -4938,16 +4952,32 @@ function FmSeg({ items, value, onChange, big }) {
   );
 }
 // Booking a move: choose Provisional or Confirmed and set the date for every day (from the move plan).
-function BookMoveModal({ e, initial, onClose, onBook }) {
+function BookMoveModal({ data, e, initial, onClose, onBook }) {
   const planned = Array.isArray(e.stages) && e.stages.length ? e.stages : [{ type: "Move", date: "" }];
   const [status, setStatus] = useState(["Confirmed", TEL_CONF].includes(initial) ? initial : "Provisional");
   const [dates, setDates] = useState(planned.map(d => d.date || ""));
   const [noDate, setNoDate] = useState(false);
+  const [res, setRes] = useState(planned.map(d => ({ crew: Array.isArray(d.crew) ? d.crew : [], vehicleIds: Array.isArray(d.vehicleIds) ? d.vehicleIds : [] })));
+  const needRes = holdsResources(status);
+  const crewOpts = crewOptions(data);
+  const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
+  const taken = i => { const t = takenOnDate(data, dates[i]); res.forEach((r, k) => { if (k !== i && dates[k] && dates[k] === dates[i]) { r.crew.forEach(c => t.crew.add(c)); r.vehicleIds.forEach(v => t.veh.add(v)); } }); return t; };
+  const toggleRes = (i, key, id) => setRes(a => a.map((r, k) => k !== i ? r : { ...r, [key]: r[key].includes(id) ? r[key].filter(x => x !== id) : [...r[key], id] }));
   const price = Number(e.quoteTotal) || 0;
   const missing = dates.map((d, i) => d ? null : i + 1).filter(Boolean);
   const go = () => {
     if (!(status === "Provisional" && noDate) && missing.length) { alert(`Pick a date for ${planned.length > 1 ? `day ${missing.join(", ")}` : "the move"} first.`); return; }
-    onBook(status, status === "Provisional" && noDate ? planned.map(() => "") : dates);
+    if (needRes) {
+      const bad = res.map((r, i) => (!r.crew.length || !r.vehicleIds.length) ? i + 1 : null).filter(Boolean);
+      if (bad.length) { alert(`Book the crew and at least one vehicle for ${planned.length > 1 ? `day ${bad.join(", ")}` : "the move"} — ${status === TEL_CONF ? "telephone confirmed" : "confirmed"} moves hold their staff and vans.`); return; }
+      const short = planned.map((d, i) => {
+        const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+        const ss = Math.max(0, ps - res[i].crew.length), vs = Math.max(0, pv - res[i].vehicleIds.length);
+        return (ss || vs) ? `${planned.length > 1 ? `Day ${i + 1}:` : ""}${ss ? ` ${ss} more staff` : ""}${ss && vs ? " and" : ""}${vs ? ` ${vs} more vehicle${vs !== 1 ? "s" : ""}` : ""}` : null;
+      }).filter(Boolean);
+      if (short.length && !confirm(`This is below the planned resources:\n\n${short.join("\n")}\n\nBook anyway?`)) return;
+    }
+    onBook(status, status === "Provisional" && noDate ? planned.map(() => "") : dates, needRes ? res : null);
   };
   const seg = on => ({ flex: 1, padding: "11px 8px", borderRadius: 10, border: on ? `2px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : "#fff", color: on ? TEAL_D : "#43534F", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" });
   return (
@@ -4959,9 +4989,17 @@ function BookMoveModal({ e, initial, onClose, onBook }) {
       </div>
       <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? "The date is definite. Deposit is marked as paid (60%) — change it on the move if not." : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
       {planned.map((d, i) => (
-        <Field key={i} label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate)}>
-          <Input type="date" value={dates[i]} onChange={v => setDates(a => a.map((x, k) => k === i ? v : x))} />
-        </Field>
+        <div key={i} style={needRes ? { background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 12, padding: "10px 12px 2px", marginBottom: 10 } : {}}>
+          <Field label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate)}>
+            <Input type="date" value={dates[i]} onChange={v => setDates(a => a.map((x, k) => k === i ? v : x))} />
+          </Field>
+          {needRes && <>
+            {(Number(d.staffCount) || Object.keys(d.vehTypes || {}).length) ? <div style={{ fontSize: 12, color: "#6A7B77", marginTop: -4, marginBottom: 8 }}>Planned: {[vehTypesSummary(d.vehTypes), Number(d.staffCount) ? `${d.staffCount} crew` : ""].filter(Boolean).join(" · ")}</div> : null}
+            <Field label="Crew" required><PickChips options={crewOpts} selectedIds={res[i].crew} takenIds={taken(i).crew} takenReasons={crewReasonsOn(data, dates[i])} onToggle={id => toggleRes(i, "crew", id)} empty="No staff — add under Company." /></Field>
+            <Field label="Vehicles" required><PickChips options={vehOpts} selectedIds={res[i].vehicleIds} takenIds={taken(i).veh} onToggle={id => toggleRes(i, "vehicleIds", id)} empty="No vehicles — add under Company." /></Field>
+            {!dates[i] && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: -6, marginBottom: 8 }}>Set the date to see who's free that day.</div>}
+          </>}
+        </div>
       ))}
       {e.preferredDate ? <div style={{ fontSize: 12, color: "#94A4A0", marginTop: -4, marginBottom: 10 }}>Enquiry said around {fmtDate(e.preferredDate)} — just a heads-up, not used.</div> : null}
       {status === "Provisional" && (
@@ -5259,14 +5297,16 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
     const planned = Array.isArray(e.stages) ? e.stages : [];
     const stages = planned.length
       // Dates come from the move plan only — the enquiry's date is just a heads-up. No plan date = "No date provisional".
-      ? planned.map((d, i) => ({ id: uid(), type: d.type || "Move", date: (opts.dates && opts.dates[i]) || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
-      : [{ id: uid(), type: "Move", date: (opts.dates && opts.dates[0]) || "", time: "", vehicleIds: [], crew: [], notes: "" }];
+      ? planned.map((d, i) => ({ id: uid(), type: d.type || "Move", date: (opts.dates && opts.dates[i]) || "", time: "", vehicleIds: (opts.res && opts.res[i] && opts.res[i].vehicleIds) || [], crew: (opts.res && opts.res[i] && opts.res[i].crew) || [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
+      : [{ id: uid(), type: "Move", date: (opts.dates && opts.dates[0]) || "", time: "", vehicleIds: (opts.res && opts.res[0] && opts.res[0].vehicleIds) || [], crew: (opts.res && opts.res[0] && opts.res[0].crew) || [], notes: "" }];
     const job = {
       id: jid, customerId: e.customerId, enquiryId: e.id,
       startTime: "",
       fromAddress1: e.fromAddress1, fromAddress2: e.fromAddress2, fromTown: e.fromTown, fromPostcode: e.fromPostcode, fromAccess: e.fromAccess,
       toAddress1: e.toAddress1, toAddress2: e.toAddress2, toTown: e.toTown, toPostcode: e.toPostcode, toAccess: e.toAccess,
-      crew: [], vehicle: "", vehicleIds: [],
+      crew: [...new Set(stages.flatMap(st => st.crew || []))],
+      vehicleIds: [...new Set(stages.flatMap(st => st.vehicleIds || []))],
+      vehicle: [...new Set(stages.flatMap(st => st.vehicleIds || []))].map(id => ((data.vehicles || []).find(v => v.id === id) || {}).name).filter(Boolean).join(", "),
       stages,
       moveDate: stages.map(st => st.date).filter(Boolean).sort()[0] || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
@@ -5320,7 +5360,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   const modals = (
     <>
       {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
-      {bookOpen && <BookMoveModal e={e} initial={bookOpen} onClose={() => setBookOpen(null)} onBook={(st, dates) => { setBookOpen(null); markWon(st, { fromDialog: true, dates }); }} />}
+      {bookOpen && <BookMoveModal data={data} e={e} initial={bookOpen} onClose={() => setBookOpen(null)} onBook={(st, dates, res) => { setBookOpen(null); markWon(st, { fromDialog: true, dates, res }); }} />}
       {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
       {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
@@ -7387,7 +7427,7 @@ function JobDetailScreen({ data, j, setView }) {
   function bookedOn(date, exceptIdx) {
     const veh = new Set(), crew = new Set();
     if (!date) return { veh, crew };
-    (data.jobs || []).filter(x => x.id !== j.id && ["Confirmed", "Completed"].includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
+    (data.jobs || []).filter(x => x.id !== j.id && RES_STATUSES.includes(x.status)).forEach(x => jobStages(x).forEach(st => { if (st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } }));
     f.stages.forEach((st, i) => { if (i !== exceptIdx && st.date === date) { (st.vehicleIds || []).forEach(v => veh.add(v)); (st.crew || []).forEach(c => crew.add(c)); } });
     (data.vehicles || []).forEach(vv => { if (vehOutOn(vv, date)) veh.add(vv.id); }); (data.staff || []).forEach(s => { if (staffOffOn(s, date)) crew.add(s.name); });
     return { veh, crew };
@@ -7418,7 +7458,12 @@ function JobDetailScreen({ data, j, setView }) {
   const [shortWarn, setShortWarn] = useState(null);
   async function save(force) {
     if (maintClash()) return;
-    if (!force && j && ["Confirmed", "Booked", "In Progress"].includes(f.status)) {
+    // only when it's being changed to telephone confirmed / confirmed here (older imported moves can still be edited)
+    if (["Confirmed", TEL_CONF].includes(f.status) && f.status !== ((j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : j.status)) {
+      const bad = (f.stages || []).map((st, i) => (!st.date || !(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+      if (!(f.stages || []).length || bad.length) { alert(`${f.status === TEL_CONF ? "Telephone confirmed" : "Confirmed"} moves need a date, named crew and at least one vehicle on every day.\n\nStill needed on day ${bad.join(", ")}.`); return; }
+    }
+    if (!force && j && ["Confirmed", TEL_CONF, "Booked", "In Progress"].includes(f.status)) {
       const short = shortDays(f.stages || [], jobStages(j));
       if (short.length) { setShortWarn(short); return; }
     }
@@ -7438,18 +7483,20 @@ function JobDetailScreen({ data, j, setView }) {
     if (enq && enq.status === "Let Go") d = upsertLocal(d, "enquiries", { ...enq, status: "Won" });
     await saveAndReload(d);
   }
-  async function confirmMove() {
+  async function confirmMove(to = "Confirmed") {
+    if (typeof to !== "string") to = "Confirmed";
     if (maintClash()) return;
     // First press on a provisional move: reveal the crew/vehicle pickers and jump to them.
-    if (!confirming) {
-      setConfirming(true);
+    if ((!confirming && f.status !== TEL_CONF) || confirming && confirming !== to && confirming !== true) {
+      setConfirming(to);
       setTimeout(() => { const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
       return;
     }
     const noDate = (f.stages || []).map((st, i) => st.date ? null : i + 1).filter(Boolean);
     if (noDate.length) { alert(`Set the date for every day before confirming.\n\nNo date on day ${noDate.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     const bad = (f.stages || []).map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
-    if (!f.stages || !f.stages.length || bad.length) { alert(`Assign named staff and at least one vehicle to every day before confirming.\n\nStill needed on day ${bad.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (!f.stages || !f.stages.length || bad.length) { alert(`Book named crew and at least one vehicle for every day first.\n\nStill needed on day ${bad.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (to !== "Confirmed") { setF(p => ({ ...p, status: to })); await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: to }))); return; }
     const price = Number(f.price) || 0;
     const dep = Math.round(price * 0.6);
     setF(p => ({ ...p, status: "Confirmed", deposit: dep, depositPaid: true }));
@@ -7518,7 +7565,7 @@ function JobDetailScreen({ data, j, setView }) {
             ) : null}
             <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
             <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
-            {["Confirmed", "Completed"].includes(f.status) || confirming ? (
+            {RES_STATUSES.includes(f.status) || confirming ? (
               <>
                 <Field label="Vehicles"><PickChips options={vehOpts} selectedIds={st.vehicleIds} takenIds={booked.veh} onToggle={vid => toggleStageVeh(idx, vid)} empty="No vehicles — add under Company." /></Field>
                 <Field label="Crew"><PickChips options={crewOpts} selectedIds={st.crew} takenIds={booked.crew} takenReasons={crewReasonsOn(data, st.date, j.id)} onToggle={name => toggleStageCrew(idx, name)} empty="No staff — add under Company." /></Field>
@@ -7557,11 +7604,11 @@ function JobDetailScreen({ data, j, setView }) {
         <Btn style={{ flex: 1 }} onClick={() => save()}><Icon name="check" size={16} /> Save move</Btn>
       </div>
       {f.status === "Provisional" && (
-        <Btn variant="grey" style={{ width: "100%", marginTop: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={async () => { await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: TEL_CONF }))); }}>📞 Telephone confirmed — awaiting deposit</Btn>
+        <Btn variant="grey" style={{ width: "100%", marginTop: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={() => confirmMove(TEL_CONF)}>📞 {confirming === TEL_CONF ? "Save as telephone confirmed" : "Telephone confirmed — book crew & vehicles"}</Btn>
       )}
       {isPencilled(f.status) && (
-        <Btn variant="primary" style={{ width: "100%", marginTop: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}>
-          <Icon name="check" size={16} /> {confirming ? `Confirm move — take 60% deposit (${gbp(Math.round((Number(f.price) || 0) * 0.6))})` : "Confirm move — assign crew & vehicles"}
+        <Btn variant="primary" style={{ width: "100%", marginTop: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}>
+          <Icon name="check" size={16} /> {confirming === "Confirmed" || confirming === true || f.status === TEL_CONF ? `Confirm move — take 60% deposit (${gbp(Math.round((Number(f.price) || 0) * 0.6))})` : "Confirm move — book crew & vehicles"}
         </Btn>
       )}
       {f.status === "Confirmed" && (
@@ -7652,8 +7699,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const jobsOn = d => showMoves ? rawJobsOn(d) : [];
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
   const colorOf = m => CAL_COL[(m.job.status === "Booked" || m.job.status === "In Progress") ? "Confirmed" : m.job.status] || TEAL;
-  const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
-  const bookedStaffOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || [])); const iso = isoOf(d); (data.staff || []).forEach(st => { if (staffOffOn(st, iso)) s.add(st.name); }); return s; };
+  const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).filter(m => RES_STATUSES.includes(m.job.status)).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
+  const bookedStaffOn = d => { const s = new Set(rawJobsOn(d).filter(m => RES_STATUSES.includes(m.job.status)).flatMap(m => m.stage.crew || [])); const iso = isoOf(d); (data.staff || []).forEach(st => { if (staffOffOn(st, iso)) s.add(st.name); }); return s; };
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (inBooking(b, iso)) out.push({ v, b }); })); return out; };
   const maintOn = d => showVeh ? maintOnIso(isoOf(d)) : [];
   const showStaffOff = true; // staff time off always shows, whatever is ticked
@@ -7672,7 +7719,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const MoveCard = ({ m, big }) => {
     const j = m.job, st = m.stage;
     const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
-    const provisional = !["Confirmed", "Completed"].includes(j.status);
+    const provisional = !RES_STATUSES.includes(j.status);
     const plannedVeh = vehTypesSummary(st.vehTypes);
     const ttl = j.status === TEL_CONF ? "📞 " : "";
     const plannedStaff = Number(st.staffCount) || 0;
