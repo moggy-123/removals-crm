@@ -1183,7 +1183,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B261";
+const BUILD_NO = "B262";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -7517,6 +7517,7 @@ function fmtHour(h){ const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh<12?"a
 function CalendarView({ data, setView, initialDate, initialMode, initialShow }) {
   const [vw, setVw] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 400));
   const [vh, setVh] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
+  const [selDay, setSelDay] = useState(null); // iPhone month view: the day tapped
   useEffect(() => { const r = () => { setVw(window.innerWidth); setVh(window.innerHeight); }; window.addEventListener("resize", r); window.addEventListener("orientationchange", r); return () => { window.removeEventListener("resize", r); window.removeEventListener("orientationchange", r); }; }, []);
   const [mode, setMode] = useState(initialMode || "agenda");
   // What to show — pick any mix of moves / surveys / servicing (remembered on this device)
@@ -7613,6 +7614,14 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       {b.days > 1 && <div style={{ fontSize: big?12:10.5, color:"#6A7B77", marginTop:1, fontWeight:600 }}>{fmtUK(b.start)} – {fmtUK(bookingEnd(b))}{b.motDate ? ` · test ${fmtUK(b.motDate)}` : ""}</div>}
     </div>
   );
+  // "3 vans · 4 crew free" for a day
+  const dayFree = d => {
+    if (!showMoves || !((data.vehicles||[]).length || (data.staff||[]).filter(s=>s.active!==false).length)) return null;
+    const bv = bookedVehiclesOn(d), bs = bookedStaffOn(d);
+    const freeV = (data.vehicles||[]).filter(v=>!bv.has(v.id)).length;
+    const freeS = (data.staff||[]).filter(s=>s.active!==false && !bs.has(s.name)).length;
+    return <span style={{ fontSize:12, fontWeight:700, color: (freeV||freeS) ? "#3f817a" : "#C4D0CD", whiteSpace:"nowrap" }}>{freeV} van{freeV!==1?"s":""} · {freeS} crew free</span>;
+  };
   const SurveyCard = ({ en, big }) => {
     const done = en.surveyDone || en.status === "Surveyed";
     const missed = isMissedSurvey(en);
@@ -7815,7 +7824,59 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         );
       })()}
 
-      {mode==="month" && (() => {
+      {mode==="month" && vw < 700 && (() => {
+        // iPhone: dots in the grid, the tapped day's full details underneath
+        const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+        const start = startOfWeek(first);
+        const sel = selDay && selDay.getMonth() === anchor.getMonth() && selDay.getFullYear() === anchor.getFullYear() ? selDay
+          : (today.getMonth() === anchor.getMonth() && today.getFullYear() === anchor.getFullYear() ? today : first);
+        const cells = [];
+        for (let i=0;i<42;i++) {
+          const d = addDays(start,i); const out = d.getMonth()!==anchor.getMonth();
+          if (i >= 35 && out) break;
+          const dots = [
+            ...surveysOn(d).map(en => isMissedSurvey(en) ? "#DC2626" : AMBER),
+            ...jobsOn(d).map(() => "#2563EB"),
+            ...maintOn(d).map(() => "#64748B"),
+          ];
+          const isSel = sameDay(d, sel), isT = sameDay(d, today);
+          cells.push(
+            <div key={i} onClick={() => { if (out) setAnchor(d); setSelDay(d); }} style={{ background: isSel ? "#E7F2F0" : out ? "#F7F9F9" : "#fff", border: isSel ? `2px solid ${TEAL}` : "1px solid #E9EEED", borderRadius:10, minHeight:46, padding:"4px 2px", cursor:"pointer", textAlign:"center" }}>
+              <div style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", minWidth:22, height:22, borderRadius:7, fontSize:13, fontWeight:800, color: isT ? "#fff" : out ? "#B7C3C0" : "#3c4c48", background: isT ? AMBER : "transparent" }}>{d.getDate()}</div>
+              <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"center", gap:2, marginTop:2, padding:"0 2px" }}>
+                {dots.slice(0,6).map((c,k) => <span key={k} style={{ width:6, height:6, borderRadius:"50%", background:c, opacity: out ? .45 : 1 }} />)}
+                {dots.length > 6 && <span style={{ fontSize:9, fontWeight:800, color:"#6A7B77", lineHeight:"6px" }}>+</span>}
+              </div>
+            </div>
+          );
+        }
+        const svs = surveysOn(sel), evs = jobsOn(sel), mnt = maintOn(sel), off = staffOffOnCal(sel);
+        const dot = c => <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", background:c, marginRight:5 }} />;
+        return (
+          <div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:4, marginBottom:4 }}>
+              {CAL_DOW.map(d => <div key={d} style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textAlign:"center" }}>{d.slice(0,1)}</div>)}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:4 }}>{cells}</div>
+            <div style={{ display:"flex", gap:14, fontSize:11.5, color:"#6A7B77", fontWeight:700, margin:"9px 2px 4px" }}>
+              <span>{dot(AMBER)}Quote</span><span>{dot("#2563EB")}Move</span><span>{dot("#64748B")}Servicing</span>
+            </div>
+            <div onClick={() => { setAnchor(sel); setMode("day"); }} style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", margin:"12px 2px 8px", cursor:"pointer" }}>
+              <div style={{ fontSize:16, fontWeight:800, color: sameDay(sel,today) ? AMBER : "#10211E" }}>{CAL_DOW[(sel.getDay()+6)%7]} {sel.getDate()} {CAL_MON[sel.getMonth()]}{sameDay(sel,today) ? " · Today" : ""}</div>
+              {dayFree(sel)}
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {svs.map(en => <SurveyCard key={en.id} en={en} big />)}
+              {mnt.map((mm,ix) => <MaintCard key={"m"+ix} v={mm.v} b={mm.b} big />)}
+              {off.map((so,ix) => <StaffOffCard key={"so"+ix} s={so.s} b={so.b} dayNo={so.dayNo} total={so.total} big />)}
+              {evs.map((m,ix) => <MoveCard key={m.job.id+'-'+ix} m={m} big />)}
+              {!svs.length && !evs.length && !mnt.length && !off.length && <div style={{ fontSize:13.5, color:"#94A4A0", fontWeight:600, padding:"10px 2px" }}>Nothing booked</div>}
+            </div>
+          </div>
+        );
+      })()}
+
+      {mode==="month" && vw >= 700 && (() => {
         const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
         // Big screens (iPad / computer): bigger boxes filling the screen, larger 2-line text, more jobs per day
         const big = vw >= 900;
@@ -7848,7 +7909,37 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         );
       })()}
 
-      {mode==="week" && (() => {
+      {mode==="week" && vw < 700 && (() => {
+        // iPhone: days stacked down the screen with full-width cards
+        const start = startOfWeek(anchor);
+        const days = []; for (let i=0;i<7;i++) days.push(addDays(start,i));
+        return (
+          <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+            {days.map((d,i) => {
+              const svs = surveysOn(d), evs = jobsOn(d), mnt = maintOn(d), off = staffOffOnCal(d); const isToday = sameDay(d,today);
+              const empty = !svs.length && !evs.length && !mnt.length && !off.length;
+              return (
+                <div key={i}>
+                  <div onClick={() => { setAnchor(d); setMode("day"); }} style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", padding:"0 2px 6px", borderBottom:`2px solid ${isToday ? "#FBD9A0" : "#E9EEED"}`, marginBottom: empty ? 0 : 8, cursor:"pointer" }}>
+                    <div style={{ fontSize:15.5, fontWeight:800, color: isToday ? AMBER : "#10211E" }}>{CAL_DOW[i]} {d.getDate()} {CAL_MON[d.getMonth()]}{isToday ? " · Today" : ""}</div>
+                    {dayFree(d)}
+                  </div>
+                  {empty ? <div style={{ fontSize:13, color:"#B7C3C0", fontWeight:600, padding:"7px 2px 0" }}>Nothing booked</div> : (
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {svs.map(en => <SurveyCard key={en.id} en={en} big />)}
+                      {mnt.map((mm,ix) => <MaintCard key={"m"+ix} v={mm.v} b={mm.b} big />)}
+                      {off.map((so,ix) => <StaffOffCard key={"so"+ix} s={so.s} b={so.b} dayNo={so.dayNo} total={so.total} big />)}
+                      {evs.map((m,ix) => <MoveCard key={m.job.id+'-'+ix} m={m} big />)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      {mode==="week" && vw >= 700 && (() => {
         const start = startOfWeek(anchor);
         const days = []; for (let i=0;i<7;i++) days.push(addDays(start,i));
         return (
