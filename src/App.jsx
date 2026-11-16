@@ -127,6 +127,36 @@ const isPencilled = st => st === "Provisional" || st === TEL_CONF; // booked but
 // Telephone confirmed and confirmed moves have their crew & vans named, and hold them in availability
 const RES_STATUSES = ["Telephone Confirmed", "Confirmed", "Completed"];
 const holdsResources = st => RES_STATUSES.includes(st);
+// Date changes on a telephone confirmed / confirmed move: what moved, and whether its crew & vans are free on the new date
+function heldDateChanges(data, job, newStages, byIndex) {
+  if (!job || !holdsResources(job.status)) return [];
+  const orig = jobStages(job);
+  return (newStages || []).map((st, i) => {
+    const o = byIndex ? orig[i] : (orig.find(x => x.id === st.id) || orig[i]);
+    if (!o || !o.date || st.date === o.date) return null;
+    const t = takenOnDate(data, st.date, job.id);
+    const clash = [
+      ...(st.crew || []).filter(c => t.crew.has(c)),
+      ...(st.vehicleIds || []).filter(v => t.veh.has(v)).map(v => ((data.vehicles || []).find(x => x.id === v) || {}).name || "vehicle"),
+    ];
+    return { i, type: st.type || "Move", from: o.date, to: st.date, clash };
+  }).filter(Boolean);
+}
+function heldDateChangeText(job, ch) {
+  const kind = job.status === "Telephone Confirmed" ? "telephone confirmed" : "confirmed";
+  return `This move is ${kind} — the customer and crew are expecting the original date${ch.length > 1 ? "s" : ""}.\n\n` +
+    ch.map(c => `Day ${c.i + 1} (${c.type}): ${c.from ? fmtUK(c.from) : "no date"} → ${c.to ? fmtUK(c.to) : "no date"}${c.clash.length ? `\n   ⚠️ Not free on the new date: ${c.clash.join(", ")}` : ""}`).join("\n") +
+    `\n\nChange the date anyway? Remember to let the customer and crew know.`;
+}
+function HeldDateNote({ c }) {
+  if (!c) return null;
+  return (
+    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#9A3412", background: "#FFF7ED", border: "1px solid #FDBA74", borderRadius: 9, padding: "8px 11px", marginTop: -4, marginBottom: 10, lineHeight: 1.4 }}>
+      ⚠️ This is a {c.kind} move booked for {fmtUK(c.from)}. Changing the date means telling the customer and crew.
+      {c.clash.length ? <div style={{ color: "#B91C1C", marginTop: 3 }}>Not free on {c.to ? fmtUK(c.to) : "the new date"}: {c.clash.join(", ")}</div> : null}
+    </div>
+  );
+}
 // What's already taken on a date (other moves holding resources, servicing, staff off)
 function takenOnDate(data, date, exceptJobId) {
   const veh = new Set(), crew = new Set();
@@ -1210,7 +1240,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B267";
+const BUILD_NO = "B268";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3836,6 +3866,10 @@ function MovePlanModal({ data, enquiry, onClose }) {
   }
   const [shortWarn, setShortWarn] = useState(null);
   async function save(force) {
+    if (force !== true && linkedJob) {
+      const ch = heldDateChanges(data, linkedJob, days, true);
+      if (ch.length && !confirm(heldDateChangeText(linkedJob, ch))) return;
+    }
     if (force !== true && linkedJob && RES_STATUSES.includes(linkedJob.status)) {
       // Fewer staff / vans than planned or than were booked before: warn, but let them make do.
       const before = (linkedJob.stages || []).map((st, i) => ({ ...st, id: "d" + i }));
@@ -3885,6 +3919,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
           </div>
           <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
           <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
+          {(() => { const c = heldDateChanges(data, linkedJob, days, true).find(x => x.i === i); return c ? <HeldDateNote c={{ ...c, kind: linkedJob.status === TEL_CONF ? "telephone confirmed" : "confirmed" }} /> : null; })()}
           {linkedJob && RES_STATUSES.includes(linkedJob.status) ? (
             <>
               <div style={{ fontSize: 12, background: "#EAF4F2", borderRadius: 9, padding: "7px 11px", marginBottom: 10 }}>
@@ -7458,6 +7493,10 @@ function JobDetailScreen({ data, j, setView }) {
   const [shortWarn, setShortWarn] = useState(null);
   async function save(force) {
     if (maintClash()) return;
+    if (force !== true && j) {
+      const ch = heldDateChanges(data, j, f.stages);
+      if (ch.length && !confirm(heldDateChangeText(j, ch))) return;
+    }
     // only when it's being changed to telephone confirmed / confirmed here (older imported moves can still be edited)
     if (["Confirmed", TEL_CONF].includes(f.status) && f.status !== ((j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : j.status)) {
       const bad = (f.stages || []).map((st, i) => (!st.date || !(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
@@ -7564,6 +7603,7 @@ function JobDetailScreen({ data, j, setView }) {
               </div>
             ) : null}
             <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
+            {(() => { const c = heldDateChanges(data, j, f.stages).find(x => x.i === idx); return c ? <HeldDateNote c={{ ...c, kind: j.status === TEL_CONF ? "telephone confirmed" : "confirmed" }} /> : null; })()}
             <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
             {RES_STATUSES.includes(f.status) || confirming ? (
               <>
