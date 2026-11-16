@@ -120,7 +120,12 @@ function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(d
 const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
 
 const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost", "Not quoted", "Let Go"];
-const JOB_STATUSES = ["Provisional", "Confirmed", "Completed", "Let Go"];
+const JOB_STATUSES = ["Provisional", "Telephone Confirmed", "Confirmed", "Completed", "Let Go"];
+// Customer has rung to say it's definite, deposit not in yet
+const TEL_CONF = "Telephone Confirmed";
+const isPencilled = st => st === "Provisional" || st === TEL_CONF; // booked but not yet confirmed (no deposit)
+// Calendar colours (all views): quotes red, provisional yellow, telephone confirmed purple, confirmed blue, vehicle green, staff holiday orange
+const CAL_COL = { quote: "#DC2626", Provisional: "#EAB308", "Telephone Confirmed": "#7C3AED", Confirmed: "#2563EB", Completed: "#94A3B8", vehicle: "#16A34A", staff: "#EA580C" };
 const PROPERTY_TYPES = ["Detached house", "Semi-detached house", "Terraced house", "End of terrace house", "Townhouse", "Cottage", "House",
   "Detached bungalow", "Semi-detached bungalow", "Bungalow", "Flat / Apartment", "Maisonette", "Farmhouse", "Barn conversion",
   "Mobile / park home", "Office", "Commercial unit", "Storage Unit", "Other"];
@@ -165,6 +170,7 @@ const STATUS_META = {
   Won:         { color: "#059669", bg: "#ECFDF5" },
   Lost:        { color: "#DC2626", bg: "#FEF2F2" },
   Provisional: { color: "#CA8A04", bg: "#FEFCE8" },
+  "Telephone Confirmed": { color: "#7C3AED", bg: "#F5F3FF" },
   "No date provisional": { color: "#C2410C", bg: "#FFF7ED" },
   Confirmed:   { color: "#2563EB", bg: "#EFF6FF" },
   Booked:      { color: "#2563EB", bg: "#EFF6FF" },
@@ -1192,7 +1198,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B265";
+const BUILD_NO = "B266";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1675,7 +1681,7 @@ function autoCompletePastMoves(d) {
   const todayIso = todayISO();
   let changed = false;
   const jobs = (d.jobs || []).map(j => {
-    if (j.status === "Completed" || j.status === "Provisional") return j;
+    if (j.status === "Completed" || isPencilled(j.status)) return j;
     const dates = jobStages(j).map(s => s.date).filter(Boolean);
     if (dates.length && dates.every(dt => dt < todayIso)) { changed = true; return { ...j, status: "Completed", balancePaid: true }; }
     return j;
@@ -1743,7 +1749,7 @@ function Dashboard({ data, setView, setData }) {
   // Home only looks ahead two weeks (today + 14 days).
   const twoWeeksIso = isoAdd(todayIso, { days: 14 });
   const inWindow = iso => !!iso && iso >= todayIso && iso <= twoWeeksIso;
-  const pastProvisional = jobs.filter(j => j.status === "Provisional").map(j => ({ j, last: jobLatestDate(j) })).filter(x => x.last && x.last < todayIso).sort((a, b) => a.last.localeCompare(b.last));
+  const pastProvisional = jobs.filter(j => isPencilled(j.status)).map(j => ({ j, last: jobLatestDate(j) })).filter(x => x.last && x.last < todayIso).sort((a, b) => a.last.localeCompare(b.last));
   const changeDate = j => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id });
   async function removeBooking(j) {
     const nDays = jobStages(j).length;
@@ -4691,7 +4697,7 @@ function MoveManageModal({ data, job, onClose }) {
           <Btn variant="grey" style={{ width: "100%" }} onClick={() => setChanging(true)}>👷 Change crew / vehicles</Btn>
         </div>
       )}
-      {((assign && f.status === "Provisional") || (changing && f.status === "Confirmed")) && (
+      {((assign && isPencilled(f.status)) || (changing && f.status === "Confirmed")) && (
         <div style={{ marginBottom: 12, borderTop: "1px solid #EEF3F2", paddingTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>{changing ? "Change who's on each day: tap a name or van to take it off, tap another to put it on, then press Save." : "Assign named staff and a vehicle to each day, then press Confirm again."}</div>
           {days.map((d, i) => {
@@ -4718,12 +4724,13 @@ function MoveManageModal({ data, job, onClose }) {
         </div>
       )}
 
-      {f.status === "Provisional" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}><Icon name="check" size={16} /> {assign ? `Confirm — take 60% deposit (${gbp(Math.round(price * 0.6))})` : "Confirm — assign crew & vehicles"}</Btn>}
+      {f.status === "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={() => persist({ status: TEL_CONF })}>📞 Telephone confirmed — awaiting deposit</Btn>}
+      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}><Icon name="check" size={16} /> {assign ? `Confirm — take 60% deposit (${gbp(Math.round(price * 0.6))})` : "Confirm — assign crew & vehicles"}</Btn>}
       {f.status === "Confirmed" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={completeMove}><Icon name="check" size={16} /> Mark move complete</Btn>}
       {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
       {f.status !== "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
 
-      {["Provisional", "Confirmed"].includes(f.status) && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={letGoMove}>Let this move go</Btn>}
+      {["Provisional", TEL_CONF, "Confirmed"].includes(f.status) && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={letGoMove}>Let this move go</Btn>}
       {f.status === "Let Go" && (
         <>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>Let go — kept for your records but hidden from the calendar, availability and upcoming moves.</div>
@@ -4933,7 +4940,7 @@ function FmSeg({ items, value, onChange, big }) {
 // Booking a move: choose Provisional or Confirmed and set the date for every day (from the move plan).
 function BookMoveModal({ e, initial, onClose, onBook }) {
   const planned = Array.isArray(e.stages) && e.stages.length ? e.stages : [{ type: "Move", date: "" }];
-  const [status, setStatus] = useState(initial === "Confirmed" ? "Confirmed" : "Provisional");
+  const [status, setStatus] = useState(["Confirmed", TEL_CONF].includes(initial) ? initial : "Provisional");
   const [dates, setDates] = useState(planned.map(d => d.date || ""));
   const [noDate, setNoDate] = useState(false);
   const price = Number(e.quoteTotal) || 0;
@@ -4947,9 +4954,10 @@ function BookMoveModal({ e, initial, onClose, onBook }) {
     <Modal title="Book this move" onClose={onClose}>
       <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
         <button style={seg(status === "Provisional")} onClick={() => setStatus("Provisional")}>Provisional</button>
+        <button style={seg(status === TEL_CONF)} onClick={() => setStatus(TEL_CONF)}>📞 Tel. confirmed</button>
         <button style={seg(status === "Confirmed")} onClick={() => setStatus("Confirmed")}>Confirmed</button>
       </div>
-      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? "The date is definite. Deposit is marked as paid (60%) — change it on the move if not." : "Pencilled in — the customer hasn't fully committed yet."}</div>
+      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? "The date is definite. Deposit is marked as paid (60%) — change it on the move if not." : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
       {planned.map((d, i) => (
         <Field key={i} label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate)}>
           <Input type="date" value={dates[i]} onChange={v => setDates(a => a.map((x, k) => k === i ? v : x))} />
@@ -4964,7 +4972,7 @@ function BookMoveModal({ e, initial, onClose, onBook }) {
       {!price && <div style={{ fontSize: 12.5, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 9, padding: "8px 11px", marginBottom: 10 }}>No quote price yet — the move will be booked at £0. Add the price on the move later.</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
         <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Cancel</Btn>
-        <Btn variant={status === "Confirmed" ? undefined : "amber"} style={{ flex: 2 }} onClick={go}><Icon name="check" size={15} /> Book {status.toLowerCase()} move</Btn>
+        <Btn variant={status === "Confirmed" ? undefined : "amber"} style={{ flex: 2, ...(status === TEL_CONF ? { background: "#7C3AED", borderColor: "#7C3AED", boxShadow: "none" } : status === "Confirmed" ? { background: "#2563EB", borderColor: "#2563EB" } : {}) }} onClick={go}><Icon name="check" size={15} /> Book {status === TEL_CONF ? "telephone confirmed" : status.toLowerCase()} move</Btn>
       </div>
     </Modal>
   );
@@ -5478,6 +5486,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         {!isReadOnly() && !linkedJob && !["Won", "Lost", "Not quoted"].includes(e.status) && <>
           <Btn variant="amber" onClick={() => markWon("Provisional")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book provisional</Btn>
+          <Btn variant="grey" onClick={() => markWon(TEL_CONF)} style={{ flex: 1, whiteSpace: "nowrap", color: "#6D28D9" }}>📞 Tel. confirmed</Btn>
           <Btn onClick={() => markWon("Confirmed")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book confirmed</Btn>
         </>}
       </div>
@@ -5967,7 +5976,7 @@ function CustomerDetail({ data, id, setView }) {
       </Card>
       )}
       {(() => {
-        const showFu = !(data.jobs || []).some(j => j.customerId === c.id && j.status === "Provisional");
+        const showFu = !(data.jobs || []).some(j => j.customerId === c.id && isPencilled(j.status));
         const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
         return (
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${1 + (showFu ? 1 : 0) + (canDelete() ? 1 : 0)}, 1fr)`, gap: 8, marginBottom: 6 }}>
@@ -6460,7 +6469,7 @@ const WON_JOB = ["Confirmed", "Booked", "In Progress", "Completed"];
 function enquiryOutcome(data, e) {
   const jobs = (data.jobs || []).filter(j => j.enquiryId === e.id && j.status !== "Let Go");
   const wonJob = jobs.find(j => WON_JOB.includes(j.status));
-  const provisional = !wonJob && jobs.find(j => j.status === "Provisional");
+  const provisional = !wonJob && jobs.find(j => isPencilled(j.status));
   const quoted = Number(e.quoteTotal) > 0 || ["Quoted", "Won"].includes(e.status) || jobs.length > 0;
   const surveyed = quoted || !!e.surveyDone || (e.inventory && e.inventory.length > 0) || ["Surveyed", "Booked", "Quoted", "Won"].includes(e.status);
   const won = !!wonJob || e.status === "Won";
@@ -7493,7 +7502,7 @@ function JobDetailScreen({ data, j, setView }) {
 
       <div id="jd-days" />
       <SectionTitle>Days</SectionTitle>
-      {confirming && f.status === "Provisional" && <div style={{ fontSize: 13, fontWeight: 700, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>Assign named staff and a vehicle to every day below, then press Confirm again.</div>}
+      {confirming && isPencilled(f.status) && <div style={{ fontSize: 13, fontWeight: 700, color: "#1D4ED8", background: "#EFF4FF", border: "1px solid #C7D7FE", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>Assign named staff and a vehicle to every day below, then press Confirm again.</div>}
       {f.stages.map((st, idx) => {
         const booked = bookedOn(st.date, idx);
         return (
@@ -7548,6 +7557,9 @@ function JobDetailScreen({ data, j, setView }) {
         <Btn style={{ flex: 1 }} onClick={() => save()}><Icon name="check" size={16} /> Save move</Btn>
       </div>
       {f.status === "Provisional" && (
+        <Btn variant="grey" style={{ width: "100%", marginTop: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={async () => { await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: TEL_CONF }))); }}>📞 Telephone confirmed — awaiting deposit</Btn>
+      )}
+      {isPencilled(f.status) && (
         <Btn variant="primary" style={{ width: "100%", marginTop: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={confirmMove}>
           <Icon name="check" size={16} /> {confirming ? `Confirm move — take 60% deposit (${gbp(Math.round((Number(f.price) || 0) * 0.6))})` : "Confirm move — assign crew & vehicles"}
         </Btn>
@@ -7557,7 +7569,7 @@ function JobDetailScreen({ data, j, setView }) {
           <Icon name="check" size={16} /> Mark move complete
         </Btn>
       )}
-      {["Provisional", "Confirmed"].includes(f.status) && (
+      {["Provisional", TEL_CONF, "Confirmed"].includes(f.status) && (
         <Btn variant="grey" style={{ width: "100%", marginTop: 10 }} onClick={letGo}>Let this move go</Btn>
       )}
       {f.status === "Let Go" && (
@@ -7639,7 +7651,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const rawSurveysOn = d => altReps(data, data.enquiries || []).filter(en => en.surveyDate === isoOf(d) && !["Lost", "Not quoted"].includes(en.status)).sort((a,b)=>(a.surveyTime||"").localeCompare(b.surveyTime||""));
   const jobsOn = d => showMoves ? rawJobsOn(d) : [];
   const surveysOn = d => showSurveys ? rawSurveysOn(d) : [];
-  const colorOf = m => (STATUS_META[m.job.status]?.color) || TEAL;
+  const colorOf = m => CAL_COL[(m.job.status === "Booked" || m.job.status === "In Progress") ? "Confirmed" : m.job.status] || TEAL;
   const bookedVehiclesOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.vehicleIds || [])); const iso = isoOf(d); (data.vehicles || []).forEach(v => { if (vehOutOn(v, iso)) s.add(v.id); }); return s; };
   const bookedStaffOn = d => { const s = new Set(rawJobsOn(d).filter(m => ["Confirmed", "Completed"].includes(m.job.status)).flatMap(m => m.stage.crew || [])); const iso = isoOf(d); (data.staff || []).forEach(st => { if (staffOffOn(st, iso)) s.add(st.name); }); return s; };
   const maintOnIso = iso => { const out = []; (data.vehicles || []).forEach(v => ((v.maint && v.maint.bookings) || []).forEach(b => { if (inBooking(b, iso)) out.push({ v, b }); })); return out; };
@@ -7662,6 +7674,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
     const vehNames = (st.vehicleIds || []).map(vid => { const v = (data.vehicles || []).find(x => x.id === vid); return v ? v.name : ""; }).filter(Boolean).join(", ");
     const provisional = !["Confirmed", "Completed"].includes(j.status);
     const plannedVeh = vehTypesSummary(st.vehTypes);
+    const ttl = j.status === TEL_CONF ? "📞 " : "";
     const plannedStaff = Number(st.staffCount) || 0;
     const resLine = provisional
       ? `${plannedVeh || "Vehicle TBC"} · ${plannedStaff || "—"} crew (planned)`
@@ -7674,7 +7687,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         <span style={{ flex:1, minWidth:0, fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</span>
         {st.time && <span style={{ fontSize: big?12:10.5, fontWeight:700, color:"#6A7B77", flexShrink:0 }}>{st.time}</span>}
       </div>
-      <div style={{ fontSize: big?12:10.5, fontWeight:800, color:colorOf(m), marginTop:1, textTransform:"uppercase", letterSpacing:".03em" }}>{st.type}</div>
+      <div style={{ fontSize: big?12:10.5, fontWeight:800, color:colorOf(m), marginTop:1, textTransform:"uppercase", letterSpacing:".03em" }}>{ttl}{st.type}</div>
       <div style={{ fontSize: big?12.5:11, color:"#6A7B77", marginTop:2, fontWeight:600, whiteSpace: big?"normal":"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
         {j.fromTown || "—"} → {j.toTown || "—"}
       </div>
@@ -7692,16 +7705,16 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
 
   const StaffOffCard = ({ s, b, big, dayNo, total }) => (
     <div onClick={() => setView({ screen: "company" })}
-      style={{ background:"#FFF7ED", border:"1px solid #FBD9A0", borderLeft:"4px solid #F59E0B", borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer" }}>
-      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:"#B45309", textTransform:"uppercase", letterSpacing:".05em" }}>🌴 Off · {b.reason || "Away"}{(total || b.days) > 1 && dayNo ? ` · Day ${dayNo} of ${total || b.days}` : ""}</div>
+      style={{ background:"#FFF7ED", border:"1px solid #FED7AA", borderLeft:`4px solid ${CAL_COL.staff}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer" }}>
+      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:"#C2410C", textTransform:"uppercase", letterSpacing:".05em" }}>🌴 Off · {b.reason || "Away"}{(total || b.days) > 1 && dayNo ? ` · Day ${dayNo} of ${total || b.days}` : ""}</div>
       <div style={{ fontSize: big?14:12.5, fontWeight:800, color:"#10211E", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.name}</div>
       {(total || b.days) > 1 && <div style={{ fontSize: big?12:10.5, color:"#6A7B77", marginTop:1, fontWeight:600 }}>{fmtUK(b.start)} – {fmtUK(isoAdd(b.start, { days: (total || b.days) - 1 }))}</div>}
     </div>
   );
   const MaintCard = ({ v, b, big }) => (
     <div onClick={() => setView({ screen: "company" })}
-      style={{ background:"#F3F6FA", border:"1px solid #D3DEEA", borderLeft:"4px solid #64748B", borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer" }}>
-      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:"#475569", textTransform:"uppercase", letterSpacing:".05em" }}>🔧 Vehicle out · {b.type}</div>
+      style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderLeft:`4px solid ${CAL_COL.vehicle}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer" }}>
+      <div style={{ fontSize: big?11:9.5, fontWeight:800, color:"#15803D", textTransform:"uppercase", letterSpacing:".05em" }}>🔧 Vehicle out · {b.type}</div>
       <div style={{ fontSize: big?14:12.5, fontWeight:800, color:"#10211E", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{v.name}</div>
       {b.days > 1 && <div style={{ fontSize: big?12:10.5, color:"#6A7B77", marginTop:1, fontWeight:600 }}>{fmtUK(b.start)} – {fmtUK(bookingEnd(b))}{b.motDate ? ` · test ${fmtUK(b.motDate)}` : ""}</div>}
     </div>
@@ -7717,7 +7730,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
   const SurveyCard = ({ en, big }) => {
     const done = en.surveyDone || en.status === "Surveyed";
     const missed = isMissedSurvey(en);
-    const bg = missed ? "#FEF2F2" : done ? "#F1F9F4" : "#FFFBF2", bd = missed ? "#FCA5A5" : done ? "#BBE6C9" : "#FBE3B3", bar = missed ? "#DC2626" : done ? "#22C55E" : AMBER, tc = missed ? "#B91C1C" : done ? "#15803D" : AMBER;
+    // quotations are red on the calendar (missed survey = darker red with ⚠️)
+    const bg = "#FEF2F2", bd = missed ? "#F87171" : "#FECACA", bar = missed ? "#991B1B" : CAL_COL.quote, tc = missed ? "#991B1B" : "#B91C1C";
     return (
     <div onClick={() => setView({ screen:"enquiryDetail", id:en.id })}
       style={{ background: bg, border:`1px solid ${bd}`, borderLeft:`4px solid ${bar}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
@@ -7952,9 +7966,10 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
           const d = addDays(start,i); const out = d.getMonth()!==anchor.getMonth();
           if (i >= 35 && out) break;
           const dots = [
-            ...surveysOn(d).map(en => isMissedSurvey(en) ? "#DC2626" : AMBER),
-            ...jobsOn(d).map(() => "#2563EB"),
-            ...maintOn(d).map(() => "#64748B"),
+            ...surveysOn(d).map(en => isMissedSurvey(en) ? "#991B1B" : CAL_COL.quote),
+            ...jobsOn(d).map(m => colorOf(m)),
+            ...maintOn(d).map(() => CAL_COL.vehicle),
+            ...staffOffOnCal(d).map(() => CAL_COL.staff),
           ];
           const isSel = sameDay(d, sel), isT = sameDay(d, today);
           cells.push(
@@ -7975,8 +7990,8 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
               {CAL_DOW.map(d => <div key={d} style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textAlign:"center" }}>{d.slice(0,1)}</div>)}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:4 }}>{cells}</div>
-            <div style={{ display:"flex", gap:14, fontSize:11.5, color:"#6A7B77", fontWeight:700, margin:"9px 2px 4px" }}>
-              <span>{dot(AMBER)}Quote</span><span>{dot("#2563EB")}Move</span><span>{dot("#64748B")}Servicing</span>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:"4px 12px", fontSize:11.5, color:"#6A7B77", fontWeight:700, margin:"9px 2px 4px" }}>
+              <span>{dot(CAL_COL.quote)}Quote</span><span>{dot(CAL_COL.Provisional)}Provisional</span><span>{dot(CAL_COL[TEL_CONF])}Tel. conf.</span><span>{dot(CAL_COL.Confirmed)}Confirmed</span><span>{dot(CAL_COL.vehicle)}Vehicle</span><span>{dot(CAL_COL.staff)}Staff off</span>
             </div>
             <div onClick={() => { setAnchor(sel); setMode("day"); }} style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", margin:"12px 2px 8px", cursor:"pointer" }}>
               <div style={{ fontSize:16, fontWeight:800, color: sameDay(sel,today) ? AMBER : "#10211E" }}>{CAL_DOW[(sel.getDay()+6)%7]} {sel.getDate()} {CAL_MON[sel.getMonth()]}{sameDay(sel,today) ? " · Today" : ""}</div>
@@ -8004,20 +8019,25 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
         const cells = [];
         for (let i=0;i<42;i++) {
           const d = addDays(start,i); const out = d.getMonth()!==anchor.getMonth();
-          const evs = jobsOn(d); const svs = surveysOn(d); const mnt = maintOn(d);
-          const total = evs.length + svs.length + mnt.length;
+          const evs = jobsOn(d); const svs = surveysOn(d); const mnt = maintOn(d); const offs = staffOffOnCal(d);
+          const total = evs.length + svs.length + mnt.length + offs.length;
           cells.push(
             <div key={i} onClick={()=>{ setAnchor(d); setMode("day"); }} style={{ background: out?"#F7F9F9":"#fff", border:"1px solid #E9EEED", borderRadius:12, minHeight:cellH, padding:7, cursor:"pointer", display:"flex", flexDirection:"column", gap:3, overflow:"hidden" }}>
               <div style={{ alignSelf:"flex-start", fontSize:big?14:12, fontWeight:800, color: out?"#B7C3C0":"#3c4c48", ...(sameDay(d,today)?{ background:AMBER, color:"#fff", width:23, height:23, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }:{}) }}>{d.getDate()}</div>
-              {svs.slice(0,maxS).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color: isMissedSurvey(en) ? "#B91C1C" : "#92591A", background: isMissedSurvey(en) ? "#FEE2E2" : "#FFF6E6", borderLeft:`3px solid ${isMissedSurvey(en) ? "#DC2626" : AMBER}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>📋 {calQuoteName(data, en)}</div>)}
+              {svs.slice(0,maxS).map(en => <div key={en.id} style={{ fontSize:10.5, fontWeight:700, color: "#B91C1C", background: "#FEF2F2", borderLeft:`3px solid ${isMissedSurvey(en) ? "#991B1B" : CAL_COL.quote}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>📋 {calQuoteName(data, en)}</div>)}
               {evs.slice(0,maxM).map((m,ix) => <div key={ix} style={{ fontSize:10.5, fontWeight:700, color:"#22332F", background:"#EEF3F2", borderLeft:`3px solid ${colorOf(m)}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>{custName(data,m.job.customerId)}{m.stage.type?` · ${m.stage.type}`:""}</div>)}
-              {mnt.slice(0,maxS).map((mm,ix) => <div key={"m"+ix} style={{ fontSize:10.5, fontWeight:700, color:"#475569", background:"#EEF2F7", borderLeft:"3px solid #64748B", borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>🔧 {mm.v.name} · {mm.b.type}</div>)}
-              {total>(maxS+maxM) && <div style={{ fontSize:big?11.5:10, color:"#94A4A0", fontWeight:700 }}>+{total-Math.min(svs.length,maxS)-Math.min(evs.length,maxM)-Math.min(mnt.length,maxS)} more</div>}
+              {offs.slice(0,maxS).map((so,ix) => <div key={"o"+ix} style={{ fontSize:10.5, fontWeight:700, color:"#C2410C", background:"#FFF7ED", borderLeft:`3px solid ${CAL_COL.staff}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>🌴 {so.s.name} · {so.b.reason || "Off"}</div>)}
+              {mnt.slice(0,maxS).map((mm,ix) => <div key={"m"+ix} style={{ fontSize:10.5, fontWeight:700, color:"#15803D", background:"#F0FDF4", borderLeft:`3px solid ${CAL_COL.vehicle}`, borderRadius:5, padding:"2px 5px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", ...txt }}>🔧 {mm.v.name} · {mm.b.type}</div>)}
+              {(total-Math.min(svs.length,maxS)-Math.min(evs.length,maxM)-Math.min(mnt.length,maxS)-Math.min(offs.length,maxS))>0 && <div style={{ fontSize:big?11.5:10, color:"#94A4A0", fontWeight:700 }}>+{total-Math.min(svs.length,maxS)-Math.min(evs.length,maxM)-Math.min(mnt.length,maxS)-Math.min(offs.length,maxS)} more</div>}
             </div>
           );
         }
+        const lg = c => <span style={{ display:"inline-block", width:10, height:10, borderRadius:3, background:c, marginRight:6, verticalAlign:"-1px" }} />;
         return (
           <div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:"4px 16px", fontSize:12.5, color:"#6A7B77", fontWeight:700, margin:"0 2px 10px" }}>
+              <span>{lg(CAL_COL.quote)}Quotation</span><span>{lg(CAL_COL.Provisional)}Provisional</span><span>{lg(CAL_COL[TEL_CONF])}Telephone confirmed</span><span>{lg(CAL_COL.Confirmed)}Confirmed</span><span>{lg(CAL_COL.vehicle)}Vehicle</span><span>{lg(CAL_COL.staff)}Staff holiday</span>
+            </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:7, marginBottom:7 }}>
               {CAL_DOW.map(d => <div key={d} style={{ fontSize:11, fontWeight:800, color:"#94A4A0", textTransform:"uppercase", letterSpacing:".05em", textAlign:"center" }}>{d}</div>)}
             </div>
