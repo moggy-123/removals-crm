@@ -1192,7 +1192,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B263";
+const BUILD_NO = "B264";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4634,6 +4634,8 @@ function MoveManageModal({ data, job, onClose }) {
   });
   const confirmMove = () => {
     if (!assign) { setAssign(true); return; }
+    const noDate = days.map((st, i) => st.date ? null : i + 1).filter(Boolean);
+    if (days.length && noDate.length) { alert(`Set the date for every day in the move plan before confirming.\n\nNo date on day ${noDate.join(", ")}.`); return; }
     const bad = days.map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
     if (!days.length || bad.length) { alert(`Assign at least one staff member and one vehicle to every day before confirming.\n\nStill needed on day ${bad.join(", ")}.`); return; }
     const shortfalls = days.map((d, i) => {
@@ -5207,8 +5209,9 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
     const jid = uid();
     const planned = Array.isArray(e.stages) ? e.stages : [];
     const stages = planned.length
-      ? planned.map(d => ({ id: uid(), type: d.type || "Move", date: d.date || e.preferredDate || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
-      : [{ id: uid(), type: "Move", date: e.preferredDate || "", time: "", vehicleIds: [], crew: [], notes: "" }];
+      // Dates come from the move plan only — the enquiry's date is just a heads-up. No plan date = "No date provisional".
+      ? planned.map(d => ({ id: uid(), type: d.type || "Move", date: d.date || "", time: "", vehicleIds: [], crew: [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
+      : [{ id: uid(), type: "Move", date: "", time: "", vehicleIds: [], crew: [], notes: "" }];
     const job = {
       id: jid, customerId: e.customerId, enquiryId: e.id,
       startTime: "",
@@ -5216,7 +5219,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       toAddress1: e.toAddress1, toAddress2: e.toAddress2, toTown: e.toTown, toPostcode: e.toPostcode, toAccess: e.toAccess,
       crew: [], vehicle: "", vehicleIds: [],
       stages,
-      moveDate: stages[0]?.date || e.preferredDate || "",
+      moveDate: stages.map(st => st.date).filter(Boolean).sort()[0] || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: e.quoteTotal || 0, deposit: 0, depositPaid: false, balancePaid: false,
       status: newStatus, notes: "", createdAt: new Date().toISOString(),
@@ -7386,6 +7389,8 @@ function JobDetailScreen({ data, j, setView }) {
       setTimeout(() => { const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
       return;
     }
+    const noDate = (f.stages || []).map((st, i) => st.date ? null : i + 1).filter(Boolean);
+    if (noDate.length) { alert(`Set the date for every day before confirming.\n\nNo date on day ${noDate.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     const bad = (f.stages || []).map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
     if (!f.stages || !f.stages.length || bad.length) { alert(`Assign named staff and at least one vehicle to every day before confirming.\n\nStill needed on day ${bad.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     const price = Number(f.price) || 0;
