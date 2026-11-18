@@ -1240,7 +1240,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B269";
+const BUILD_NO = "B270";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1260,6 +1260,7 @@ const Icon = ({ name, size = 18, color = "currentColor" }) => {
     plus: "M12 4v16m8-8H4", back: "M15 19l-7-7 7-7", check: "M5 13l4 4L19 7",
     truck: "M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 001 1h1m-1-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1",
     box: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4",
+    invoice: "M6 3h12v18l-3-2-3 2-3-2-3 2V3zM9 8h6M9 12h6M9 16h3",
     trash: "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16",
     edit: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
     quote: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
@@ -5899,7 +5900,7 @@ function invTotals(inv) {
   const total = r2(net + vat);
   const paid = r2((inv.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0));
   const balance = r2(total - paid);
-  const status = inv.void ? "Cancelled" : balance <= 0.004 ? "Paid" : (inv.due && inv.due < todayISO()) ? "Overdue" : paid > 0 ? "Part paid" : "Unpaid";
+  const status = inv.void ? "Cancelled" : (balance <= 0.004 && total > 0) ? "Paid" : (inv.due && inv.due < todayISO()) ? "Overdue" : paid > 0 ? "Part paid" : "Unpaid";
   return { net, vat, total, paid, balance, status };
 }
 const INV_STATUS_COL = { Paid: ["#15803D", "#ECFDF5"], "Part paid": ["#B45309", "#FFFBEB"], Unpaid: ["#1D4ED8", "#EFF6FF"], Overdue: ["#B91C1C", "#FEF2F2"], Cancelled: ["#6B7280", "#F3F4F6"] };
@@ -6088,7 +6089,7 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
   return (
     <Modal title={isNew ? "New invoice" : `Invoice ${invNumber(f)}`} onClose={onClose}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div><div style={{ fontWeight: 800, fontSize: 15 }}>{c.ref ? c.ref + " " : ""}{c.name}</div><div style={{ fontSize: 12.5, color: "#6A7B77" }}>No. {invNumber(f)} · {f.kind === "storage" ? "Storage" : "Move"}</div></div>
+        <div><div style={{ fontWeight: 800, fontSize: 15 }}>{c.ref ? c.ref + " " : ""}{c.name}</div><div style={{ fontSize: 12.5, color: "#6A7B77" }}>No. {invNumber(f)} · {f.kind === "storage" ? "Storage" : f.kind === "move" ? "Move" : "Other"}</div></div>
         <InvBadge status={t.status} />
       </div>
       <Field label="Title"><Input value={f.title || ""} onChange={v => set("title", v)} /></Field>
@@ -6149,7 +6150,7 @@ function InvoiceRow({ inv, c, onOpen, showCust }) {
     <div onClick={onOpen} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#fff", border: "1px solid #E9EEED", borderRadius: 12, cursor: "pointer" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 800, fontSize: 14, color: "#10211E", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{invNumber(inv)}{showCust ? ` · ${c.ref ? c.ref + " " : ""}${c.name}` : ""}</div>
-        <div style={{ fontSize: 12.5, color: "#6A7B77", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inv.kind === "storage" ? "📦 " : "🚚 "}{inv.title} · due {fmtUK(inv.due)}</div>
+        <div style={{ fontSize: 12.5, color: "#6A7B77", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inv.kind === "storage" ? "📦 " : inv.kind === "move" ? "🚚 " : "🧾 "}{inv.title} · due {fmtUK(inv.due)}</div>
       </div>
       <div style={{ textAlign: "right" }}>
         <div style={{ fontWeight: 800, fontSize: 14 }}>{gbpPlain(t.total)}</div>
@@ -6195,22 +6196,55 @@ function InvoicesHomeCard({ data, setView }) {
     </div>
   );
 }
+function NewInvoicePicker({ data, onPick, onClose }) {
+  const [q, setQ] = useState("");
+  const list = (data.customers || []).filter(c => { const t = q.trim().toLowerCase(); return !t || [c.name, c.company, c.ref, c.postcode, c.phone].filter(Boolean).join(" ").toLowerCase().includes(t); }).sort((a, b) => (Number(b.ref) || 0) - (Number(a.ref) || 0)).slice(0, 40);
+  return (
+    <Modal title="New invoice — choose customer" onClose={onClose}>
+      <Input value={q} onChange={setQ} placeholder="Search name, ref, postcode…" />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+        {list.map(c => <button key={c.id} onClick={() => onPick(c)} style={{ textAlign: "left", padding: "10px 12px", border: "1px solid #E9EEED", borderRadius: 10, background: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}><b>{c.ref ? c.ref + " " : ""}{c.name}</b><span style={{ color: "#6A7B77" }}>{c.postcode ? " · " + c.postcode : ""}</span></button>)}
+      </div>
+    </Modal>
+  );
+}
 function InvoicesView({ data, setView }) {
   const [filter, setFilter] = useState("Owed");
+  const [q, setQ] = useState("");
+  const [period, setPeriod] = useState("All dates");
+  const [picker, setPicker] = useState(false);
   const [open, setOpen] = useState(null);
   const [busy, setBusy] = useState(false);
   const [setOpenS, setSetOpenS] = useState(false);
   const [sv, setSv] = useState(getInvSettings);
   const all = allInvoices(data).map(x => ({ ...x, t: invTotals(x.inv) })).sort((a, b) => (b.inv.no || 0) - (a.inv.no || 0));
   const due = storageDue(data);
-  const list = all.filter(x => filter === "All" ? true : filter === "Owed" ? ["Unpaid", "Part paid", "Overdue"].includes(x.t.status) : x.t.status === filter);
+  const today = todayISO(), ym = today.slice(0, 7);
+  const lastM = (() => { const d = new Date(today + "T12:00"); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
+  const inPeriod = dt => period === "All dates" ? true : period === "This month" ? (dt || "").startsWith(ym) : period === "Last month" ? (dt || "").startsWith(lastM) : period === "Last 3 months" ? (dt || "") >= addDaysISO(today, -92) : period === "This year" ? (dt || "").startsWith(today.slice(0, 4)) : true;
+  const qq = q.trim().toLowerCase();
+  const matches = x => !qq || [invNumber(x.inv), x.c.name, x.c.company, x.c.ref, x.c.postcode, x.inv.title].filter(Boolean).join(" ").toLowerCase().includes(qq);
+  const base = all.filter(x => inPeriod(x.inv.date) && matches(x));
+  const list = base.filter(x => filter === "All" ? true : filter === "Owed" ? ["Unpaid", "Part paid", "Overdue"].includes(x.t.status) : x.t.status === filter);
+  const owedAll = all.filter(x => x.t.status !== "Cancelled").reduce((s, x) => s + Math.max(0, x.t.balance), 0);
+  const overdueAll = all.filter(x => x.t.status === "Overdue");
+  const paidThisMonth = all.reduce((s, x) => s + (x.inv.payments || []).filter(p => (p.date || "").startsWith(ym)).reduce((a, p) => a + (Number(p.amount) || 0), 0), 0);
+  const tile = (label, val, col, onClick) => <div onClick={onClick} style={{ flex: 1, minWidth: 0, background: "#fff", border: "1px solid #E3E9E8", borderRadius: 12, padding: "10px 12px", cursor: onClick ? "pointer" : "default" }}><div style={{ fontSize: 11.5, fontWeight: 700, color: "#6A7B77" }}>{label}</div><div style={{ fontSize: 18, fontWeight: 800, color: col, marginTop: 2 }}>{val}</div></div>;
   const sum = k => list.reduce((s, x) => s + (x.t.status === "Cancelled" ? 0 : x.t[k]), 0);
   const ro = isReadOnly();
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Invoices</h2>
-        {!ro && <Btn size="sm" variant="grey" onClick={() => setSetOpenS(o => !o)}>⚙️ Numbering</Btn>}
+        <div style={{ display: "flex", gap: 6 }}>
+          {!ro && <Btn size="sm" variant="grey" onClick={() => setSetOpenS(o => !o)}>⚙️</Btn>}
+          {!ro && <Btn size="sm" onClick={() => setPicker(true)}>+ New invoice</Btn>}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {tile("Owed", gbpPlain(owedAll), "#1D4ED8", () => setFilter("Owed"))}
+        {tile("Overdue", `${overdueAll.length}`, overdueAll.length ? "#B91C1C" : "#10211E", () => setFilter("Overdue"))}
+        {tile("Paid this month", gbpPlain(paidThisMonth), "#15803D")}
       </div>
       {setOpenS && <Card style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 8 }}>Next invoice number will be <b>{getInvSettings().prefix}{nextInvoiceNo(data)}</b>. Set the starting number to follow on from your current invoices (it can change once Sage is connected).</div>
@@ -6226,6 +6260,10 @@ function InvoicesView({ data, setView }) {
         <div style={{ fontSize: 12.5, color: "#92400E", margin: "4px 0 8px" }}>{due.slice(0, 6).map(d => `${d.c.ref ? d.c.ref + " " : ""}${d.c.name} · ${fmtUK(d.from)}–${fmtUK(d.to)} · ${gbpPlain(r2(d.sj.rate4w) * (1 + VAT_RATE))}`).join("\n").split("\n").map((l, i) => <div key={i}>{l}</div>)}{due.length > 6 ? <div>…and {due.length - 6} more</div> : null}</div>
         {!ro && <Btn variant="amber" disabled={busy} onClick={async () => { if (!confirm(`Create ${due.length} storage invoice${due.length !== 1 ? "s" : ""}?`)) return; setBusy(true); await createStorageInvoices(data, due); }}>Create all</Btn>}
       </Card>}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 2 }}><Input value={q} onChange={setQ} placeholder="Search invoice no., name, ref…" /></div>
+        <div style={{ flex: 1 }}><Select value={period} onChange={setPeriod} options={["All dates", "This month", "Last month", "Last 3 months", "This year"]} /></div>
+      </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
         {["Owed", "Overdue", "Paid", "All"].map(k => <button key={k} onClick={() => setFilter(k)} style={{ padding: "7px 13px", borderRadius: 99, border: filter === k ? `2px solid ${TEAL}` : "1px solid #E3E9E8", background: filter === k ? "#E7F2F0" : "#fff", color: filter === k ? TEAL_D : "#43534F", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{k}</button>)}
       </div>
@@ -6234,7 +6272,13 @@ function InvoicesView({ data, setView }) {
         {list.map(x => <InvoiceRow key={x.inv.id} inv={x.inv} c={x.c} showCust onOpen={() => setOpen({ custId: x.c.id, invId: x.inv.id })} />)}
         {!list.length && <div style={{ fontSize: 13.5, color: "#94A4A0", padding: "10px 2px" }}>Nothing here. Moves are invoiced from the customer's page (Invoices section) once telephone confirmed or confirmed.</div>}
       </div>
-      {open && <InvoiceModal data={data} custId={open.custId} invId={open.invId} onClose={() => setOpen(null)} />}
+      {open && <InvoiceModal data={data} custId={open.custId} invId={open.invId} draft={open.draft} onClose={() => setOpen(null)} />}
+      {picker && <NewInvoicePicker data={data} onClose={() => setPicker(false)} onPick={c => {
+        setPicker(false);
+        const job = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "Completed"].includes(j.status) && !moveInvoiceFor(data, c, j)).sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || ""))[0];
+        const draft = job ? buildMoveInvoice(data, c, job) : { id: uid(), no: nextInvoiceNo(data), kind: "other", date: todayISO(), due: addDaysISO(todayISO(), Number(getInvSettings().terms) || 7), title: "", lines: [{ desc: "", amount: "" }], vat: true, payments: [], notes: "", createdAt: new Date().toISOString() };
+        setOpen({ custId: c.id, draft });
+      }} />}
     </div>
   );
 }
@@ -10673,6 +10717,7 @@ function MainApp() {
     { id: "calendar",  icon: "calendar",  label: "Calendar",  phone: "Calendar" },
     { id: "customers", icon: "customers", label: "Customers", phone: "Customers" },
     { id: "storage",   icon: "box",       label: "Storage",   phone: "Storage" },
+    ...(CURRENT_USER.role === "crew" ? [] : [{ id: "invoices", icon: "invoice", label: "Invoices", phone: "Invoices" }]),
     { id: "company",   icon: "company",   label: "Company",   phone: "Company" },
   ];
   const missedCount = missedSurveys(data).length;
@@ -10680,7 +10725,7 @@ function MainApp() {
     ? <span style={{ position: "absolute", top: 4, left: "calc(50% + 6px)", minWidth: 18, height: 18, padding: "0 5px", borderRadius: 99, background: "#DC2626", color: "#fff", fontSize: 11, fontWeight: 800, lineHeight: "18px", textAlign: "center", boxShadow: "0 0 0 2px #fff" }}>{missedCount}</span>
     : null;
   const sectionKey = sectionFor(view.screen);
-  const activeTab = (view.screen === "reports" || view.screen === "invoices") ? "company" : ["dashboard", "calendar", "company", "storage"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
+  const activeTab = view.screen === "reports" ? "company" : ["dashboard", "calendar", "company", "storage", "invoices"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
 
   const SyncDot = () => (
     <span title={syncStatus} style={{ width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
@@ -10817,8 +10862,8 @@ function MainApp() {
           return (
             <button key={n.id} onClick={() => setView({ screen: n.id })} style={{ position: "relative", flex: 1, padding: "11px 0 16px", background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
               {navBadge(n.id)}
-              <Icon name={n.icon} size={24} color={on ? TEAL : "#9CA3AF"} />
-              <span style={{ fontSize: 10.5, fontWeight: 700, color: on ? TEAL : "#9CA3AF" }}>{n.phone}</span>
+              <Icon name={n.icon} size={NAV.length > 6 ? 22 : 24} color={on ? TEAL : "#9CA3AF"} />
+              <span style={{ fontSize: NAV.length > 6 ? 9.5 : 10.5, fontWeight: 700, color: on ? TEAL : "#9CA3AF", letterSpacing: NAV.length > 6 ? "-.01em" : 0 }}>{n.phone}</span>
               {on && <span style={{ width: 16, height: 2.5, borderRadius: 99, background: AMBER }} />}
             </button>
           );
