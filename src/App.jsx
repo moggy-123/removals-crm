@@ -1240,7 +1240,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B268";
+const BUILD_NO = "B269";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1874,6 +1874,7 @@ function Dashboard({ data, setView, setData }) {
       })()}
 
       <WebLeadsTray setView={setView} />
+      <InvoicesHomeCard data={data} setView={setView} />
       <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 18px", borderRadius: 10, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
         <Icon name="plus" size={15} /> New Enquiry
       </button>
@@ -5872,6 +5873,372 @@ function CommLogForm({ data, customer, entry, preset, onClose }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// INVOICING — invoices live on the customer record (customers.invoices, JSON).
+// One invoice per move (deposit shown as already paid) + 4-weekly storage invoices.
+// Sage comes later: each invoice keeps a `sage` slot for its Sage id/number.
+// ════════════════════════════════════════════════════════════════════════════
+const INV_SET_KEY = "removals_inv_settings";
+function getInvSettings() { try { return { prefix: "", start: 1, terms: 7, ...(JSON.parse(localStorage.getItem(INV_SET_KEY) || "{}")) }; } catch { return { prefix: "", start: 1, terms: 7 }; } }
+function saveInvSettings(s) { try { localStorage.setItem(INV_SET_KEY, JSON.stringify(s)); } catch {} }
+const VAT_RATE = 0.2;
+const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
+function addDaysISO(iso, n) { const d = new Date((iso || todayISO()) + "T12:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+function allInvoices(data) {
+  return (data.customers || []).flatMap(c => (Array.isArray(c.invoices) ? c.invoices : []).map(inv => ({ inv, c })));
+}
+function nextInvoiceNo(data) {
+  const s = getInvSettings();
+  const max = allInvoices(data).reduce((m, x) => Math.max(m, Number(x.inv.no) || 0), 0);
+  return Math.max(max + 1, Number(s.start) || 1);
+}
+function invNumber(inv) { return `${getInvSettings().prefix || ""}${inv.no}`; }
+function invTotals(inv) {
+  const net = r2((inv.lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0));
+  const vat = inv.vat === false ? 0 : r2(net * VAT_RATE);
+  const total = r2(net + vat);
+  const paid = r2((inv.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0));
+  const balance = r2(total - paid);
+  const status = inv.void ? "Cancelled" : balance <= 0.004 ? "Paid" : (inv.due && inv.due < todayISO()) ? "Overdue" : paid > 0 ? "Part paid" : "Unpaid";
+  return { net, vat, total, paid, balance, status };
+}
+const INV_STATUS_COL = { Paid: ["#15803D", "#ECFDF5"], "Part paid": ["#B45309", "#FFFBEB"], Unpaid: ["#1D4ED8", "#EFF6FF"], Overdue: ["#B91C1C", "#FEF2F2"], Cancelled: ["#6B7280", "#F3F4F6"] };
+function InvBadge({ status }) { const [c, b] = INV_STATUS_COL[status] || INV_STATUS_COL.Unpaid; return <span style={{ fontSize: 11.5, fontWeight: 800, color: c, background: b, borderRadius: 99, padding: "3px 9px", whiteSpace: "nowrap" }}>{status}</span>; }
+// Save one invoice (add or replace) onto its customer
+async function saveInvoice(data, custId, inv, remove) {
+  const cur = loadData();
+  const c = (cur.customers || []).find(x => x.id === custId) || (data.customers || []).find(x => x.id === custId);
+  if (!c) return;
+  const list = Array.isArray(c.invoices) ? c.invoices : [];
+  const next = remove ? list.filter(x => x.id !== inv.id) : (list.some(x => x.id === inv.id) ? list.map(x => x.id === inv.id ? { ...inv, updatedAt: Date.now() } : x) : [...list, { ...inv, updatedAt: Date.now() }]);
+  await saveAndReload(upsertLocal(cur, "customers", { ...c, invoices: next }));
+}
+// ── Move invoice: one invoice for the whole move, lines from the quote, deposit shown as paid
+function moveInvoiceFor(data, c, j) { return (c.invoices || []).find(x => x.kind === "move" && x.jobId === j.id && !x.void); }
+function buildMoveInvoice(data, c, j) {
+  const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
+  const days = jobStages(j).filter(st => st.date).map(st => st.date).sort();
+  const first = days[0] || "", last = days[days.length - 1] || "";
+  const from = e ? (e.fromTown || e.fromPostcode || "") : "", to = e ? (e.toStore ? "store" : (e.toTown || e.toPostcode || "")) : "";
+  const when = first ? (first === last ? fmtUK(first) : `${fmtUK(first)} – ${fmtUK(last)}`) : "";
+  let lines = e && Array.isArray(e.quoteLines) ? e.quoteLines.filter(l => l.desc || Number(l.amount)).map(l => ({ desc: l.desc || "Removal services", amount: r2(l.amount) })) : [];
+  const vat = e ? e.quoteVat !== false : true;
+  const quotedTotal = r2(lines.reduce((s, l) => s + l.amount, 0) * (vat ? 1 + VAT_RATE : 1));
+  // price on the move differs from the quote (or no quote lines): one line for the move price
+  if (!lines.length || (Number(j.price) && Math.abs(quotedTotal - Number(j.price)) > 0.5)) lines = [{ desc: "Removal services", amount: r2((Number(j.price) || 0) / (vat ? 1 + VAT_RATE : 1)) }];
+  const today = todayISO();
+  const payments = j.depositPaid && Number(j.deposit) > 0 ? [{ id: uid(), date: today, amount: r2(j.deposit), method: "Deposit" }] : [];
+  return {
+    id: uid(), no: nextInvoiceNo(data), kind: "move", jobId: j.id, date: today,
+    due: first && first > today ? first : addDaysISO(today, Number(getInvSettings().terms) || 7),
+    title: `Removal${when ? " " + when : ""}${from || to ? ` · ${[from, to].filter(Boolean).join(" to ")}` : ""}`,
+    lines, vat, payments, notes: "", createdAt: new Date().toISOString(),
+  };
+}
+// ── Storage: every 4 weeks from the date into store, invoiced in advance
+const STORE_PERIOD = 28;
+function storagePeriodsDue(job, upTo) {
+  const rate = Number(job.rate4w) || 0;
+  if (!rate || !job.dateIn) return [];
+  const startBill = job.billFrom || job.dateIn;
+  const out = [];
+  for (let k = 0; k < 400; k++) {
+    const from = addDaysISO(job.dateIn, k * STORE_PERIOD);
+    if (from > upTo) break;
+    if (job.dateOut && from >= job.dateOut) break;
+    const to = addDaysISO(from, STORE_PERIOD - 1);
+    if (to < startBill) continue;
+    out.push({ from, to });
+  }
+  return out;
+}
+function storageDue(data) {
+  const today = todayISO(), due = [];
+  (data.customers || []).forEach(c => {
+    getStorageJobs(c).forEach(sj => {
+      if (sj.id === "legacy") return;
+      storagePeriodsDue(sj, today).forEach(p => {
+        if ((c.invoices || []).some(x => x.kind === "storage" && x.storageJobId === sj.id && x.periodFrom === p.from && !x.void)) return;
+        due.push({ c, sj, ...p });
+      });
+    });
+  });
+  return due.sort((a, b) => a.from.localeCompare(b.from));
+}
+function buildStorageInvoice(no, d) {
+  return {
+    id: uid(), no, kind: "storage", storageJobId: d.sj.id, periodFrom: d.from, periodTo: d.to, date: todayISO(), due: d.from > todayISO() ? d.from : todayISO(),
+    title: `Storage ${fmtUK(d.from)} – ${fmtUK(d.to)}`,
+    lines: [{ desc: `Storage${d.sj.location ? " at " + d.sj.location : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.sj.rate4w) }],
+    vat: true, payments: [], notes: "", createdAt: new Date().toISOString(),
+  };
+}
+async function createStorageInvoices(data, list) {
+  let cur = loadData(), no = nextInvoiceNo(data);
+  const byCust = {};
+  list.forEach(d => { (byCust[d.c.id] = byCust[d.c.id] || []).push(buildStorageInvoice(no++, d)); });
+  Object.keys(byCust).forEach(cid => {
+    const c = (cur.customers || []).find(x => x.id === cid); if (!c) return;
+    cur = upsertLocal(cur, "customers", { ...c, invoices: [...(Array.isArray(c.invoices) ? c.invoices : []), ...byCust[cid]] });
+  });
+  await saveAndReload(cur);
+}
+// ── Invoice PDF (A4), with the R&J logo and footer taken from the quote template
+async function buildInvoicePdf(inv, c) {
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([595.28, 841.89]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica), bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const H = 841.89, black = rgb(0.06, 0.13, 0.12), grey = rgb(0.42, 0.48, 0.47), red = rgb(0.8, 0, 0.05), line = rgb(0.85, 0.88, 0.87), teal = rgb(0.06, 0.46, 0.43);
+  const clean = s => String(s == null ? "" : s).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—−]/g, "-").replace(/…/g, "...").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
+  const T = (x, y, t, s = 10, f = font, col = black) => { const tt = clean(t); if (tt) page.drawText(tt, { x, y: H - y, size: s, font: f, color: col }); };
+  const R = (xr, y, t, s = 10, f = font, col = black) => { const tt = clean(t); if (!tt) return; page.drawText(tt, { x: xr - f.widthOfTextAtSize(tt, s), y: H - y, size: s, font: f, color: col }); };
+  try { // logo + footer from the quote template, so it matches the quotes
+    const tpl = await PDFDocument.load(await (await fetch("/quote-template.pdf")).arrayBuffer());
+    const tp = tpl.getPage(0), tw = tp.getWidth(), th = tp.getHeight();
+    const logoX = await pdf.embedPage(tp, { left: 20, bottom: th - 72, right: 222, top: th - 14 });
+    page.drawPage(logoX, { x: 32, y: H - 86 });
+    const foot = await pdf.embedPage(tp, { left: 14, bottom: 0, right: tw - 14, top: 58 });
+    page.drawPage(foot, { x: 14, y: 6 });
+  } catch (_e) { T(36, 60, "R J Removals Ltd", 18, bold, teal); }
+  const t = invTotals(inv);
+  R(560, 52, "INVOICE", 26, bold, teal);
+  R(560, 72, `No. ${invNumber(inv)}`, 12, bold, red);
+  // details box
+  const box = [["Invoice date", fmtUK(inv.date)], ["Due date", fmtUK(inv.due)], ["Customer ref", c.ref ? String(c.ref) : ""], ["Status", t.status]];
+  box.forEach(([k, v], i) => { T(370, 100 + i * 15, k, 9.5, font, grey); R(560, 100 + i * 15, v, 9.5, bold); });
+  // bill to
+  T(36, 110, "Invoice to", 9.5, bold, grey);
+  const addr = [c.name, c.company, c.address1, c.address2, c.town, c.county, c.postcode].filter(Boolean);
+  addr.forEach((a, i) => T(36, 126 + i * 13, a, 10.5, i === 0 ? bold : font));
+  // title
+  let y = Math.max(200, 140 + addr.length * 13 + 20);
+  T(36, y, inv.title || (inv.kind === "storage" ? "Storage" : "Removal"), 12, bold);
+  y += 16;
+  // lines
+  page.drawRectangle({ x: 36, y: H - y - 16, width: 524, height: 20, color: rgb(0.93, 0.96, 0.95) });
+  T(44, y + 10, "Description", 9.5, bold, grey); R(552, y + 10, "Amount", 9.5, bold, grey);
+  y += 22;
+  const wrap = (txt, maxW, s) => { const out = []; let ln = ""; clean(txt).split(/\s+/).forEach(w => { const tst = ln ? ln + " " + w : w; if (font.widthOfTextAtSize(tst, s) > maxW && ln) { out.push(ln); ln = w; } else ln = tst; }); if (ln) out.push(ln); return out; };
+  (inv.lines || []).forEach(l => {
+    const ws = wrap(l.desc, 420, 10.5);
+    ws.forEach((w, i) => T(44, y + 12 + i * 13, w, 10.5));
+    R(552, y + 12, gbpPlain(l.amount), 10.5);
+    y += 8 + ws.length * 13;
+    page.drawLine({ start: { x: 36, y: H - y }, end: { x: 560, y: H - y }, thickness: 0.6, color: line });
+  });
+  y += 14;
+  const tot = [["Net", gbpPlain(t.net)], [`VAT @ ${Math.round(VAT_RATE * 100)}%`, gbpPlain(t.vat)], ["Total", gbpPlain(t.total)]];
+  if (t.paid > 0) tot.push(["Paid", "-" + gbpPlain(t.paid)]);
+  tot.push(["Balance due", gbpPlain(Math.max(0, t.balance))]);
+  tot.forEach(([k, v], i) => { const strong = k === "Total" || k === "Balance due"; T(380, y + i * 17, k, 10.5, strong ? bold : font, k === "Balance due" ? teal : black); R(552, y + i * 17, v, strong ? 11.5 : 10.5, strong ? bold : font, k === "Balance due" ? teal : black); });
+  if (t.paid > 0) {
+    let py = y;
+    T(36, py, "Payments received", 9.5, bold, grey);
+    (inv.payments || []).forEach((p, i) => T(36, py + 15 + i * 13, `${fmtUK(p.date)}  ${p.method || ""}  ${gbpPlain(p.amount)}`, 9.5, font, grey));
+  }
+  y += tot.length * 17 + 24;
+  if (inv.notes) { wrap(inv.notes, 520, 10).forEach((w, i) => T(36, y + i * 13, w, 10)); y += wrap(inv.notes, 520, 10).length * 13 + 14; }
+  // how to pay
+  page.drawRectangle({ x: 36, y: H - y - 62, width: 524, height: 66, color: rgb(0.97, 0.98, 0.98), borderColor: line, borderWidth: 0.8 });
+  T(48, y + 16, "How to pay", 11, bold, teal);
+  T(48, y + 32, "Bank transfer to HSBC  -  R J Removals Ltd  -  Sort code 40 14 18  -  Account 91611836", 10);
+  T(48, y + 48, `Please use reference: ${invNumber(inv)}${c.ref ? " / " + c.ref : ""}`, 10, bold);
+  return await pdf.save();
+}
+async function openInvoicePdf(inv, c) {
+  try { const bytes = await buildInvoicePdf(inv, c); await showPdf(new File([bytes], `Invoice-${invNumber(inv)}.pdf`, { type: "application/pdf" }), `Invoice-${invNumber(inv)}.pdf`); }
+  catch (ex) { alert("Could not make the invoice PDF: " + ((ex && ex.message) || ex)); }
+}
+async function shareInvoicePdf(inv, c) {
+  try {
+    const bytes = await buildInvoicePdf(inv, c);
+    const file = new File([bytes], `Invoice-${invNumber(inv)}.pdf`, { type: "application/pdf" });
+    const first = String(c.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").split(" ")[0] || "";
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: `Invoice ${invNumber(inv)}`, text: `Hi ${first}, please find your invoice ${invNumber(inv)} attached. Many thanks, R&J Removals` }); resetZoomSoon(); return true; }
+    await showPdf(file, file.name); return true;
+  } catch (_e) { return false; }
+}
+function emailInvoice(inv, c) {
+  const t = invTotals(inv);
+  const first = String(c.name || "").replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, "").split(" ")[0] || "";
+  const body = `Hi ${first},\n\nPlease find your invoice ${invNumber(inv)} for ${inv.title || "your removal"}.\n\nTotal: ${gbpPlain(t.total)}${t.paid > 0 ? `\nPaid: ${gbpPlain(t.paid)}` : ""}\nBalance due: ${gbpPlain(Math.max(0, t.balance))} by ${fmtUK(inv.due)}\n\nBank transfer to HSBC, R J Removals Ltd, sort code 40 14 18, account 91611836. Please use reference ${invNumber(inv)}${c.ref ? " / " + c.ref : ""}.\n\nMany thanks,\nR&J Removals & Storage\n0117 9611112`;
+  window.location.href = `mailto:${quoteMailTo(c)}?subject=${encodeURIComponent(`Invoice ${invNumber(inv)} – R&J Removals`)}&body=${encodeURIComponent(body)}`;
+}
+// ── Invoice screen (view, edit lines, take payments, PDF, email)
+function InvoiceModal({ data, custId, invId, draft, onClose }) {
+  const c = (data.customers || []).find(x => x.id === custId);
+  const saved = c && (c.invoices || []).find(x => x.id === invId);
+  const [f, setF] = useState(() => JSON.parse(JSON.stringify(draft || saved || {})));
+  const [pay, setPay] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (!c || !f.id) return null;
+  const ro = isReadOnly();
+  const t = invTotals(f);
+  const isNew = !saved;
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const setLine = (i, k, v) => setF(p => ({ ...p, lines: p.lines.map((l, ix) => ix === i ? { ...l, [k]: v } : l) }));
+  const persist = async next => { setBusy(true); await saveInvoice(data, c.id, next || { ...f, lines: (f.lines || []).filter(l => l.desc || Number(l.amount)).map(l => ({ ...l, amount: r2(l.amount) })) }); };
+  const addPayment = async () => {
+    const amt = r2(pay.amount);
+    if (!(amt > 0)) { alert("Enter the amount received."); return; }
+    await persist({ ...f, payments: [...(f.payments || []), { id: uid(), date: pay.date || todayISO(), amount: amt, method: pay.method || "Bank transfer" }] });
+  };
+  const del = async () => { if (!confirm(`Delete invoice ${invNumber(f)}? This can't be undone.`)) return; setBusy(true); await saveInvoice(data, c.id, f, true); };
+  return (
+    <Modal title={isNew ? "New invoice" : `Invoice ${invNumber(f)}`} onClose={onClose}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div><div style={{ fontWeight: 800, fontSize: 15 }}>{c.ref ? c.ref + " " : ""}{c.name}</div><div style={{ fontSize: 12.5, color: "#6A7B77" }}>No. {invNumber(f)} · {f.kind === "storage" ? "Storage" : "Move"}</div></div>
+        <InvBadge status={t.status} />
+      </div>
+      <Field label="Title"><Input value={f.title || ""} onChange={v => set("title", v)} /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Invoice date"><Input type="date" value={f.date} onChange={v => set("date", v)} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Due date"><Input type="date" value={f.due} onChange={v => set("due", v)} /></Field></div>
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", margin: "4px 0 6px" }}>Lines (ex VAT)</div>
+      {(f.lines || []).map((l, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+          <input value={l.desc} disabled={ro} onChange={e => setLine(i, "desc", e.target.value)} placeholder="Description" style={{ ...inputStyle, flex: 3 }} />
+          <input value={l.amount} disabled={ro} onChange={e => setLine(i, "amount", e.target.value)} inputMode="decimal" placeholder="£" style={{ ...inputStyle, flex: 1, minWidth: 70, textAlign: "right" }} />
+          {!ro && <button onClick={() => setF(p => ({ ...p, lines: p.lines.filter((_, ix) => ix !== i) }))} style={{ border: "none", background: "#FEE2E2", color: "#DC2626", borderRadius: 8, width: 34, cursor: "pointer" }}>×</button>}
+        </div>
+      ))}
+      {!ro && <Btn size="sm" variant="grey" onClick={() => setF(p => ({ ...p, lines: [...(p.lines || []), { desc: "", amount: "" }] }))}>+ Add line</Btn>}
+      <div style={{ background: "#F7FAF9", borderRadius: 10, padding: "10px 12px", margin: "12px 0", fontSize: 13.5 }}>
+        {[["Net", t.net], [`VAT @ ${Math.round(VAT_RATE * 100)}%`, t.vat], ["Total", t.total], ...(t.paid ? [["Paid", -t.paid]] : []), ["Balance due", Math.max(0, t.balance)]].map(([k, v]) => (
+          <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontWeight: k === "Total" || k === "Balance due" ? 800 : 500, color: k === "Balance due" ? TEAL_D : "#10211E" }}><span>{k}</span><span>{v < 0 ? "-" : ""}{gbpPlain(Math.abs(v))}</span></div>
+        ))}
+      </div>
+      {(f.payments || []).length > 0 && <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Payments</div>
+        {f.payments.map(p => <div key={p.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5, padding: "4px 0", borderBottom: "1px solid #EEF3F2" }}>
+          <span>{fmtUK(p.date)} · {p.method}</span>
+          <span style={{ display: "flex", gap: 8, alignItems: "center" }}><b>{gbpPlain(p.amount)}</b>{!ro && <button onClick={() => setF(q => ({ ...q, payments: q.payments.filter(x => x.id !== p.id) }))} style={{ border: "none", background: "none", color: "#DC2626", cursor: "pointer", fontSize: 15 }}>×</button>}</span>
+        </div>)}
+      </div>}
+      {!ro && !isNew && t.balance > 0.004 && (pay ? (
+        <div style={{ background: "#ECFDF5", border: "1px solid #BBF7D0", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}><Field label="Amount"><Input value={pay.amount} onChange={v => setPay(p => ({ ...p, amount: v }))} /></Field></div>
+            <div style={{ flex: 1 }}><Field label="Date"><Input type="date" value={pay.date} onChange={v => setPay(p => ({ ...p, date: v }))} /></Field></div>
+          </div>
+          <Field label="Method"><Select value={pay.method} onChange={v => setPay(p => ({ ...p, method: v }))} options={["Bank transfer", "Card", "Cash", "Cheque"]} /></Field>
+          <div style={{ display: "flex", gap: 8 }}><Btn variant="grey" style={{ flex: 1 }} onClick={() => setPay(null)}>Cancel</Btn><Btn style={{ flex: 2 }} onClick={addPayment}>Save payment</Btn></div>
+        </div>
+      ) : <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#15803D" }} onClick={() => setPay({ amount: String(Math.max(0, t.balance)), date: todayISO(), method: "Bank transfer" })}>💷 Record a payment</Btn>)}
+      <Field label="Notes on the invoice"><textarea value={f.notes || ""} disabled={ro} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} /></Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 6 }}>
+        <Btn variant="grey" onClick={() => openInvoicePdf(f, c)}>📄 View PDF</Btn>
+        <Btn variant="grey" onClick={async () => { if (await shareInvoicePdf(f, c) && !ro && !f.sentAt) persist({ ...f, sentAt: new Date().toISOString() }); }}>📤 Send PDF</Btn>
+      </div>
+      {quoteEmails(c).length > 0 && <Btn variant="grey" style={{ width: "100%", marginTop: 8 }} onClick={() => { if (!ro && !f.sentAt) saveInvoice(data, c.id, { ...f, sentAt: new Date().toISOString() }); emailInvoice(f, c); }}>📧 Email {quoteEmails(c).length > 1 ? `${quoteEmails(c).length} contacts` : "customer"} (pre-addressed)</Btn>}
+      {f.sentAt && <div style={{ fontSize: 12, color: "#6A7B77", marginTop: 6 }}>Sent {fmtUK(String(f.sentAt).slice(0, 10))}</div>}
+      {!ro && <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        {!isNew && canDelete() && <Btn variant="danger" onClick={del}><Icon name="trash" size={14} /></Btn>}
+        <Btn variant="grey" style={{ flex: 1 }} onClick={onClose}>Close</Btn>
+        <Btn style={{ flex: 2 }} disabled={busy} onClick={() => persist()}>{isNew ? "Create invoice" : "Save invoice"}</Btn>
+      </div>}
+    </Modal>
+  );
+}
+// ── List rows + customer card + Home card + Invoices screen
+function InvoiceRow({ inv, c, onOpen, showCust }) {
+  const t = invTotals(inv);
+  return (
+    <div onClick={onOpen} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#fff", border: "1px solid #E9EEED", borderRadius: 12, cursor: "pointer" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: "#10211E", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{invNumber(inv)}{showCust ? ` · ${c.ref ? c.ref + " " : ""}${c.name}` : ""}</div>
+        <div style={{ fontSize: 12.5, color: "#6A7B77", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inv.kind === "storage" ? "📦 " : "🚚 "}{inv.title} · due {fmtUK(inv.due)}</div>
+      </div>
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontWeight: 800, fontSize: 14 }}>{gbpPlain(t.total)}</div>
+        <InvBadge status={t.status} />
+      </div>
+    </div>
+  );
+}
+function CustomerInvoices({ data, c }) {
+  const [open, setOpen] = useState(null);
+  const role = CURRENT_USER.role;
+  if (role === "crew") return null;
+  const invs = (c.invoices || []).slice().sort((a, b) => (b.no || 0) - (a.no || 0));
+  const canInvoice = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "Completed"].includes(j.status) && !moveInvoiceFor(data, c, j));
+  const owed = invs.reduce((s, i) => s + Math.max(0, invTotals(i).balance), 0);
+  return (
+    <>
+      <SectionTitle>Invoices{owed > 0.004 ? ` · ${gbpPlain(owed)} owed` : ""}</SectionTitle>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+        {invs.map(inv => <InvoiceRow key={inv.id} inv={inv} c={c} onOpen={() => setOpen({ invId: inv.id })} />)}
+        {!isReadOnly() && canInvoice.map(j => <Btn key={j.id} variant="grey" onClick={() => setOpen({ draft: buildMoveInvoice(data, c, j) })}>🧾 Create invoice for move {moveRef(data, j)}</Btn>)}
+        {!invs.length && !canInvoice.length && <div style={{ fontSize: 13, color: "#94A4A0" }}>No invoices yet. A move can be invoiced once it's telephone confirmed or confirmed.</div>}
+      </div>
+      {open && <InvoiceModal data={data} custId={c.id} invId={open.invId} draft={open.draft} onClose={() => setOpen(null)} />}
+    </>
+  );
+}
+function InvoicesHomeCard({ data, setView }) {
+  const role = CURRENT_USER.role;
+  if (role === "crew" || role === "viewer") return null;
+  const all = allInvoices(data).map(x => ({ ...x, t: invTotals(x.inv) }));
+  const overdue = all.filter(x => x.t.status === "Overdue");
+  const owed = all.reduce((s, x) => s + (x.t.status === "Cancelled" ? 0 : Math.max(0, x.t.balance)), 0);
+  const due = storageDue(data).length;
+  if (!all.length && !due) return null;
+  return (
+    <div onClick={() => setView({ screen: "invoices" })} style={{ background: "#fff", border: "1px solid #E3E9E8", borderRadius: 14, padding: "12px 14px", marginBottom: 14, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+      <div>
+        <div style={{ fontWeight: 800, fontSize: 15 }}>💷 Invoices</div>
+        <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2 }}>{gbpPlain(owed)} owed{overdue.length ? <span style={{ color: "#B91C1C", fontWeight: 800 }}> · {overdue.length} overdue</span> : ""}{due ? <span style={{ color: "#B45309", fontWeight: 800 }}> · {due} storage to invoice</span> : ""}</div>
+      </div>
+      <span style={{ fontSize: 13, fontWeight: 800, color: TEAL }}>Open ›</span>
+    </div>
+  );
+}
+function InvoicesView({ data, setView }) {
+  const [filter, setFilter] = useState("Owed");
+  const [open, setOpen] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [setOpenS, setSetOpenS] = useState(false);
+  const [sv, setSv] = useState(getInvSettings);
+  const all = allInvoices(data).map(x => ({ ...x, t: invTotals(x.inv) })).sort((a, b) => (b.inv.no || 0) - (a.inv.no || 0));
+  const due = storageDue(data);
+  const list = all.filter(x => filter === "All" ? true : filter === "Owed" ? ["Unpaid", "Part paid", "Overdue"].includes(x.t.status) : x.t.status === filter);
+  const sum = k => list.reduce((s, x) => s + (x.t.status === "Cancelled" ? 0 : x.t[k]), 0);
+  const ro = isReadOnly();
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h2 className="rm-page-title" style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Invoices</h2>
+        {!ro && <Btn size="sm" variant="grey" onClick={() => setSetOpenS(o => !o)}>⚙️ Numbering</Btn>}
+      </div>
+      {setOpenS && <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 8 }}>Next invoice number will be <b>{getInvSettings().prefix}{nextInvoiceNo(data)}</b>. Set the starting number to follow on from your current invoices (it can change once Sage is connected).</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}><Field label="Prefix" hint="optional"><Input value={sv.prefix} onChange={v => setSv(s => ({ ...s, prefix: v }))} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Start from"><Input value={String(sv.start)} onChange={v => setSv(s => ({ ...s, start: parseInt(v, 10) || 1 }))} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Pay within (days)"><Input value={String(sv.terms)} onChange={v => setSv(s => ({ ...s, terms: parseInt(v, 10) || 0 }))} /></Field></div>
+        </div>
+        <Btn onClick={() => { saveInvSettings(sv); setSetOpenS(false); }}>Save</Btn>
+      </Card>}
+      {due.length > 0 && <Card style={{ marginBottom: 12, background: "#FFFBEB", border: "1px solid #FDE68A" }}>
+        <div style={{ fontWeight: 800, fontSize: 15, color: "#92400E" }}>📦 {due.length} storage invoice{due.length !== 1 ? "s" : ""} to create</div>
+        <div style={{ fontSize: 12.5, color: "#92400E", margin: "4px 0 8px" }}>{due.slice(0, 6).map(d => `${d.c.ref ? d.c.ref + " " : ""}${d.c.name} · ${fmtUK(d.from)}–${fmtUK(d.to)} · ${gbpPlain(r2(d.sj.rate4w) * (1 + VAT_RATE))}`).join("\n").split("\n").map((l, i) => <div key={i}>{l}</div>)}{due.length > 6 ? <div>…and {due.length - 6} more</div> : null}</div>
+        {!ro && <Btn variant="amber" disabled={busy} onClick={async () => { if (!confirm(`Create ${due.length} storage invoice${due.length !== 1 ? "s" : ""}?`)) return; setBusy(true); await createStorageInvoices(data, due); }}>Create all</Btn>}
+      </Card>}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {["Owed", "Overdue", "Paid", "All"].map(k => <button key={k} onClick={() => setFilter(k)} style={{ padding: "7px 13px", borderRadius: 99, border: filter === k ? `2px solid ${TEAL}` : "1px solid #E3E9E8", background: filter === k ? "#E7F2F0" : "#fff", color: filter === k ? TEAL_D : "#43534F", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{k}</button>)}
+      </div>
+      <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 8 }}>{list.length} invoice{list.length !== 1 ? "s" : ""} · total {gbpPlain(sum("total"))}{filter !== "Paid" ? ` · balance ${gbpPlain(sum("balance"))}` : ""}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {list.map(x => <InvoiceRow key={x.inv.id} inv={x.inv} c={x.c} showCust onOpen={() => setOpen({ custId: x.c.id, invId: x.inv.id })} />)}
+        {!list.length && <div style={{ fontSize: 13.5, color: "#94A4A0", padding: "10px 2px" }}>Nothing here. Moves are invoiced from the customer's page (Invoices section) once telephone confirmed or confirmed.</div>}
+      </div>
+      {open && <InvoiceModal data={data} custId={open.custId} invId={open.invId} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
 function CustomerDetail({ data, id, setView }) {
   const c = (data.customers || []).find(x => x.id === id);
   const latestEnq = (data.enquiries || []).filter(x => x.customerId === id).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))[0];
@@ -6129,6 +6496,7 @@ function CustomerDetail({ data, id, setView }) {
           );
         })}
       </Card>
+      <CustomerInvoices data={data} c={c} />
       <HistoryList customerId={c.id} title="History of changes" />
     </div>
   );
@@ -7056,6 +7424,7 @@ function CompanyView({ data, setView, setData }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }} className="rm-company-grid">
         <Btn style={{ width: "100%", marginBottom: 0 }} onClick={() => setView({ screen: "reports" })}>📊 Reports — where leads come from &amp; what wins</Btn>
+        {CURRENT_USER.role !== "crew" && <Btn style={{ width: "100%", marginBottom: 0 }} onClick={() => setView({ screen: "invoices" })}>💷 Invoices — moves &amp; storage</Btn>}
         {LOGINS_ENABLED && <AccountCard />}
         <HistoryList title="Activity log (all changes)" />
 
@@ -9256,8 +9625,8 @@ function StorageJobForm({ data, customer, job, onClose }) {
   const linkedMove = moves.find(m => m.id === moveJobId) || (data.jobs || []).find(m => m.id === moveJobId) || null;
   const storeDay = linkedMove ? storeDayOf(linkedMove) : null;
   const [f, setF] = useState(() => job
-    ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "" }
-    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: (moves[0] && storeDayOf(moves[0]) && storeDayOf(moves[0]).date) || todayISO(), dateOut: "" });
+    ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "", rate4w: job.rate4w ?? "", billFrom: job.billFrom || "" }
+    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: (moves[0] && storeDayOf(moves[0]) && storeDayOf(moves[0]).date) || todayISO(), dateOut: "", rate4w: "", billFrom: "" });
   const [locs, setLocs] = useState(getStorageLocs);
   const [newLoc, setNewLoc] = useState("");
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -9265,7 +9634,10 @@ function StorageJobForm({ data, customer, job, onClose }) {
 
   async function save() {
     if (isNew && !moveJobId) { alert("Pick the confirmed move this storage is for."); return; }
-    const jrec = { ...(job || {}), id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", inStore: !f.dateOut, moveJobId: moveJobId || "", crew: (storeDay && storeDay.crew) || (job && job.crew) || [] };
+    // Storage is invoiced every 4 weeks from the date into store. Start billing from the current period unless set.
+    const curPeriod = (() => { if (!f.dateIn) return ""; let p = f.dateIn; while (addDaysISO(p, STORE_PERIOD) <= todayISO()) p = addDaysISO(p, STORE_PERIOD); return p; })();
+    const billFrom = Number(f.rate4w) > 0 ? (f.billFrom || curPeriod) : (f.billFrom || "");
+    const jrec = { ...(job || {}), id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", rate4w: Number(f.rate4w) || 0, billFrom, inStore: !f.dateOut, moveJobId: moveJobId || "", crew: (storeDay && storeDay.crew) || (job && job.crew) || [] };
     const existing = getStorageJobs(customer).map(j => ({ ...j, id: j.id === "legacy" ? uid() : j.id }));
     const jobs = existing.some(j => j.id === jrec.id) ? existing.map(j => j.id === jrec.id ? jrec : j) : [...existing, jrec];
     await saveAndReload(upsertLocal(data, "customers", { ...customer, storageJobs: jobs, storage: null }));
@@ -9297,6 +9669,11 @@ function StorageJobForm({ data, customer, job, onClose }) {
         </select>
       </Field>
       <Field label="Location of storage"><Select value={f.location} onChange={v => set("location", v)} options={locs} /></Field>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Storage charge per 4 weeks" hint="£ ex VAT"><Input value={String(f.rate4w ?? "")} onChange={v => set("rate4w", v)} placeholder="0.00" /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Invoice from" hint="blank = current 4 weeks"><Input type="date" value={f.billFrom} onChange={v => set("billFrom", v)} /></Field></div>
+      </div>
+      {Number(f.rate4w) > 0 && f.dateIn ? <div style={{ fontSize: 12, color: "#6A7B77", marginTop: -4, marginBottom: 10 }}>Invoiced in advance every 4 weeks from {fmtUK(f.dateIn)} · {gbpPlain(r2(f.rate4w) * (1 + VAT_RATE))} inc VAT each time. They appear under Invoices to create.</div> : null}
       <div style={{ display: "flex", gap: 8, margin: "0 0 10px", alignItems: "flex-end" }}>
         <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
         <Btn size="sm" onClick={addLoc} disabled={!newLoc.trim()}>Add location</Btn>
@@ -9485,7 +9862,7 @@ function StorageView({ data, setView }) {
 }
 
 // Page names shown in the green top bar on phones
-const PAGE_TITLES = { enquiries: "Enquiries", calendar: "Calendar", customers: "Customers", storage: "Storage", company: "Company", reports: "Reports" };
+const PAGE_TITLES = { enquiries: "Enquiries", calendar: "Calendar", customers: "Customers", storage: "Storage", company: "Company", reports: "Reports", invoices: "Invoices" };
 
 // ══ Logins & roles ═══════════════════════════════════════════════════════════
 // Remember the invite / password-reset link details before Supabase tidies the URL.
@@ -10303,7 +10680,7 @@ function MainApp() {
     ? <span style={{ position: "absolute", top: 4, left: "calc(50% + 6px)", minWidth: 18, height: 18, padding: "0 5px", borderRadius: 99, background: "#DC2626", color: "#fff", fontSize: 11, fontWeight: 800, lineHeight: "18px", textAlign: "center", boxShadow: "0 0 0 2px #fff" }}>{missedCount}</span>
     : null;
   const sectionKey = sectionFor(view.screen);
-  const activeTab = view.screen === "reports" ? "company" : ["dashboard", "calendar", "company", "storage"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
+  const activeTab = (view.screen === "reports" || view.screen === "invoices") ? "company" : ["dashboard", "calendar", "company", "storage"].includes(view.screen) ? view.screen : (sectionKey || "dashboard");
 
   const SyncDot = () => (
     <span title={syncStatus} style={{ width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
@@ -10320,6 +10697,7 @@ function MainApp() {
     if (view.screen === "reports") return (CURRENT_USER.role === "crew" ? null : <div><Btn variant="grey" size="sm" style={{ marginBottom: 12 }} onClick={() => setView({ screen: "company" })}>‹ Company</Btn><ReportsView data={data} /></div>);
     if (view.screen === "catalogue") return <CatalogueEditor catalog={catalog} onSave={applyCatalogEdit} setView={setView} />;
     if (view.screen === "storage") return <StorageView data={data} setView={setView} />;
+    if (view.screen === "invoices") return (CURRENT_USER.role === "crew" ? null : <InvoicesView data={data} setView={setView} />);
     if (view.screen === "storageIntake") return <StorageIntakeForm data={data} setView={setView} presetCustomerId={view.customerId} editRecId={view.editRecId} presetJobId={view.jobId} />;
     if (view.screen === "storageCollect") return <PartCollectionForm data={data} setView={setView} recId={view.recId} />;
     if (view.screen === "storageJob") return <StorageJobDetail data={data} setView={setView} customerId={view.customerId} jobId={view.jobId} />;
