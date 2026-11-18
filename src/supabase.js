@@ -25,6 +25,9 @@ const customerToDb = c => {
   // Extra contacts (husband, partner…). Only sent once a customer has some, so
   // nothing changes for everyone else.
   if (Array.isArray(c.contacts) && (c.contacts.length || c.contactsCleared)) o.contacts = c.contacts;
+  // Invoices (moves & storage). Only sent for customers that have had one — needs the
+  // "invoices" column (add-invoices.sql).
+  if (Array.isArray(c.invoices)) o.invoices = c.invoices;
   return o;
 };
 const customerFromDb = r => ({
@@ -32,6 +35,7 @@ const customerFromDb = r => ({
   address1: r.address1, address2: r.address2, town: r.town, county: r.county,
   postcode: r.postcode, custType: r.cust_type || "Private", ref: r.ref || null, notes: r.notes, contacts: Array.isArray(r.contacts) && r.contacts.length ? r.contacts : undefined, contactsCleared: Array.isArray(r.contacts) && !r.contacts.length ? true : undefined,
   storage: r.storage || null, storageJobs: r.storage_jobs || null, move: r.move || null, storageInv: r.storage_inv || null, comms: r.comms || null, followUpDate: r.follow_up_date || "", followUpNote: r.follow_up_note || "", followUpTime: r.follow_up_time || "",
+  invoices: Array.isArray(r.invoices) ? r.invoices : undefined,
   updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
 });
 
