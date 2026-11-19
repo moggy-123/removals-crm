@@ -42,19 +42,33 @@ function setRefStart(n) { localStorage.setItem(REF_KEY, String(parseInt(n, 10) |
 const STORLOC_KEY = "removals_storage_locs";
 function getStorageLocs() { try { const a = JSON.parse(localStorage.getItem(STORLOC_KEY) || "null"); return Array.isArray(a) && a.length ? a : ["Wild & Lye"]; } catch { return ["Wild & Lye"]; } }
 // A customer can have several storage jobs. Migrate an old single `storage` object into one job.
+// Storage dates come from the move plan: into-store day = date in, out-of-store day = date out
+let LIVE_JOBS = [];
+function planStoreDates(job) {
+  const st = jobStages(job);
+  const out = st.find(isOutDay);
+  const into = st.find(x => /into stor|to stor/i.test(x.type || "") && !isOutDay(x)) || st.filter(x => x.date && !isOutDay(x)).sort((a, b) => a.date.localeCompare(b.date))[0];
+  return { dateIn: (into && into.date) || "", dateOut: out ? (out.date || "") : null };
+}
+function withPlanDates(sj) {
+  const mv = sj && sj.moveJobId ? LIVE_JOBS.find(j => j.id === sj.moveJobId) : null;
+  if (!mv) return sj;
+  const p = planStoreDates(mv);
+  return { ...sj, dateIn: p.dateIn || sj.dateIn, dateOut: p.dateOut === null ? sj.dateOut : p.dateOut, fromPlan: true };
+}
 function getStorageJobs(c) {
-  if (Array.isArray(c && c.storageJobs)) return c.storageJobs;
+  if (Array.isArray(c && c.storageJobs)) return c.storageJobs.map(withPlanDates);
   const s = c && c.storage;
   if (s && (s.inStore || s.location || s.value || s.containers)) return [{ id: "legacy", dateIn: s.dateIn || "", dateOut: s.dateOut || "", containers: s.containers || 0, containerNos: s.containerNos || [], looseItems: !!s.looseItems, looseNote: s.looseNote || "", location: s.location || "", value: s.value || 0, inStore: s.dateOut ? false : !!s.inStore }];
   return [];
 }
-const jobInStore = j => !!j && !j.dateOut;
+const jobInStore = j => !!j && (!j.dateOut || j.dateOut > todayISO());
 // A customer qualifies for a storage job only once a quote is accepted (job Confirmed/Completed)
 // and that move involves going into store.
 function customerHasStorageMove(data, customerId) {
   return (data.jobs || []).some(j => {
     if (j.customerId !== customerId) return false;
-    if (!["Confirmed", "Completed"].includes(j.status)) return false;
+    if (!["Confirmed", "In Store", "Completed"].includes(j.status)) return false;
     const stageStore = jobStages(j).some(s => /store/i.test(s.type || ""));
     const enqStore = (data.enquiries || []).some(e => e.id === j.enquiryId && e.toStore);
     return stageStore || enqStore;
@@ -120,12 +134,12 @@ function nextCustomerRef(data) { return Math.max(getRefStart(), maxCustomerRef(d
 const TEAL = "#0E7C73", TEAL_D = "#0B5F58", NAVY = "#0F2E2A", AMBER = "#F59E0B";
 
 const ENQUIRY_STATUSES = ["New", "Surveyed", "Quoted", "Won", "Lost", "Not quoted", "Let Go"];
-const JOB_STATUSES = ["Provisional", "Telephone Confirmed", "Confirmed", "Completed", "Let Go"];
+const JOB_STATUSES = ["Provisional", "Telephone Confirmed", "Confirmed", "In Store", "Completed", "Let Go"];
 // Customer has rung to say it's definite, deposit not in yet
 const TEL_CONF = "Telephone Confirmed";
 const isPencilled = st => st === "Provisional" || st === TEL_CONF; // booked but not yet confirmed (no deposit)
 // Telephone confirmed and confirmed moves have their crew & vans named, and hold them in availability
-const RES_STATUSES = ["Telephone Confirmed", "Confirmed", "Completed"];
+const RES_STATUSES = ["Telephone Confirmed", "Confirmed", "In Store", "Completed"];
 const holdsResources = st => RES_STATUSES.includes(st);
 // "Out of store" days are usually dated later, when the customer's ready — they don't need a date (or crew) to book
 const isOutDay = st => /out of stor|from stor|ex[- ]?stor|redeliver/i.test((st && st.type) || "");
@@ -170,7 +184,7 @@ function takenOnDate(data, date, exceptJobId) {
   return { veh, crew };
 }
 // Calendar colours (all views): quotes red, provisional yellow, telephone confirmed purple, confirmed blue, vehicle green, staff holiday orange
-const CAL_COL = { quote: "#DC2626", Provisional: "#EAB308", "Telephone Confirmed": "#7C3AED", Confirmed: "#2563EB", Completed: "#94A3B8", vehicle: "#16A34A", staff: "#EA580C" };
+const CAL_COL = { quote: "#DC2626", Provisional: "#EAB308", "Telephone Confirmed": "#7C3AED", Confirmed: "#2563EB", "In Store": "#2563EB", Completed: "#94A3B8", vehicle: "#16A34A", staff: "#EA580C" };
 const PROPERTY_TYPES = ["Detached house", "Semi-detached house", "Terraced house", "End of terrace house", "Townhouse", "Cottage", "House",
   "Detached bungalow", "Semi-detached bungalow", "Bungalow", "Flat / Apartment", "Maisonette", "Farmhouse", "Barn conversion",
   "Mobile / park home", "Office", "Commercial unit", "Storage Unit", "Other"];
@@ -216,6 +230,7 @@ const STATUS_META = {
   Lost:        { color: "#DC2626", bg: "#FEF2F2" },
   Provisional: { color: "#CA8A04", bg: "#FEFCE8" },
   "Telephone Confirmed": { color: "#7C3AED", bg: "#F5F3FF" },
+  "In Store": { color: "#4F46E5", bg: "#EEF2FF" },
   "No date provisional": { color: "#C2410C", bg: "#FFF7ED" },
   Confirmed:   { color: "#2563EB", bg: "#EFF6FF" },
   Booked:      { color: "#2563EB", bg: "#EFF6FF" },
@@ -1243,7 +1258,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B276";
+const BUILD_NO = "B277";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1727,10 +1742,14 @@ function autoCompletePastMoves(d) {
   const todayIso = todayISO();
   let changed = false;
   const jobs = (d.jobs || []).map(j => {
-    if (j.status === "Completed" || isPencilled(j.status)) return j;
-    const dates = jobStages(j).map(s => s.date).filter(Boolean);
-    if (dates.length && dates.every(dt => dt < todayIso)) { changed = true; return { ...j, status: "Completed", balancePaid: true }; }
-    return j;
+    if (j.status === "Completed" || isPencilled(j.status) || j.status === "Let Go") return j;
+    const st = jobStages(j);
+    const dates = st.map(s => s.date).filter(Boolean);
+    if (!dates.length || !dates.every(dt => dt < todayIso)) return j;
+    // Gone into store but not out yet (out-of-store day not dated, or still to come) → "In Store", not completed
+    const out = st.find(isOutDay);
+    if (out && (!out.date || out.date >= todayIso)) { if (j.status === "In Store") return j; changed = true; return { ...j, status: "In Store" }; }
+    changed = true; return { ...j, status: "Completed", balancePaid: true };
   });
   return changed ? { ...d, jobs } : d;
 }
@@ -6305,7 +6324,7 @@ function CustomerInvoices({ data, c }) {
   const role = CURRENT_USER.role;
   if (role === "crew") return null;
   const invs = (c.invoices || []).slice().sort((a, b) => (b.no || 0) - (a.no || 0));
-  const canInvoice = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "Completed"].includes(j.status))
+  const canInvoice = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "In Store", "Completed"].includes(j.status))
     .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))
     // the out-of-store invoice is only offered once the into-store one exists
     .filter(x => x.pt !== "out" || moveInvoiceFor(data, c, x.j, "in"));
@@ -6421,7 +6440,7 @@ function InvoicesView({ data, setView }) {
       {review && <StorageInvoiceReview data={data} due={due} onClose={() => setReview(false)} />}
       {picker && <NewInvoicePicker data={data} onClose={() => setPicker(false)} onPick={c => {
         setPicker(false);
-        const opt = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "Completed"].includes(j.status)).sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || ""))
+        const opt = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "In Store", "Completed"].includes(j.status)).sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || ""))
           .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))[0];
         const draft = opt ? buildMoveInvoice(data, c, opt.j, opt.pt) : { id: uid(), no: nextInvoiceNo(data), kind: "other", date: todayISO(), due: addDaysISO(todayISO(), Number(getInvSettings().terms) || 7), title: "", lines: [{ desc: "", amount: "" }], vat: true, payments: [], notes: "", createdAt: new Date().toISOString() };
         setOpen({ custId: c.id, draft });
@@ -7099,7 +7118,7 @@ function pickLostReason(current, opts = {}) {
   });
 }
 
-const WON_JOB = ["Confirmed", "Booked", "In Progress", "Completed"];
+const WON_JOB = ["Confirmed", "Booked", "In Progress", "In Store", "Completed"];
 function enquiryOutcome(data, e) {
   const jobs = (data.jobs || []).filter(j => j.enquiryId === e.id && j.status !== "Let Go");
   const wonJob = jobs.find(j => WON_JOB.includes(j.status));
@@ -9803,7 +9822,7 @@ function PartCollectionForm({ data, setView, recId }) {
 }
 
 // Storage jobs can only be added against a CONFIRMED move that's booked in the calendar.
-const BOOKED_MOVE_STATUSES = ["Confirmed", "In Progress", "Completed"];
+const BOOKED_MOVE_STATUSES = ["Confirmed", "In Progress", "In Store", "Completed"];
 function bookedMovesFor(data, customerId) {
   // ...and the move must be a storage job: "Moving into store" ticked on the enquiry, or an "Into store" day in the move plan.
   const isStorage = j => jobStages(j).some(st => /store/i.test(st.type || "")) || (data.enquiries || []).some(e => e.id === j.enquiryId && e.toStore);
@@ -9820,6 +9839,7 @@ function StorageJobForm({ data, customer, job, onClose }) {
   const [moveJobId, setMoveJobId] = useState(() => (job ? job.moveJobId || "" : (moves[0] && moves[0].id) || ""));
   const linkedMove = moves.find(m => m.id === moveJobId) || (data.jobs || []).find(m => m.id === moveJobId) || null;
   const storeDay = linkedMove ? storeDayOf(linkedMove) : null;
+  const planD = linkedMove ? planStoreDates(linkedMove) : null;
   const [f, setF] = useState(() => job
     ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "", rate4w: job.rate4w ?? "", billFrom: job.billFrom || "", mpCover: !!job.mpCover }
     : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: (moves[0] && storeDayOf(moves[0]) && storeDayOf(moves[0]).date) || todayISO(), dateOut: "", rate4w: "", billFrom: "", mpCover: false });
@@ -9834,9 +9854,10 @@ function StorageJobForm({ data, customer, job, onClose }) {
   async function save() {
     if (isNew && !moveJobId) { alert("Pick the confirmed move this storage is for."); return; }
     // Storage is invoiced every 4 weeks from the date into store. Start billing from the current period unless set.
-    const curPeriod = (() => { if (!f.dateIn) return ""; let p = f.dateIn; while (addDaysISO(p, STORE_PERIOD) <= todayISO()) p = addDaysISO(p, STORE_PERIOD); return p; })();
+    const dIn = (planD && planD.dateIn) || f.dateIn || "", dOut = planD && planD.dateOut !== null ? planD.dateOut : (f.dateOut || "");
+    const curPeriod = (() => { if (!dIn) return ""; let p = dIn; while (addDaysISO(p, STORE_PERIOD) <= todayISO()) p = addDaysISO(p, STORE_PERIOD); return p; })();
     const billFrom = Number(f.rate4w) > 0 ? (f.billFrom || curPeriod) : (f.billFrom || "");
-    const jrec = { ...(job || {}), id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", rate4w: Number(f.rate4w) || 0, billFrom, mpCover: !!f.mpCover, inStore: !f.dateOut, moveJobId: moveJobId || "", crew: (storeDay && storeDay.crew) || (job && job.crew) || [] };
+    const jrec = { ...(job || {}), id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: dIn, dateOut: dOut, rate4w: Number(f.rate4w) || 0, billFrom, mpCover: !!f.mpCover, inStore: !dOut || dOut > todayISO(), moveJobId: moveJobId || "", crew: (storeDay && storeDay.crew) || (job && job.crew) || [] };
     const existing = getStorageJobs(customer).map(j => ({ ...j, id: j.id === "legacy" ? uid() : j.id }));
     const jobs = existing.some(j => j.id === jrec.id) ? existing.map(j => j.id === jrec.id ? jrec : j) : [...existing, jrec];
     await saveAndReload(upsertLocal(data, "customers", { ...customer, storageJobs: jobs, storage: null }));
@@ -9884,8 +9905,8 @@ function StorageJobForm({ data, customer, job, onClose }) {
       </div>
       <Field label="Storage value (£)"><Input type="number" inputMode="decimal" value={f.value} onChange={v => set("value", v)} /></Field>
       <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><Field label="Date into store"><Input type="date" value={f.dateIn} onChange={v => set("dateIn", v)} /></Field></div>
-        <div style={{ flex: 1 }}><Field label="Date out" hint="Blank while in store"><Input type="date" value={f.dateOut} onChange={v => set("dateOut", v)} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Date into store" hint={planD && planD.dateIn ? "from move plan" : undefined}>{planD && planD.dateIn ? <div style={{ ...inputStyle, background: "#F3F6F5", color: "#43534F" }}>{fmtUK(planD.dateIn)}</div> : <Input type="date" value={f.dateIn} onChange={v => set("dateIn", v)} />}</Field></div>
+        <div style={{ flex: 1 }}><Field label="Date out" hint={planD && planD.dateOut !== null ? "from move plan" : "Blank while in store"}>{planD && planD.dateOut !== null ? <div style={{ ...inputStyle, background: "#F3F6F5", color: planD.dateOut ? "#43534F" : "#94A4A0" }}>{planD.dateOut ? fmtUK(planD.dateOut) : "Set in move plan"}</div> : <Input type="date" value={f.dateOut} onChange={v => set("dateOut", v)} />}</Field></div>
       </div>
       <div style={{ fontSize: 12, color: "#9CA3AF", margin: "0 0 10px" }}>Container count and loose items are worked out automatically from this job's inventory sheets.</div>
       <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
@@ -10668,7 +10689,7 @@ function CrewApp() {
   const today = todayISO();
   const me = (CURRENT_USER.staffName || "").trim().toLowerCase();
   const mine = !me ? [] : (data.jobs || [])
-    .filter(j => ["Confirmed", "Completed", "Booked", "In Progress"].includes(j.status))
+    .filter(j => ["Confirmed", "In Store", "Completed", "Booked", "In Progress"].includes(j.status))
     .flatMap(j => jobStages(j).filter(st => st.date === today && (st.crew || []).some(c => String(c).trim().toLowerCase() === me)).map(st => ({ j, st })))
     .sort((a, b) => (a.st.time || "99").localeCompare(b.st.time || "99"));
   return (
@@ -10871,6 +10892,7 @@ function MainApp() {
 
   const setView = useCallback((v) => { try { sessionStorage.setItem("removals_view", JSON.stringify(v)); } catch {} setViewState(v); setData(loadData()); }, []);
 
+  LIVE_JOBS = data.jobs || [];
   const NAV = [
     { id: "dashboard", icon: "dashboard", label: "Dashboard", phone: "Home" },
     { id: "enquiries", icon: "enquiries", label: "Enquiries", phone: "Enquiries" },
