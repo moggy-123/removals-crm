@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B295";
+const BUILD_NO = "B296";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6316,6 +6316,20 @@ function storagePeriodsDue(job, upTo, rateOverride) {
   }
   return out;
 }
+// The next 4 weeks of storage not yet invoiced: its start date is when that invoice is due (null once they've come out)
+function nextStorageInvoice(c, sj) {
+  if (!sj || !sj.dateIn) return null;
+  const startBill = sj.billFrom || sj.dateIn;
+  for (let k = 0; k < 400; k++) {
+    const from = addDaysISO(sj.dateIn, k * STORE_PERIOD);
+    if (sj.dateOut && from >= sj.dateOut) return null;
+    const to = addDaysISO(from, STORE_PERIOD - 1);
+    if (to < startBill) continue;
+    if ((c.invoices || []).some(x => x.kind === "storage" && x.storageJobId === sj.id && x.periodFrom === from && !x.void)) continue;
+    return { from, to };
+  }
+  return null;
+}
 function storageDue(data, waiting) {
   const today = todayISO(), due = [];
   (data.customers || []).forEach(c => {
@@ -10488,7 +10502,17 @@ function StorageView({ data, setView }) {
                       {jobLoose(c, j).any ? " · loose items" : ""}
                     </div>
                   </div>
-                  <div style={{ fontWeight: 700, color: "#10211E", flexShrink: 0 }}>{Number(j.value) ? money(j.value) : ""}</div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontWeight: 700, color: "#10211E" }}>{Number(j.value) ? money(j.value) : ""}</div>
+                    {(() => {
+                      const nx = nextStorageInvoice(c, j);
+                      if (!nx) return null;
+                      const today = todayISO(), due = nx.from <= today, soon = !due && nx.from <= addDaysISO(today, 7);
+                      return <div style={{ fontSize: 11.5, fontWeight: 800, marginTop: 3, borderRadius: 999, padding: "2px 8px", color: due ? "#B91C1C" : soon ? "#B45309" : "#0F766E", background: due ? "#FEE2E2" : soon ? "#FFF3DC" : "#E8F5F3", whiteSpace: "nowrap" }}>
+                        🧾 {due ? `Invoice due ${fmtUK(nx.from).slice(0, 5)}` : `Next invoice ${fmtUK(nx.from).slice(0, 5)}`}
+                      </div>;
+                    })()}
+                  </div>
                 </div>
               </Card>
             ))}
