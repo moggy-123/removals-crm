@@ -209,8 +209,10 @@ export async function pushToCloud(data) {
 // Push ONE record (fast single saves)
 export async function pushOne(table, record) {
   const row = MAP_TO_DB[table](record);
-  const send = r => Promise.race([supabase.from(table).upsert(r), new Promise((_, rej) => setTimeout(() => rej(new Error("request timed out")), 12000))]);
-  const { error } = await send(row);
+  const send = r => Promise.race([supabase.from(table).upsert(r), new Promise((_, rej) => setTimeout(() => rej(new Error("request timed out")), 30000))]); // weak signal + big record (inventory, signatures) needs time
+  let res;
+  try { res = await send(row); } catch (e) { res = await send(row); } // one retry on a timeout
+  const { error } = res;
   if (!error) return;
   const msg = error.message || error.details || error.hint || JSON.stringify(error);
   // Database not updated yet for extra contacts: save everything else, then report it.
