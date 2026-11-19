@@ -1240,7 +1240,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B273";
+const BUILD_NO = "B274";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5915,26 +5915,50 @@ async function saveInvoice(data, custId, inv, remove) {
   await saveAndReload(upsertLocal(cur, "customers", { ...c, invoices: next }));
 }
 // ── Move invoice: one invoice for the whole move, lines from the quote, deposit shown as paid
-function moveInvoiceFor(data, c, j) { return (c.invoices || []).find(x => x.kind === "move" && x.jobId === j.id && !x.void); }
-function buildMoveInvoice(data, c, j) {
+// part: "all" (normal move), "in" (into store — out-of-store charge left off) or "out" (out-of-store charge, when they come out)
+function moveInvoiceFor(data, c, j, part) { return (c.invoices || []).find(x => x.kind === "move" && x.jobId === j.id && !x.void && (x.part || "all") === (part || "all")); }
+const OUT_RE = /out of stor|from stor|ex[- ]?stor|out of the stor|redeliver|deliver\w* (?:back )?from|leaving stor|store out|storage out/i;
+// Quote lines split into "into store" and "out of store" charges (by wording, or by the matching move-plan day)
+function splitStoreLines(e) {
+  const lines = e && Array.isArray(e.quoteLines) ? e.quoteLines.filter(l => l.desc || Number(l.amount)) : [];
+  const days = (e && e.stages) || [];
+  const isOut = (l, i) => OUT_RE.test(l.desc || "") || OUT_RE.test((days[i] && days[i].type) || "");
+  return { inLines: lines.filter((l, i) => !isOut(l, i)), outLines: lines.filter((l, i) => isOut(l, i)) };
+}
+function moveInvoiceParts(data, j) {
   const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
-  const days = jobStages(j).filter(st => st.date).map(st => st.date).sort();
+  return splitStoreLines(e).outLines.length ? ["in", "out"] : ["all"];
+}
+function buildMoveInvoice(data, c, j, part = "all") {
+  const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
+  const stagesAll = jobStages(j);
+  const outIdx = i => OUT_RE.test((stagesAll[i] && stagesAll[i].type) || "");
+  const st = stagesAll.filter((x, i) => part === "all" ? true : part === "out" ? outIdx(i) : !outIdx(i));
+  const days = st.filter(x => x.date).map(x => x.date).sort();
   const first = days[0] || "", last = days[days.length - 1] || "";
-  const from = e ? (e.fromTown || e.fromPostcode || "") : "", to = e ? (e.toStore ? "store" : (e.toTown || e.toPostcode || "")) : "";
+  const from = e ? (e.fromTown || e.fromPostcode || "") : "", to = e ? (e.toTown || e.toPostcode || "") : "";
   const when = first ? (first === last ? fmtUK(first) : `${fmtUK(first)} – ${fmtUK(last)}`) : "";
-  let lines = e && Array.isArray(e.quoteLines) ? e.quoteLines.filter(l => l.desc || Number(l.amount)).map(l => ({ desc: l.desc || "Removal services", amount: r2(l.amount) })) : [];
   const vat = e ? e.quoteVat !== false : true;
-  const quotedTotal = r2(lines.reduce((s, l) => s + l.amount, 0) * (vat ? 1 + VAT_RATE : 1));
+  const sp = splitStoreLines(e);
+  let lines = (part === "in" ? sp.inLines : part === "out" ? sp.outLines : [...sp.inLines, ...sp.outLines]).map(l => ({ desc: l.desc || "Removal services", amount: r2(l.amount) }));
+  const quotedTotal = r2([...sp.inLines, ...sp.outLines].reduce((s2, l) => s2 + (Number(l.amount) || 0), 0) * (vat ? 1 + VAT_RATE : 1));
   // price on the move differs from the quote (or no quote lines): one line for the move price
-  if (!lines.length || (Number(j.price) && Math.abs(quotedTotal - Number(j.price)) > 0.5)) lines = [{ desc: "Removal services", amount: r2((Number(j.price) || 0) / (vat ? 1 + VAT_RATE : 1)) }];
+  if (part === "all" && (!lines.length || (Number(j.price) && Math.abs(quotedTotal - Number(j.price)) > 0.5))) lines = [{ desc: "Removal services", amount: r2((Number(j.price) || 0) / (vat ? 1 + VAT_RATE : 1)) }];
   const today = todayISO();
-  const payments = j.depositPaid && Number(j.deposit) > 0 ? [{ id: uid(), date: today, amount: r2(j.deposit), method: "Deposit" }] : [];
-  // move out of store: credit any storage paid for after the date out
-  if (first) storageCredits(c).forEach(cr => { if (Math.abs(daysBetween(cr.dateOut, first)) <= 14) lines = [...lines, cr.line]; });
+  // the deposit is taken off the into-store invoice (any left over goes on the out-of-store one)
+  const net = lines.reduce((s2, l) => s2 + l.amount, 0), gross = r2(net * (vat ? 1 + VAT_RATE : 1));
+  const dep = j.depositPaid ? r2(j.deposit) : 0;
+  const inv1 = part === "out" ? (c.invoices || []).find(x => x.kind === "move" && x.jobId === j.id && x.part === "in" && !x.void) : null;
+  const depUsed = inv1 ? (inv1.payments || []).filter(p => p.method === "Deposit").reduce((s2, p) => s2 + (Number(p.amount) || 0), 0) : 0;
+  const depHere = part === "out" ? Math.max(0, r2(dep - depUsed)) : part === "in" ? Math.min(dep, gross) : dep;
+  const payments = depHere > 0 ? [{ id: uid(), date: today, amount: r2(Math.min(depHere, gross)), method: "Deposit" }] : [];
+  // coming out of store: credit any storage paid for after the date out
+  if (part === "out") storageCredits(c).forEach(cr => { lines = [...lines, cr.line]; });
+  else if (first) storageCredits(c).forEach(cr => { if (Math.abs(daysBetween(cr.dateOut, first)) <= 14) lines = [...lines, cr.line]; });
   return {
-    id: uid(), no: nextInvoiceNo(data), kind: "move", jobId: j.id, date: today,
+    id: uid(), no: nextInvoiceNo(data), kind: "move", jobId: j.id, part, date: today,
     due: first && first > today ? first : addDaysISO(today, Number(getInvSettings().terms) || 7),
-    title: `Removal${when ? " " + when : ""}${from || to ? ` · ${[from, to].filter(Boolean).join(" to ")}` : ""}`,
+    title: part === "out" ? `Delivery out of store${when ? " " + when : ""}${to ? ` · to ${to}` : ""}` : part === "in" ? `Removal into store${when ? " " + when : ""}${from ? ` · from ${from}` : ""}` : `Removal${when ? " " + when : ""}${from || to ? ` · ${[from, e && e.toStore ? "store" : to].filter(Boolean).join(" to ")}` : ""}`,
     lines, vat, payments, notes: "", createdAt: new Date().toISOString(),
   };
 }
@@ -6212,14 +6236,17 @@ function CustomerInvoices({ data, c }) {
   const role = CURRENT_USER.role;
   if (role === "crew") return null;
   const invs = (c.invoices || []).slice().sort((a, b) => (b.no || 0) - (a.no || 0));
-  const canInvoice = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "Completed"].includes(j.status) && !moveInvoiceFor(data, c, j));
+  const canInvoice = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "Completed"].includes(j.status))
+    .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))
+    // the out-of-store invoice is only offered once the into-store one exists
+    .filter(x => x.pt !== "out" || moveInvoiceFor(data, c, x.j, "in"));
   const owed = invs.reduce((s, i) => s + Math.max(0, invTotals(i).balance), 0);
   return (
     <>
       <SectionTitle>Invoices{owed > 0.004 ? ` · ${gbpPlain(owed)} owed` : ""}</SectionTitle>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
         {invs.map(inv => <InvoiceRow key={inv.id} inv={inv} c={c} onOpen={() => setOpen({ invId: inv.id })} />)}
-        {!isReadOnly() && canInvoice.map(j => <Btn key={j.id} variant="grey" onClick={() => setOpen({ draft: buildMoveInvoice(data, c, j) })}>🧾 Create invoice for move {moveRef(data, j)}</Btn>)}
+        {!isReadOnly() && canInvoice.map(({ j, pt }) => <Btn key={j.id + pt} variant="grey" onClick={() => setOpen({ draft: buildMoveInvoice(data, c, j, pt) })}>🧾 {pt === "out" ? `Create out-of-store invoice for move ${moveRef(data, j)}` : pt === "in" ? `Create into-store invoice for move ${moveRef(data, j)}` : `Create invoice for move ${moveRef(data, j)}`}</Btn>)}
         {!invs.length && !canInvoice.length && <div style={{ fontSize: 13, color: "#94A4A0" }}>No invoices yet. A move can be invoiced once it's telephone confirmed or confirmed.</div>}
       </div>
       {open && <InvoiceModal data={data} custId={c.id} invId={open.invId} draft={open.draft} onClose={() => setOpen(null)} />}
@@ -6323,8 +6350,9 @@ function InvoicesView({ data, setView }) {
       {open && <InvoiceModal data={data} custId={open.custId} invId={open.invId} draft={open.draft} onClose={() => setOpen(null)} />}
       {picker && <NewInvoicePicker data={data} onClose={() => setPicker(false)} onPick={c => {
         setPicker(false);
-        const job = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "Completed"].includes(j.status) && !moveInvoiceFor(data, c, j)).sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || ""))[0];
-        const draft = job ? buildMoveInvoice(data, c, job) : { id: uid(), no: nextInvoiceNo(data), kind: "other", date: todayISO(), due: addDaysISO(todayISO(), Number(getInvSettings().terms) || 7), title: "", lines: [{ desc: "", amount: "" }], vat: true, payments: [], notes: "", createdAt: new Date().toISOString() };
+        const opt = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "Completed"].includes(j.status)).sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || ""))
+          .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))[0];
+        const draft = opt ? buildMoveInvoice(data, c, opt.j, opt.pt) : { id: uid(), no: nextInvoiceNo(data), kind: "other", date: todayISO(), due: addDaysISO(todayISO(), Number(getInvSettings().terms) || 7), title: "", lines: [{ desc: "", amount: "" }], vat: true, payments: [], notes: "", createdAt: new Date().toISOString() };
         setOpen({ custId: c.id, draft });
       }} />}
     </div>
@@ -7819,7 +7847,7 @@ function StaffForm({ data, onClose, editStaff }) {
   );
 }
 
-const DEFAULT_DAY_TYPES = ["Move", "Full Pack", "7 Hour Pack", "Load", "Unload", "Load Travel (Night Out)", "Into store"];
+const DEFAULT_DAY_TYPES = ["Move", "Full Pack", "7 Hour Pack", "Load", "Unload", "Load Travel (Night Out)", "Into store", "Out of store"];
 const PLAN_VEHICLE_TYPES = ["18t", "7.5t", "3.5t", "Van"];
 function vehTypesSummary(m) {
   if (!m) return "";
