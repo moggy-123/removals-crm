@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B296";
+const BUILD_NO = "B297";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6310,9 +6310,12 @@ function storagePeriodsDue(job, upTo, rateOverride) {
     const from = addDaysISO(job.dateIn, k * STORE_PERIOD);
     if (from > upTo) break;
     if (job.dateOut && from >= job.dateOut) break;
-    const to = addDaysISO(from, STORE_PERIOD - 1);
-    if (to < startBill) continue;
-    out.push({ from, to });
+    const full = addDaysISO(from, STORE_PERIOD - 1);
+    if (full < startBill) continue;
+    // coming out part-way through: the last invoice stops at the out-of-store date, charged per week (part week = a week)
+    const to = job.dateOut && job.dateOut < full ? job.dateOut : full;
+    const weeks = to === full ? 4 : Math.min(4, Math.max(1, Math.ceil((daysBetween(from, to) + 1) / 7)));
+    out.push({ from, to, weeks });
   }
   return out;
 }
@@ -6323,10 +6326,10 @@ function nextStorageInvoice(c, sj) {
   for (let k = 0; k < 400; k++) {
     const from = addDaysISO(sj.dateIn, k * STORE_PERIOD);
     if (sj.dateOut && from >= sj.dateOut) return null;
-    const to = addDaysISO(from, STORE_PERIOD - 1);
-    if (to < startBill) continue;
+    const full = addDaysISO(from, STORE_PERIOD - 1);
+    if (full < startBill) continue;
     if ((c.invoices || []).some(x => x.kind === "storage" && x.storageJobId === sj.id && x.periodFrom === from && !x.void)) continue;
-    return { from, to };
+    return { from, to: sj.dateOut && sj.dateOut < full ? sj.dateOut : full };
   }
   return null;
 }
@@ -6340,7 +6343,7 @@ function storageDue(data, waiting) {
       const periods = storagePeriodsDue(sj, today, ri.rate || 1).filter(p => !(c.invoices || []).some(x => x.kind === "storage" && x.storageJobId === sj.id && x.periodFrom === p.from && !x.void));
       if (!periods.length) return;
       if (ri.used == null) { if (waiting) waiting.push({ c, sj, n: periods.length }); return; }
-      periods.forEach(p => due.push({ c, sj, ...p, rate: ri.rate, weekly: ri.weekly, containers: ri.containers }));
+      periods.forEach(p => due.push({ c, sj, ...p, rate: p.weeks < 4 ? r2(ri.rate * p.weeks / 4) : ri.rate, rate4: ri.rate, weekly: ri.weekly, containers: ri.containers }));
     });
   });
   return due.sort((a, b) => a.from.localeCompare(b.from));
@@ -6366,6 +6369,7 @@ function storageCredits(c, exceptInvId) {
     return amt > 0 ? { sjId: sj.id, amount: amt, days, dateOut: sj.dateOut, line: { desc: `Credit: storage paid in advance, ${days} unused day${days !== 1 ? "s" : ""} after ${fmtUK(sj.dateOut)}`, amount: -amt, extra: "sc", sjId: sj.id } } : null;
   }).filter(Boolean);
 }
+const wk = d => Number(d && d.weeks) || 4; // weeks on a storage invoice (less than 4 for the last one when they come out)
 function buildStorageInvoice(no, d) {
   return {
     id: uid(), no, kind: "storage", storageJobId: d.sj.id, periodFrom: d.from, periodTo: d.to,
@@ -6373,8 +6377,8 @@ function buildStorageInvoice(no, d) {
     date: d.invDate || d.from, due: (d.invDate || d.from) > todayISO() ? (d.invDate || d.from) : todayISO(),
     title: `Storage ${fmtUK(d.from)} – ${fmtUK(d.to)}`,
     lines: [
-      { desc: `Storage${Number(d.containers) ? `, ${d.containers} container${Number(d.containers) !== 1 ? "s" : ""}` : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.rate ?? d.sj.rate4w) },
-      ...(storeMpAmount(d.mpSj || d.sj) > 0 ? [{ desc: `MoveProtect storage cover, goods valued ${gbpPlain((d.mpSj || d.sj).value)} @ 0.1% per week × 4 weeks`, amount: storeMpAmount(d.mpSj || d.sj), extra: "mp" }] : []),
+      { desc: `Storage${Number(d.containers) ? `, ${d.containers} container${Number(d.containers) !== 1 ? "s" : ""}` : ""}, ${wk(d)} week${wk(d) !== 1 ? "s" : ""} ${fmtUK(d.from)} – ${fmtUK(d.to)}${wk(d) < 4 ? " (out of store " + fmtUK(d.to) + ")" : ""}`, amount: r2(d.rate ?? d.sj.rate4w) },
+      ...(storeMpAmount(d.mpSj || d.sj) > 0 ? [{ desc: `MoveProtect storage cover, goods valued ${gbpPlain((d.mpSj || d.sj).value)} @ 0.1% per week × ${wk(d)} week${wk(d) !== 1 ? "s" : ""}`, amount: r2(storeMpAmount(d.mpSj || d.sj) * wk(d) / 4), extra: "mp" }] : []),
     ],
     vat: true, payments: [], notes: "", createdAt: new Date().toISOString(),
   };
@@ -6385,7 +6389,7 @@ async function createStorageInvoices(data, list) {
   const jobUpd = {};
   list.forEach(d => {
     (byCust[d.c.id] = byCust[d.c.id] || []).push(buildStorageInvoice(no++, d));
-    if (d.mpSj || d.rate != null) jobUpd[d.sj.id] = { rate4w: r2(d.rate ?? d.sj.rate4w), ...(Number(d.containers) ? { rateContainers: Number(d.containers) } : {}), ...(Number(d.weekly) ? { weekly: Number(d.weekly) } : {}), ...(d.mpSj ? { mpCover: !!d.mpSj.mpCover, value: Number(d.mpSj.value) || 0 } : {}) };
+    if (d.mpSj || d.rate != null) jobUpd[d.sj.id] = { rate4w: r2((d.rate ?? d.sj.rate4w) * 4 / wk(d)), ...(Number(d.containers) ? { rateContainers: Number(d.containers) } : {}), ...(Number(d.weekly) ? { weekly: Number(d.weekly) } : {}), ...(d.mpSj ? { mpCover: !!d.mpSj.mpCover, value: Number(d.mpSj.value) || 0 } : {}) };
   });
   Object.keys(byCust).forEach(cid => {
     const c = (cur.customers || []).find(x => x.id === cid); if (!c) return;
@@ -6585,14 +6589,14 @@ function StorageInvoiceReview({ data, due, onClose }) {
   const upd = (i, k, v) => setRows(a => a.map((r, ix) => {
     if (ix !== i) return r;
     const nr = { ...r, [k]: v };
-    if ((k === "containers" || k === "weekly") && Number(nr.weekly) > 0 && Number(nr.containers) > 0) nr.rate = String(r2(Number(nr.weekly) * Number(nr.containers) * 4));
+    if ((k === "containers" || k === "weekly") && Number(nr.weekly) > 0 && Number(nr.containers) > 0) nr.rate = String(r2(Number(nr.weekly) * Number(nr.containers) * wk(nr)));
     return nr;
   }));
-  const mpOf = r => r.mp && Number(r.value) > 0 ? r2(Number(r.value) * STORE_MP_WEEKLY * 4) : 0;
+  const mpOf = r => r.mp && Number(r.value) > 0 ? r2(Number(r.value) * STORE_MP_WEEKLY * wk(r)) : 0;
   const pick = rows.filter(r => r.on);
   const go = async () => {
     if (!pick.length) { onClose(); return; }
-    if (pick.some(r => !(Number(r.rate) > 0))) { alert("Enter the 4-week storage charge for each invoice."); return; }
+    if (pick.some(r => !(Number(r.rate) > 0))) { alert("Enter the storage charge for each invoice."); return; }
     if (pick.some(r => r.mp && !(Number(r.value) > 0))) { alert("Enter the value of goods for MoveProtect."); return; }
     setBusy(true);
     await createStorageInvoices(data, pick.map(r => ({ ...r, rate: r2(r.rate), containers: Number(r.containers) || 0, weekly: Number(r.weekly) || 0, mpSj: { ...r.sj, mpCover: r.mp, value: Number(r.value) || 0 } })));
@@ -6610,13 +6614,13 @@ function StorageInvoiceReview({ data, due, onClose }) {
             </label>
             <div style={{ fontSize: 12.5, color: "#6A7B77", margin: "2px 0 8px 26px" }}>{fmtUK(r.from)} – {fmtUK(r.to)}{r.sj.location ? ` · ${r.sj.location}` : ""} · inventory: {storeContainersUsed(r.c, r.sj)} container{storeContainersUsed(r.c, r.sj) !== 1 ? "s" : ""}{q ? ` · quoted ${q.containers}` : ""}</div>
             {r.on && <>
-              <Field label="Invoice date" hint={r.invDate === r.from ? "start of these 4 weeks" : undefined}><Input type="date" value={r.invDate} onChange={v => upd(i, "invDate", v || r.from)} /></Field>
+              <Field label="Invoice date" hint={r.invDate === r.from ? (wk(r) < 4 ? "start of the last period" : "start of these 4 weeks") : undefined}><Input type="date" value={r.invDate} onChange={v => upd(i, "invDate", v || r.from)} /></Field>
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ flex: 1 }}><Field label="Containers"><Input type="number" inputMode="numeric" value={r.containers} onChange={v => upd(i, "containers", v)} /></Field></div>
                 <div style={{ flex: 1 }}><Field label="£ / container / week"><Input inputMode="decimal" value={r.weekly} onChange={v => upd(i, "weekly", v)} placeholder="£" /></Field></div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ flex: 1 }}><Field label="4-week charge" hint="£ ex VAT"><Input value={r.rate} onChange={v => upd(i, "rate", v)} /></Field></div>
+                <div style={{ flex: 1 }}><Field label={wk(r) < 4 ? `Charge — ${wk(r)} week${wk(r) !== 1 ? "s" : ""}` : "4-week charge"} hint={wk(r) < 4 ? "£ ex VAT · last one, up to out of store" : "£ ex VAT"}><Input value={r.rate} onChange={v => upd(i, "rate", v)} /></Field></div>
                 <div style={{ flex: 1 }}><Field label="Goods value" hint="for MoveProtect"><Input value={r.value} onChange={v => upd(i, "value", v)} placeholder="£" /></Field></div>
               </div>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, cursor: "pointer", marginBottom: 6 }}>
@@ -6785,7 +6789,7 @@ function InvoicesView({ data, setView }) {
       </Card>}
       {due.length > 0 && <Card style={{ marginBottom: 12, background: "#FFFBEB", border: "1px solid #FDE68A" }}>
         <div style={{ fontWeight: 800, fontSize: 15, color: "#92400E" }}>📦 {due.length} storage invoice{due.length !== 1 ? "s" : ""} to create</div>
-        <div style={{ fontSize: 12.5, color: "#92400E", margin: "4px 0 8px" }}>{due.slice(0, 6).map(d => `${d.c.ref ? d.c.ref + " " : ""}${d.c.name} · ${fmtUK(d.from)}–${fmtUK(d.to)} · ${gbpPlain(r2(Number(d.rate) + storeMpAmount(d.sj)) * (1 + VAT_RATE))}`).join("\n").split("\n").map((l, i) => <div key={i}>{l}</div>)}{due.length > 6 ? <div>…and {due.length - 6} more</div> : null}</div>
+        <div style={{ fontSize: 12.5, color: "#92400E", margin: "4px 0 8px" }}>{due.slice(0, 6).map(d => `${d.c.ref ? d.c.ref + " " : ""}${d.c.name} · ${fmtUK(d.from)}–${fmtUK(d.to)} · ${gbpPlain(r2(Number(d.rate) + storeMpAmount(d.sj) * wk(d) / 4) * (1 + VAT_RATE))}`).join("\n").split("\n").map((l, i) => <div key={i}>{l}</div>)}{due.length > 6 ? <div>…and {due.length - 6} more</div> : null}</div>
         {!ro && <Btn variant="amber" disabled={busy} onClick={() => setReview(true)}>Check &amp; create</Btn>}
       </Card>}
       {waiting.length > 0 && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#6A7B77", background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "9px 12px", marginBottom: 12 }}>
