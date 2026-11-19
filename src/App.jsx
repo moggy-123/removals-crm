@@ -1258,7 +1258,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B278";
+const BUILD_NO = "B279";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5959,7 +5959,8 @@ function splitStoreLines(e) {
 }
 function moveInvoiceParts(data, j) {
   const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
-  return splitStoreLines(e).outLines.length ? ["in", "out"] : ["all"];
+  const sp = splitStoreLines(e);
+  return sp.outLines.length && sp.inLines.length ? ["in", "out"] : ["all"]; // only split when the quote has both
 }
 function buildMoveInvoice(data, c, j, part = "all") {
   const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
@@ -6046,8 +6047,12 @@ function storageCredits(c, exceptInvId) {
     (c.invoices || []).filter(x => x.kind === "storage" && x.storageJobId === sj.id && !x.void && x.periodTo > sj.dateOut).forEach(x => {
       const unused = Math.min(STORE_PERIOD, daysBetween(x.periodFrom > sj.dateOut ? addDaysISO(x.periodFrom, -1) : sj.dateOut, x.periodTo));
       if (unused <= 0) return;
+      // only money actually paid is refunded (a part-paid invoice is credited in proportion)
+      const t = invTotals(x);
+      const paidShare = t.total > 0 ? Math.min(1, t.paid / t.total) : 0;
+      if (paidShare <= 0) return;
       const net = (x.lines || []).reduce((s2, l) => s2 + (Number(l.amount) || 0), 0);
-      amt += net * unused / STORE_PERIOD; days += unused;
+      amt += net * unused / STORE_PERIOD * paidShare; days += unused;
     });
     amt = r2(amt);
     return amt > 0 ? { sjId: sj.id, amount: amt, days, dateOut: sj.dateOut, line: { desc: `Credit: storage paid in advance, ${days} unused day${days !== 1 ? "s" : ""} after ${fmtUK(sj.dateOut)}`, amount: -amt, extra: "sc", sjId: sj.id } } : null;
