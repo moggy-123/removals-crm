@@ -1258,7 +1258,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B277";
+const BUILD_NO = "B278";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1742,14 +1742,18 @@ function autoCompletePastMoves(d) {
   const todayIso = todayISO();
   let changed = false;
   const jobs = (d.jobs || []).map(j => {
-    if (j.status === "Completed" || isPencilled(j.status) || j.status === "Let Go") return j;
+    if (isPencilled(j.status) || j.status === "Let Go") return j;
     const st = jobStages(j);
     const dates = st.map(s => s.date).filter(Boolean);
     if (!dates.length || !dates.every(dt => dt < todayIso)) return j;
-    // Gone into store but not out yet (out-of-store day not dated, or still to come) → "In Store", not completed
+    // Gone into store but not out yet → "In Store", not completed. "Not out yet" = the Out of store day isn't dated or
+    // is still to come; or (no Out of store day in the plan) a storage job for this move with no date out.
     const out = st.find(isOutDay);
-    if (out && (!out.date || out.date >= todayIso)) { if (j.status === "In Store") return j; changed = true; return { ...j, status: "In Store" }; }
-    changed = true; return { ...j, status: "Completed", balancePaid: true };
+    const sj = (d.customers || []).flatMap(c => Array.isArray(c.storageJobs) ? c.storageJobs : []).find(x => x.moveJobId === j.id);
+    const stillIn = out ? (!out.date || out.date >= todayIso) : !!(sj && !(sj.dateOut && sj.dateOut <= todayIso));
+    if (stillIn) { if (j.status === "In Store") return j; changed = true; return { ...j, status: "In Store", updatedAt: Date.now() }; }
+    if (j.status === "Completed") return j;
+    changed = true; return { ...j, status: "Completed", balancePaid: true, updatedAt: Date.now() };
   });
   return changed ? { ...d, jobs } : d;
 }
