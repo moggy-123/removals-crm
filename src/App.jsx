@@ -1332,7 +1332,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B291";
+const BUILD_NO = "B292";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5214,18 +5214,15 @@ function EnquiryStorageCard({ data, e, move, customer, setView }) {
   if (!move || !customer || isOutJob(move)) return null;
   const isStorage = jobStages(move).some(st => /store/i.test(st.type || "")) || !!e.toStore;
   if (!isStorage || move.status === "Let Go") return null;
-  const booked = bookedMovesFor(data, customer.id).some(m => m.id === move.id);
   const sjs = getStorageJobs(customer).filter(j => j.moveJobId === move.id);
-  const ro = isReadOnly();
+  if (!sjs.length) return null; // storage jobs are added from the Storage screen
   return (
     <>
       {form && <StorageJobForm data={data} customer={customer} job={null} forMove={move.id} onClose={() => setForm(false)} />}
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div style={{ fontWeight: 700, color: "#111827" }}>📦 Storage</div>
-          {!ro && booked && !sjs.length && <Btn size="sm" onClick={() => setForm(true)}>+ Add storage job</Btn>}
         </div>
-        {!sjs.length && <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>{booked ? "No storage job yet — add it to start the storage inventory and invoicing." : "The storage job can be added once this move is confirmed with a date."}</div>}
         {sjs.map(j => {
           const n = jobContainerCount(customer, j);
           return (
@@ -6935,7 +6932,7 @@ function CustomerDetail({ data, id, setView }) {
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: getStorageJobs(c).length ? 8 : 0 }}>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Storage jobs</div>
-          <span style={{ fontSize: 11.5, color: "#94A4A0", fontWeight: 600 }}>Add from the move's enquiry</span>
+          <span style={{ fontSize: 11.5, color: "#94A4A0", fontWeight: 600 }}>Add from the Storage screen</span>
         </div>
         {getStorageJobs(c).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 8 }}>No storage jobs yet.</div>}
         {getStorageJobs(c).map((j, idx) => (
@@ -10370,7 +10367,24 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
   );
 }
 
+// Booked storage moves that don't have their storage job yet
+function movesNeedingStorageJob(data) {
+  const out = [];
+  (data.customers || []).forEach(c => {
+    const sjs = getStorageJobs(c);
+    bookedMovesFor(data, c.id).forEach(m => {
+      if (!jobStages(m).some(x => /store/i.test(x.type || "") && !isOutDay(x))) return;
+      // skip old imported moves, and ones whose goods have already come out
+      if (m.status === "Completed" && (/Imported from Mover/i.test(m.notes || "") || (outJobOf(data.jobs, m) || {}).status === "Completed")) return;
+      if (sjs.some(j => j.moveJobId === m.id)) return;
+      out.push({ c, m });
+    });
+  });
+  return out.sort((a, b) => (storeDayOf(a.m)?.date || "").localeCompare(storeDayOf(b.m)?.date || ""));
+}
 function StorageView({ data, setView }) {
+  const [addFor, setAddFor] = useState(null); // { c, m }
+  const needJob = movesNeedingStorageJob(data);
   const money = n => `£${Number(n || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
   // Every in-store storage job across all customers (a customer can have several).
   const jobsList = [];
@@ -10407,7 +10421,25 @@ function StorageView({ data, setView }) {
         </div>
       </Card>
 
-      {totJobs === 0 && <Empty icon="box" text="No storage jobs in store" />}
+      {addFor && <StorageJobForm data={data} customer={addFor.c} job={null} forMove={addFor.m.id} onClose={() => setAddFor(null)} />}
+      {needJob.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#B45309", margin: "0 2px 8px" }}>⚠️ Needs a storage job ({needJob.length})</div>
+          {needJob.map(({ c, m }) => {
+            const sd = storeDayOf(m);
+            return (
+              <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: "#FFF7E8", border: "1.5px solid #F2C77A", borderRadius: 14, padding: "11px 13px", marginBottom: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, color: "#10211E", fontSize: 15 }}>{c.ref ? <span style={{ color: TEAL_D }}>{c.ref} </span> : ""}{c.name}</div>
+                  <div style={{ fontSize: 12.5, color: "#8A5A12", marginTop: 2 }}>Move {moveRef(data, m)} · {m.status}{sd && sd.date ? ` · into store ${fmtUK(sd.date)}` : ""}</div>
+                </div>
+                {!isReadOnly() && <Btn size="sm" onClick={() => setAddFor({ c, m })}>+ Add storage job</Btn>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {totJobs === 0 && !needJob.length && <Empty icon="box" text="No storage jobs in store" />}
 
       {locNames.map(loc => {
         const list = groups[loc].slice().sort((a, b) => (a.c.name || "").localeCompare(b.c.name || ""));
