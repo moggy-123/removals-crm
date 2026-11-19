@@ -1240,7 +1240,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B272";
+const BUILD_NO = "B273";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4056,7 +4056,7 @@ function MessageModal({ customer, ctx, onClose }) {
 }
 function fmtUK(iso) { if (!iso) return ""; const d = new Date(iso + (iso.length === 10 ? "T00:00" : "")); if (isNaN(d)) return iso; return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`; }
 function fmtLong(iso) { if (!iso) return ""; const d = new Date(iso + (iso.length === 10 ? "T00:00" : "")); if (isNaN(d)) return iso; return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }); }
-function gbpPlain(n) { return "£" + Number(n || 0).toFixed(2); }
+function gbpPlain(n) { const v = Number(n || 0); return (v < 0 ? "-£" : "£") + Math.abs(v).toFixed(2); }
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -5929,6 +5929,8 @@ function buildMoveInvoice(data, c, j) {
   if (!lines.length || (Number(j.price) && Math.abs(quotedTotal - Number(j.price)) > 0.5)) lines = [{ desc: "Removal services", amount: r2((Number(j.price) || 0) / (vat ? 1 + VAT_RATE : 1)) }];
   const today = todayISO();
   const payments = j.depositPaid && Number(j.deposit) > 0 ? [{ id: uid(), date: today, amount: r2(j.deposit), method: "Deposit" }] : [];
+  // move out of store: credit any storage paid for after the date out
+  if (first) storageCredits(c).forEach(cr => { if (Math.abs(daysBetween(cr.dateOut, first)) <= 14) lines = [...lines, cr.line]; });
   return {
     id: uid(), no: nextInvoiceNo(data), kind: "move", jobId: j.id, date: today,
     due: first && first > today ? first : addDaysISO(today, Number(getInvSettings().terms) || 7),
@@ -5968,6 +5970,23 @@ function storageDue(data) {
     });
   });
   return due.sort((a, b) => a.from.localeCompare(b.from));
+}
+// Storage paid in advance: when they come out part-way through a 4 weeks, the unused days are credited
+// on the move-out invoice (once per storage record).
+function daysBetween(a, b) { return Math.round((new Date(b + "T12:00") - new Date(a + "T12:00")) / 86400000); }
+function storageCredits(c, exceptInvId) {
+  const used = new Set((c.invoices || []).filter(x => !x.void && x.id !== exceptInvId).flatMap(x => (x.lines || []).filter(l => l.extra === "sc").map(l => l.sjId)));
+  return getStorageJobs(c).filter(sj => sj.dateOut && !used.has(sj.id)).map(sj => {
+    let amt = 0, days = 0;
+    (c.invoices || []).filter(x => x.kind === "storage" && x.storageJobId === sj.id && !x.void && x.periodTo > sj.dateOut).forEach(x => {
+      const unused = Math.min(STORE_PERIOD, daysBetween(x.periodFrom > sj.dateOut ? addDaysISO(x.periodFrom, -1) : sj.dateOut, x.periodTo));
+      if (unused <= 0) return;
+      const net = (x.lines || []).reduce((s2, l) => s2 + (Number(l.amount) || 0), 0);
+      amt += net * unused / STORE_PERIOD; days += unused;
+    });
+    amt = r2(amt);
+    return amt > 0 ? { sjId: sj.id, amount: amt, days, dateOut: sj.dateOut, line: { desc: `Credit: storage paid in advance, ${days} unused day${days !== 1 ? "s" : ""} after ${fmtUK(sj.dateOut)}`, amount: -amt, extra: "sc", sjId: sj.id } } : null;
+  }).filter(Boolean);
 }
 function buildStorageInvoice(no, d) {
   return {
@@ -6093,6 +6112,8 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
   const baseNet = r2((f.lines || []).filter(l => !l.extra).reduce((s2, l) => s2 + (Number(l.amount) || 0), 0));
   const lkVal = qx.lateKey && qx.lateKey !== "FREE" ? r2(qx.lateKey) : 0;
   const hasEx = k => (f.lines || []).some(l => l.extra === k);
+  const credits = f.kind === "move" ? [...(f.lines || []).filter(l => l.extra === "sc").map(l => ({ sjId: l.sjId, amount: -l.amount, line: l, on: true })), ...storageCredits(c, f.id).filter(cr => !(f.lines || []).some(l => l.extra === "sc" && l.sjId === cr.sjId)).map(cr => ({ ...cr, on: false }))] : [];
+  const toggleCredit = (cr, on) => setF(p => ({ ...p, lines: on ? [...(p.lines || []), cr.line] : (p.lines || []).filter(l => !(l.extra === "sc" && l.sjId === cr.sjId)) }));
   const toggleEx = (k, on) => setF(p => {
     const rest = (p.lines || []).filter(l => l.extra !== k);
     if (!on) return { ...p, lines: rest };
@@ -6130,6 +6151,7 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
         <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Customer took</div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}><input type="checkbox" checked={hasEx("mp")} onChange={e => toggleEx("mp", e.target.checked)} style={{ width: 18, height: 18 }} /> MoveProtect · {mpPct}% · {gbpPlain(r2(baseNet * mpPct / 100))}</label>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}><input type="checkbox" checked={hasEx("lk")} onChange={e => toggleEx("lk", e.target.checked)} style={{ width: 18, height: 18 }} /> Late Key Waiver · {lkVal ? `${gbpPlain(lkVal)} inc VAT (${gbpPlain(r2(lkVal / (1 + VAT_RATE)))} net)` : "FREE"}</label>
+        {credits.map(cr => <label key={cr.sjId} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer", color: "#15803D" }}><input type="checkbox" checked={cr.on} onChange={e => toggleCredit(cr, e.target.checked)} style={{ width: 18, height: 18 }} /> Storage overpaid · credit {gbpPlain(cr.amount)} net</label>)}
         <div style={{ fontSize: 11.5, color: "#94A4A0" }}>From the quote · lines are net, VAT added below</div>
       </div>}
       <div style={{ background: "#F7FAF9", borderRadius: 10, padding: "10px 12px", margin: "12px 0", fontSize: 13.5 }}>
