@@ -1325,7 +1325,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B283";
+const BUILD_NO = "B284";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5475,7 +5475,7 @@ function EnquiryFileMaker({ data, e, customer, linkedJob, setView, quoteDone, ac
           <Btn style={sb} onClick={() => act.setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
           {!linkedJob && <Btn variant="grey" style={sb} onClick={act.setFollowUp}>⏰ Call back</Btn>}
           {!["Won", "Lost", "Not quoted"].includes(e.status) && <Btn variant="grey" style={{ ...sb, color: "#B91C1C" }} onClick={act.markLost}>✕ Mark Lost</Btn>}
-          {!["Won", "Lost", "Not quoted"].includes(e.status) && !linkedJob && <Btn variant="grey" style={{ ...sb, color: "#4B5563" }} onClick={() => markNotQuotedFlow(data, e)}>🚫 Didn't quote</Btn>}
+          {!["Won", "Lost", "Not quoted"].includes(e.status) && !linkedJob && !surveyed && <Btn variant="grey" style={{ ...sb, color: "#4B5563" }} onClick={() => markNotQuotedFlow(data, e)}>🚫 Didn't quote</Btn>}
           {canDelete() && <Btn variant="danger" style={{ ...sb, marginLeft: "auto" }} onClick={act.del}><Icon name="trash" size={15} /> Delete</Btn>}
         </>}
       </div>
@@ -5774,14 +5774,14 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {!isReadOnly() && !linkedJob && !["Won", "Lost", "Not quoted"].includes(e.status) && <>
+        {!isReadOnly() && !linkedJob && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <>
           <Btn variant="amber" onClick={() => setBookOpen("choose")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book move</Btn>
         </>}
         {!isReadOnly() && linkedJob && isPencilled(linkedJob.status) && <Btn variant="amber" onClick={() => setBookOpen("upgrade")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book move</Btn>}
       </div>
       {(() => {
         const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
-        const showNq = showLost && !linkedJob;
+        const showNq = showLost && !linkedJob && !surveyDone; // once surveyed it's a quote: Lost, not "didn't quote"
         const n = (showFu ? 1 : 0) + (showLost ? 1 : 0) + (showNq ? 1 : 0);
         const eq = { width: "100%", minWidth: 0, whiteSpace: "nowrap" };
         if (isReadOnly()) return <Btn variant="grey" style={{ ...eq, marginTop: 8 }} onClick={() => setShowEdit(true)}>👁 View enquiry details</Btn>;
