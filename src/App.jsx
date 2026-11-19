@@ -1258,7 +1258,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B280";
+const BUILD_NO = "B281";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5021,16 +5021,18 @@ function FmSeg({ items, value, onChange, big }) {
   );
 }
 // Booking a move: choose Provisional or Confirmed and set the date for every day (from the move plan).
-function BookMoveModal({ data, e, initial, onClose, onBook }) {
-  const planned = Array.isArray(e.stages) && e.stages.length ? e.stages : [{ type: "Move", date: "" }];
-  const [status, setStatus] = useState(["Confirmed", TEL_CONF].includes(initial) ? initial : "Provisional");
+function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
+  // job = an existing provisional / telephone confirmed move being moved up; otherwise a new booking
+  const planned = job ? jobStages(job) : (Array.isArray(e.stages) && e.stages.length ? e.stages : [{ type: "Move", date: "" }]);
+  const choices = job ? (job.status === TEL_CONF ? ["Confirmed"] : [TEL_CONF, "Confirmed"]) : ["Provisional", TEL_CONF, "Confirmed"];
+  const [status, setStatus] = useState(choices.includes(initial) ? initial : (choices.length === 1 ? choices[0] : null));
   const [dates, setDates] = useState(planned.map(d => d.date || ""));
   const [noDate, setNoDate] = useState(false);
   const [res, setRes] = useState(planned.map(d => ({ crew: Array.isArray(d.crew) ? d.crew : [], vehicleIds: Array.isArray(d.vehicleIds) ? d.vehicleIds : [] })));
   const needRes = holdsResources(status);
   const crewOpts = crewOptions(data);
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
-  const taken = i => { const t = takenOnDate(data, dates[i]); res.forEach((r, k) => { if (k !== i && dates[k] && dates[k] === dates[i]) { r.crew.forEach(c => t.crew.add(c)); r.vehicleIds.forEach(v => t.veh.add(v)); } }); return t; };
+  const taken = i => { const t = takenOnDate(data, dates[i], job && job.id); res.forEach((r, k) => { if (k !== i && dates[k] && dates[k] === dates[i]) { r.crew.forEach(c => t.crew.add(c)); r.vehicleIds.forEach(v => t.veh.add(v)); } }); return t; };
   const toggleRes = (i, key, id) => setRes(a => a.map((r, k) => k !== i ? r : { ...r, [key]: r[key].includes(id) ? r[key].filter(x => x !== id) : [...r[key], id] }));
   const price = Number(e.quoteTotal) || 0;
   const missing = dates.map((d, i) => (d || isOutDay(planned[i])) ? null : i + 1).filter(Boolean);
@@ -5051,11 +5053,24 @@ function BookMoveModal({ data, e, initial, onClose, onBook }) {
   };
   const seg = on => ({ flex: 1, padding: "11px 8px", borderRadius: 10, border: on ? `2px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : "#fff", color: on ? TEAL_D : "#43534F", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" });
   return (
+    !status ? (
+      <Modal title="Book this move" onClose={onClose}>
+        <div style={{ fontSize: 13.5, color: "#6A7B77", marginBottom: 12 }}>How is this move booked?</div>
+        {choices.map(ch => {
+          const meta = ch === "Provisional" ? ["#CA8A04", "#FEFCE8", "Pencilled in — not fully committed yet"] : ch === TEL_CONF ? ["#7C3AED", "#F5F3FF", "Customer has rung to say it's definite — deposit to follow"] : ["#2563EB", "#EFF6FF", "Definite — deposit taken"];
+          return (
+            <button key={ch} onClick={() => setStatus(ch)} style={{ display: "block", width: "100%", textAlign: "left", padding: "14px 16px", marginBottom: 10, borderRadius: 14, border: `2px solid ${meta[0]}`, background: meta[1], cursor: "pointer", fontFamily: "inherit" }}>
+              <div style={{ fontSize: 16.5, fontWeight: 800, color: meta[0] }}>{ch === TEL_CONF ? "📞 Telephone confirmed" : ch}</div>
+              <div style={{ fontSize: 13, color: "#43534F", marginTop: 2 }}>{meta[2]}</div>
+            </button>
+          );
+        })}
+        <Btn variant="grey" style={{ width: "100%" }} onClick={onClose}>Cancel</Btn>
+      </Modal>
+    ) :
     <Modal title="Book this move" onClose={onClose}>
       <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-        <button style={seg(status === "Provisional")} onClick={() => setStatus("Provisional")}>Provisional</button>
-        <button style={seg(status === TEL_CONF)} onClick={() => setStatus(TEL_CONF)}>📞 Tel. confirmed</button>
-        <button style={seg(status === "Confirmed")} onClick={() => setStatus("Confirmed")}>Confirmed</button>
+        {choices.map(ch => <button key={ch} style={seg(status === ch)} onClick={() => setStatus(ch)}>{ch === TEL_CONF ? "📞 Tel. confirmed" : ch}</button>)}
       </div>
       <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? `The date is definite. Deposit of ${gbp(depositFor(data, e.id, e.quoteTotal))} (60%${splitStoreLines(e).outLines.length && splitStoreLines(e).inLines.length ? ", not counting the out-of-store charge" : ""}) is marked as paid — change it on the move if not.` : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
       {planned.map((d, i) => (
@@ -5348,7 +5363,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   async function markWon(newStatus = "Provisional", opts = {}) {
     if (typeof newStatus !== "string") newStatus = "Provisional";
     const existing = (data.jobs || []).find(j => j.enquiryId === e.id);
-    if (!existing && !opts.fromDialog) { setBookOpen(newStatus); return; } // always pick the date(s) first
+    if (!existing && !opts.fromDialog) { setBookOpen("choose"); return; } // always pick the type and date(s) first
     if (existing) {
       // Re-booking an enquiry that already has a move: don't create a second job.
       let d0 = upsertLocal(data, "jobs", { ...existing, status: existing.status === "Completed" ? "Provisional" : existing.status });
@@ -5430,7 +5445,15 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   const modals = (
     <>
       {showEdit && <EnquiryForm data={data} editEnquiry={e} reopen={rebook} onClose={() => { setShowEdit(false); setRebook(false); }} />}
-      {bookOpen && <BookMoveModal data={data} e={e} initial={bookOpen} onClose={() => setBookOpen(null)} onBook={(st, dates, res) => { setBookOpen(null); markWon(st, { fromDialog: true, dates, res }); }} />}
+      {bookOpen && bookOpen !== "upgrade" && <BookMoveModal data={data} e={e} initial={bookOpen} onClose={() => setBookOpen(null)} onBook={(st, dates, res) => { setBookOpen(null); markWon(st, { fromDialog: true, dates, res }); }} />}
+      {bookOpen === "upgrade" && linkedJob && <BookMoveModal data={data} e={e} job={linkedJob} onClose={() => setBookOpen(null)} onBook={async (st, dates, res) => {
+        setBookOpen(null);
+        const stages = jobStages(linkedJob).map((x, i) => ({ ...x, date: dates[i] || "", ...(res && res[i] ? { crew: res[i].crew, vehicleIds: res[i].vehicleIds } : {}) }));
+        const rec = { ...linkedJob, stages, status: st, moveDate: stages.map(x => x.date).filter(Boolean).sort()[0] || linkedJob.moveDate || "",
+          crew: [...new Set(stages.flatMap(x => x.crew || []))], vehicleIds: [...new Set(stages.flatMap(x => x.vehicleIds || []))],
+          ...(st === "Confirmed" ? { deposit: depositFor(data, linkedJob.enquiryId, linkedJob.price), depositPaid: true } : {}) };
+        await saveAndReload(upsertLocal(data, "jobs", rec));
+      }} />}
       {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
       {showInv && <InventoryModal data={data} enquiry={e} onClose={() => setShowInv(false)} />}
       {showResched && <RescheduleSurveyModal data={data} enquiry={e} onClose={() => setShowResched(false)} />}
@@ -5595,10 +5618,9 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         {!isReadOnly() && !linkedJob && !["Won", "Lost", "Not quoted"].includes(e.status) && <>
-          <Btn variant="amber" onClick={() => markWon("Provisional")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book provisional</Btn>
-          <Btn variant="grey" onClick={() => markWon(TEL_CONF)} style={{ flex: 1, whiteSpace: "nowrap", color: "#6D28D9" }}>📞 Tel. confirmed</Btn>
-          <Btn onClick={() => markWon("Confirmed")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book confirmed</Btn>
+          <Btn variant="amber" onClick={() => setBookOpen("choose")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book move</Btn>
         </>}
+        {!isReadOnly() && linkedJob && isPencilled(linkedJob.status) && <Btn variant="amber" onClick={() => setBookOpen("upgrade")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book move</Btn>}
       </div>
       {(() => {
         const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
