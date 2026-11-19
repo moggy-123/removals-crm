@@ -102,6 +102,7 @@ const jobToDb = j => ({
   price: j.price || 0, deposit: j.deposit || 0, deposit_paid: !!j.depositPaid,
   balance_paid: !!j.balancePaid,
   status: j.status || "Booked", notes: j.notes || "",
+  ...(j.outOf ? { out_of: j.outOf } : {}), // out-of-store move → the into-store move it belongs to
   updated_at: j.updatedAt || Date.now(),
   created_at: j.createdAt || new Date().toISOString(),
 });
@@ -116,6 +117,7 @@ const jobFromDb = r => ({
   price: r.price || 0, deposit: r.deposit || 0, depositPaid: r.deposit_paid,
   balancePaid: r.balance_paid,
   status: r.status || "Booked", notes: r.notes || "",
+  ...(r.out_of ? { outOf: r.out_of } : {}),
   updatedAt: Number(r.updated_at) || 0, createdAt: r.created_at,
   // Job sign-offs (crew + customer signatures). Written only by the crew_sign_off function.
   signOffs: r.sign_offs && Object.keys(r.sign_offs).length ? r.sign_offs : undefined,
