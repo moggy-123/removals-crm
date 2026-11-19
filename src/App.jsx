@@ -1240,7 +1240,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B270";
+const BUILD_NO = "B272";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5937,6 +5937,9 @@ function buildMoveInvoice(data, c, j) {
   };
 }
 // ── Storage: every 4 weeks from the date into store, invoiced in advance
+// MoveProtect on storage: 0.1% of the goods' value per week (+VAT)
+const STORE_MP_WEEKLY = 0.001;
+function storeMpAmount(sj) { return sj && sj.mpCover && Number(sj.value) > 0 ? r2(Number(sj.value) * STORE_MP_WEEKLY * 4) : 0; }
 const STORE_PERIOD = 28;
 function storagePeriodsDue(job, upTo) {
   const rate = Number(job.rate4w) || 0;
@@ -5970,7 +5973,10 @@ function buildStorageInvoice(no, d) {
   return {
     id: uid(), no, kind: "storage", storageJobId: d.sj.id, periodFrom: d.from, periodTo: d.to, date: todayISO(), due: d.from > todayISO() ? d.from : todayISO(),
     title: `Storage ${fmtUK(d.from)} – ${fmtUK(d.to)}`,
-    lines: [{ desc: `Storage${d.sj.location ? " at " + d.sj.location : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.sj.rate4w) }],
+    lines: [
+      { desc: `Storage${d.sj.location ? " at " + d.sj.location : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.sj.rate4w) },
+      ...(storeMpAmount(d.sj) > 0 ? [{ desc: `MoveProtect storage cover, goods valued ${gbpPlain(d.sj.value)} @ 0.1% per week × 4 weeks`, amount: storeMpAmount(d.sj), extra: "mp" }] : []),
+    ],
     vat: true, payments: [], notes: "", createdAt: new Date().toISOString(),
   };
 }
@@ -6079,6 +6085,20 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
   const isNew = !saved;
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const setLine = (i, k, v) => setF(p => ({ ...p, lines: p.lines.map((l, ix) => ix === i ? { ...l, [k]: v } : l) }));
+  // Quote extras for a move: MoveProtect (% of the removal net) and Late Key Waiver
+  const job = f.kind === "move" ? (data.jobs || []).find(x => x.id === f.jobId) : null;
+  const enq = job ? (data.enquiries || []).find(x => x.id === job.enquiryId) : null;
+  const qx = (enq && enq.quoteExtra) || {};
+  const mpPct = Number(qx.mpPct) || 10;
+  const baseNet = r2((f.lines || []).filter(l => !l.extra).reduce((s2, l) => s2 + (Number(l.amount) || 0), 0));
+  const lkVal = qx.lateKey && qx.lateKey !== "FREE" ? r2(qx.lateKey) : 0;
+  const hasEx = k => (f.lines || []).some(l => l.extra === k);
+  const toggleEx = (k, on) => setF(p => {
+    const rest = (p.lines || []).filter(l => l.extra !== k);
+    if (!on) return { ...p, lines: rest };
+    const line = k === "mp" ? { desc: `MoveProtect (${mpPct}% of removal charge)`, amount: r2(baseNet * mpPct / 100), extra: "mp" } : { desc: lkVal ? "Late Key Waiver" : "Late Key Waiver (included free)", amount: r2(lkVal / (1 + VAT_RATE)), extra: "lk" };
+    return { ...p, lines: [...rest, line] };
+  });
   const persist = async next => { setBusy(true); await saveInvoice(data, c.id, next || { ...f, lines: (f.lines || []).filter(l => l.desc || Number(l.amount)).map(l => ({ ...l, amount: r2(l.amount) })) }); };
   const addPayment = async () => {
     const amt = r2(pay.amount);
@@ -6106,6 +6126,12 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
         </div>
       ))}
       {!ro && <Btn size="sm" variant="grey" onClick={() => setF(p => ({ ...p, lines: [...(p.lines || []), { desc: "", amount: "" }] }))}>+ Add line</Btn>}
+      {f.kind === "move" && !ro && <div style={{ background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 10, padding: "8px 12px", marginTop: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Customer took</div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}><input type="checkbox" checked={hasEx("mp")} onChange={e => toggleEx("mp", e.target.checked)} style={{ width: 18, height: 18 }} /> MoveProtect · {mpPct}% · {gbpPlain(r2(baseNet * mpPct / 100))}</label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}><input type="checkbox" checked={hasEx("lk")} onChange={e => toggleEx("lk", e.target.checked)} style={{ width: 18, height: 18 }} /> Late Key Waiver · {lkVal ? `${gbpPlain(lkVal)} inc VAT (${gbpPlain(r2(lkVal / (1 + VAT_RATE)))} net)` : "FREE"}</label>
+        <div style={{ fontSize: 11.5, color: "#94A4A0" }}>From the quote · lines are net, VAT added below</div>
+      </div>}
       <div style={{ background: "#F7FAF9", borderRadius: 10, padding: "10px 12px", margin: "12px 0", fontSize: 13.5 }}>
         {[["Net", t.net], [`VAT @ ${Math.round(VAT_RATE * 100)}%`, t.vat], ["Total", t.total], ...(t.paid ? [["Paid", -t.paid]] : []), ["Balance due", Math.max(0, t.balance)]].map(([k, v]) => (
           <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontWeight: k === "Total" || k === "Balance due" ? 800 : 500, color: k === "Balance due" ? TEAL_D : "#10211E" }}><span>{k}</span><span>{v < 0 ? "-" : ""}{gbpPlain(Math.abs(v))}</span></div>
@@ -6257,7 +6283,7 @@ function InvoicesView({ data, setView }) {
       </Card>}
       {due.length > 0 && <Card style={{ marginBottom: 12, background: "#FFFBEB", border: "1px solid #FDE68A" }}>
         <div style={{ fontWeight: 800, fontSize: 15, color: "#92400E" }}>📦 {due.length} storage invoice{due.length !== 1 ? "s" : ""} to create</div>
-        <div style={{ fontSize: 12.5, color: "#92400E", margin: "4px 0 8px" }}>{due.slice(0, 6).map(d => `${d.c.ref ? d.c.ref + " " : ""}${d.c.name} · ${fmtUK(d.from)}–${fmtUK(d.to)} · ${gbpPlain(r2(d.sj.rate4w) * (1 + VAT_RATE))}`).join("\n").split("\n").map((l, i) => <div key={i}>{l}</div>)}{due.length > 6 ? <div>…and {due.length - 6} more</div> : null}</div>
+        <div style={{ fontSize: 12.5, color: "#92400E", margin: "4px 0 8px" }}>{due.slice(0, 6).map(d => `${d.c.ref ? d.c.ref + " " : ""}${d.c.name} · ${fmtUK(d.from)}–${fmtUK(d.to)} · ${gbpPlain(r2(Number(d.sj.rate4w) + storeMpAmount(d.sj)) * (1 + VAT_RATE))}`).join("\n").split("\n").map((l, i) => <div key={i}>{l}</div>)}{due.length > 6 ? <div>…and {due.length - 6} more</div> : null}</div>
         {!ro && <Btn variant="amber" disabled={busy} onClick={async () => { if (!confirm(`Create ${due.length} storage invoice${due.length !== 1 ? "s" : ""}?`)) return; setBusy(true); await createStorageInvoices(data, due); }}>Create all</Btn>}
       </Card>}
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -9669,8 +9695,8 @@ function StorageJobForm({ data, customer, job, onClose }) {
   const linkedMove = moves.find(m => m.id === moveJobId) || (data.jobs || []).find(m => m.id === moveJobId) || null;
   const storeDay = linkedMove ? storeDayOf(linkedMove) : null;
   const [f, setF] = useState(() => job
-    ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "", rate4w: job.rate4w ?? "", billFrom: job.billFrom || "" }
-    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: (moves[0] && storeDayOf(moves[0]) && storeDayOf(moves[0]).date) || todayISO(), dateOut: "", rate4w: "", billFrom: "" });
+    ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "", rate4w: job.rate4w ?? "", billFrom: job.billFrom || "", mpCover: !!job.mpCover }
+    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: (moves[0] && storeDayOf(moves[0]) && storeDayOf(moves[0]).date) || todayISO(), dateOut: "", rate4w: "", billFrom: "", mpCover: false });
   const [locs, setLocs] = useState(getStorageLocs);
   const [newLoc, setNewLoc] = useState("");
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -9681,7 +9707,7 @@ function StorageJobForm({ data, customer, job, onClose }) {
     // Storage is invoiced every 4 weeks from the date into store. Start billing from the current period unless set.
     const curPeriod = (() => { if (!f.dateIn) return ""; let p = f.dateIn; while (addDaysISO(p, STORE_PERIOD) <= todayISO()) p = addDaysISO(p, STORE_PERIOD); return p; })();
     const billFrom = Number(f.rate4w) > 0 ? (f.billFrom || curPeriod) : (f.billFrom || "");
-    const jrec = { ...(job || {}), id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", rate4w: Number(f.rate4w) || 0, billFrom, inStore: !f.dateOut, moveJobId: moveJobId || "", crew: (storeDay && storeDay.crew) || (job && job.crew) || [] };
+    const jrec = { ...(job || {}), id: f.id, location: f.location || "", value: Number(f.value) || 0, dateIn: f.dateIn || "", dateOut: f.dateOut || "", rate4w: Number(f.rate4w) || 0, billFrom, mpCover: !!f.mpCover, inStore: !f.dateOut, moveJobId: moveJobId || "", crew: (storeDay && storeDay.crew) || (job && job.crew) || [] };
     const existing = getStorageJobs(customer).map(j => ({ ...j, id: j.id === "legacy" ? uid() : j.id }));
     const jobs = existing.some(j => j.id === jrec.id) ? existing.map(j => j.id === jrec.id ? jrec : j) : [...existing, jrec];
     await saveAndReload(upsertLocal(data, "customers", { ...customer, storageJobs: jobs, storage: null }));
@@ -9717,7 +9743,12 @@ function StorageJobForm({ data, customer, job, onClose }) {
         <div style={{ flex: 1 }}><Field label="Storage charge per 4 weeks" hint="£ ex VAT"><Input value={String(f.rate4w ?? "")} onChange={v => set("rate4w", v)} placeholder="0.00" /></Field></div>
         <div style={{ flex: 1 }}><Field label="Invoice from" hint="blank = current 4 weeks"><Input type="date" value={f.billFrom} onChange={v => set("billFrom", v)} /></Field></div>
       </div>
-      {Number(f.rate4w) > 0 && f.dateIn ? <div style={{ fontSize: 12, color: "#6A7B77", marginTop: -4, marginBottom: 10 }}>Invoiced in advance every 4 weeks from {fmtUK(f.dateIn)} · {gbpPlain(r2(f.rate4w) * (1 + VAT_RATE))} inc VAT each time. They appear under Invoices to create.</div> : null}
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer", marginBottom: 6 }}>
+        <input type="checkbox" checked={!!f.mpCover} onChange={e => set("mpCover", e.target.checked)} style={{ width: 18, height: 18 }} /> MoveProtect cover in store (0.1% of goods value per week + VAT)
+      </label>
+      {f.mpCover && !(Number(f.value) > 0) ? <div style={{ fontSize: 12, color: "#B45309", marginBottom: 8 }}>Enter the value of goods above so MoveProtect can be worked out.</div> : null}
+      {f.mpCover && Number(f.value) > 0 ? <div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 8 }}>MoveProtect: {gbpPlain(storeMpAmount(f))} ex VAT every 4 weeks.</div> : null}
+      {Number(f.rate4w) > 0 && f.dateIn ? <div style={{ fontSize: 12, color: "#6A7B77", marginTop: -4, marginBottom: 10 }}>Invoiced in advance every 4 weeks from {fmtUK(f.dateIn)} · {gbpPlain(r2(Number(f.rate4w) + storeMpAmount(f)) * (1 + VAT_RATE))} inc VAT each time. They appear under Invoices to create.</div> : null}
       <div style={{ display: "flex", gap: 8, margin: "0 0 10px", alignItems: "flex-end" }}>
         <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
         <Btn size="sm" onClick={addLoc} disabled={!newLoc.trim()}>Add location</Btn>
