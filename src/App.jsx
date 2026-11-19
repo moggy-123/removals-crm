@@ -1071,14 +1071,17 @@ async function saveAndReload(data) {
   try {
     await Promise.race([
       pushChangedOnly(stamped),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after 12s")), 12000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after 45s")), 45000)),
     ]);
   } catch (e) {
     hideSavingOverlay();
     SAVING_IN_PROGRESS = false;
     const msg = e?.message || "";
-    const offline = !navigator.onLine || /Load failed|timeout|Failed to fetch|NetworkError/.test(msg);
-    if (!offline) alert("Sync problem: " + (msg || JSON.stringify(e)));
+    const slow = /timed out|timeout/i.test(msg);
+    const offline = !navigator.onLine || /Load failed|Failed to fetch|NetworkError/.test(msg);
+    // weak signal: it's saved on this device and uploads by itself next time the app syncs
+    if (slow && !offline) alert("Saved on this device ✓\n\nThe signal's too weak to upload it right now — it will upload automatically when you have better signal (or open the app on Wi-Fi).");
+    else if (!offline) alert("Sync problem: " + (msg || JSON.stringify(e)));
     window.location.reload();
     return;
   }
@@ -1332,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B293";
+const BUILD_NO = "B294";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
