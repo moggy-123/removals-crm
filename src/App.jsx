@@ -1258,7 +1258,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B281";
+const BUILD_NO = "B282";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3871,7 +3871,8 @@ function MovePlanModal({ data, enquiry, onClose }) {
   const vname = id => ((data.vehicles || []).find(v => v.id === id) || {}).name;
   const [days, setDays] = useState(() => (Array.isArray(enquiry.stages) ? enquiry.stages : []).map((d, i) => {
     const js = linkedJob ? (linkedJob.stages || [])[i] : null;
-    return { ...d, crew: (d.crew && d.crew.length ? d.crew : (js?.crew || [])), vehicleIds: (d.vehicleIds && d.vehicleIds.length ? d.vehicleIds : (js?.vehicleIds || [])) };
+    // once booked, the move's own dates are the real ones (a blank day stays blank)
+    return { ...d, date: js ? (js.date || "") : (d.date || ""), crew: (d.crew && d.crew.length ? d.crew : (js?.crew || [])), vehicleIds: (d.vehicleIds && d.vehicleIds.length ? d.vehicleIds : (js?.vehicleIds || [])) };
   }));
   const addDay = () => setDays(d => [...d, { id: uid(), type: "Move", date: "", staffCount: "", vehTypes: {}, crew: [], vehicleIds: [], notes: "" }]);
   const removeDay = (i) => setDays(d => d.filter((_, ix) => ix !== i));
@@ -3919,11 +3920,11 @@ function MovePlanModal({ data, enquiry, onClose }) {
     if (linkedJob) {
       const newStages = days.map((day, i) => {
         const ex = (linkedJob.stages || [])[i] || {};
-        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || ex.date || linkedJob.moveDate || "", time: ex.time || "", vehicleIds: day.vehicleIds || [], crew: day.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "" };
+        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || "", time: ex.time || "", vehicleIds: day.vehicleIds || [], crew: day.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "" };
       });
       const allVeh = [...new Set(newStages.flatMap(s => s.vehicleIds || []))];
       const allCrew = [...new Set(newStages.flatMap(s => s.crew || []))];
-      d = upsertLocal(d, "jobs", { ...linkedJob, stages: newStages, moveDate: newStages[0]?.date || linkedJob.moveDate || "", vehicleIds: allVeh, vehicle: allVeh.map(vname).filter(Boolean).join(", "), crew: allCrew });
+      d = upsertLocal(d, "jobs", { ...linkedJob, stages: newStages, moveDate: newStages.map(x => x.date).filter(Boolean).sort()[0] || "", vehicleIds: allVeh, vehicle: allVeh.map(vname).filter(Boolean).join(", "), crew: allCrew });
     }
     await saveAndReload(d);
     onClose();
