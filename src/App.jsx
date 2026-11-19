@@ -1332,7 +1332,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B290";
+const BUILD_NO = "B291";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5256,7 +5256,11 @@ function OutOfStoreCard({ data, e, parent }) {
       const inDay = jobStages(parent).find(x => /store/i.test(x.type || "")) || {};
       const nj = makeOutJob(parent, [{ type: "Out of store", date: "", staffCount: inDay.staffCount || "", vehTypes: inDay.vehTypes || {} }], outP, NOT_BOOKED);
       try { localStorage.setItem("removals_open_outplan", nj.id); } catch {}
-      await saveAndReload(upsertLocal(data, "jobs", nj));
+      let d2 = upsertLocal(data, "jobs", nj);
+      // the into-store move was priced at the whole quote: take the out-of-store part off it
+      if (outP && Math.abs((Number(parent.price) || 0) - (Number(e.quoteTotal) || 0)) < 0.5) d2 = upsertLocal(d2, "jobs", { ...parent, price: Math.max(0, Math.round(((Number(parent.price) || 0) - outP) * 100) / 100) });
+      if (lines.some((l, i) => l !== (e.quoteLines || [])[i])) d2 = upsertLocal(d2, "enquiries", { ...e, quoteLines: lines });
+      await saveAndReload(d2);
     };
     return (
       <Card>
@@ -6215,7 +6219,8 @@ function moveInvoiceParts(data, j) {
   if (outJobOf(data.jobs, j)) return ["in"];
   const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
   const sp = splitStoreLines(e);
-  return sp.outLines.length && sp.inLines.length ? ["in", "out"] : ["all"]; // only split when the quote has both
+  // quote has both: this move is the into-store part — out of store is invoiced from its own move once booked
+  return sp.outLines.length && sp.inLines.length ? ["in"] : ["all"];
 }
 // Deposit = 60% of everything except the out-of-store charge (that's paid when they come out)
 function depositFor(data, enquiryId, price) {
