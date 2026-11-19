@@ -1332,7 +1332,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B288";
+const BUILD_NO = "B289";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5246,10 +5246,41 @@ function EnquiryStorageCard({ data, e, move, customer, setView }) {
 function OutOfStoreCard({ data, e, parent }) {
   const oj = outJobOf(data.jobs, parent);
   const [open, setOpen] = useState(null); // "plan" | "book" | "manage"
-  if (!oj) return null;
+  if (!oj) {
+    // an into-store move with no out of store yet: add it now (or any time later)
+    const intoStore = parent && !isOutJob(parent) && parent.status !== "Let Go" && (jobStages(parent).some(x => /store/i.test(x.type || "") && !isOutDay(x)) || !!e.toStore);
+    if (!intoStore || isReadOnly()) return null;
+    const add = async () => {
+      const lines = flagOutLines(e);
+      const outP = quoteTotal(lines.filter(l => l && l.out), e.quoteVat !== false);
+      const inDay = jobStages(parent).find(x => /store/i.test(x.type || "")) || {};
+      const nj = makeOutJob(parent, [{ type: "Out of store", date: "", staffCount: inDay.staffCount || "", vehTypes: inDay.vehTypes || {} }], outP, NOT_BOOKED);
+      try { localStorage.setItem("removals_open_outplan", nj.id); } catch {}
+      await saveAndReload(upsertLocal(data, "jobs", nj));
+    };
+    return (
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div>
+            <div style={{ fontWeight: 700, color: "#111827" }}>🏬 Out of store</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>Not added yet — add it now or when the customer has a date.</div>
+          </div>
+          <Btn size="sm" onClick={add}>+ Add out of store</Btn>
+        </div>
+      </Card>
+    );
+  }
   const ro = isReadOnly();
   const st = jobStages(oj);
   const dated = st.filter(x => x.date).map(x => x.date).sort();
+  try { if (!open && localStorage.getItem("removals_open_outplan") === oj.id) { localStorage.removeItem("removals_open_outplan"); setTimeout(() => setOpen("plan"), 0); } } catch {}
+  const editPrice = async () => {
+    const v = prompt("Out-of-store price (£ inc VAT)", String(oj.price || ""));
+    if (v == null) return;
+    const n = Number(String(v).replace(/[£,\s]/g, ""));
+    if (!isFinite(n)) return;
+    await saveAndReload(upsertLocal(data, "jobs", { ...oj, price: Math.round(n * 100) / 100 }));
+  };
   const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name;
   const canBook = !ro && (oj.status === NOT_BOOKED || isPencilled(oj.status));
   return (
@@ -5278,7 +5309,7 @@ function OutOfStoreCard({ data, e, parent }) {
                 </div>
               ))}
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3 }}>{gbp(oj.price)} · invoiced when they come out{oj.balancePaid ? " · paid ✓" : ""}</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3 }}>{gbp(oj.price)}{!ro && <span onClick={editPrice} style={{ color: TEAL, fontWeight: 700, cursor: "pointer", marginLeft: 6 }}>Edit price</span>} · invoiced when they come out{oj.balancePaid ? " · paid ✓" : ""}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
             <Btn size="sm" variant="grey" onClick={() => setOpen("plan")}><Icon name="calendar" size={14} /> {ro ? "Plan" : "Edit plan"}</Btn>
@@ -6601,17 +6632,14 @@ function CustomerInvoices({ data, c }) {
   const role = CURRENT_USER.role;
   if (role === "crew") return null;
   const invs = (c.invoices || []).slice().sort((a, b) => (b.no || 0) - (a.no || 0));
-  const canInvoice = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "In Store", "Completed"].includes(j.status))
-    .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))
-    // the out-of-store invoice is only offered once the into-store one exists
-    .filter(x => x.pt !== "out" || moveInvoiceFor(data, c, isOutJob(x.j) ? (parentJobOf(data.jobs, x.j) || x.j) : x.j, "in"));
+  const canInvoice = moveInvoiceOptions(data, c);
   const owed = invs.reduce((s, i) => s + Math.max(0, invTotals(i).balance), 0);
   return (
     <>
       <SectionTitle>Invoices{owed > 0.004 ? ` · ${gbpPlain(owed)} owed` : ""}</SectionTitle>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
         {invs.map(inv => <InvoiceRow key={inv.id} inv={inv} c={c} onOpen={() => setOpen({ invId: inv.id })} />)}
-        {!isReadOnly() && canInvoice.map(({ j, pt }) => <Btn key={j.id + pt} variant="grey" onClick={() => setOpen({ draft: buildMoveInvoice(data, c, j, pt) })}>🧾 {pt === "out" ? `Create out-of-store invoice for move ${moveRef(data, j)}` : pt === "in" ? `Create into-store invoice for move ${moveRef(data, j)}` : `Create invoice for move ${moveRef(data, j)}`}</Btn>)}
+        {!isReadOnly() && canInvoice.map(({ j, pt }) => <Btn key={j.id + pt} variant="grey" onClick={() => setOpen({ draft: buildMoveInvoice(data, c, j, pt) })}>🧾 {pt === "out" ? `Create out-of-store invoice ${moveRef(data, j)}` : pt === "in" ? `Create into-store invoice for move ${moveRef(data, j)}` : `Create invoice for move ${moveRef(data, j)}`}</Btn>)}
         {!invs.length && !canInvoice.length && <div style={{ fontSize: 13, color: "#94A4A0" }}>No invoices yet. A move can be invoiced once it's telephone confirmed or confirmed.</div>}
       </div>
       {open && <InvoiceModal data={data} custId={c.id} invId={open.invId} draft={open.draft} onClose={() => setOpen(null)} />}
@@ -6636,14 +6664,39 @@ function InvoicesHomeCard({ data, setView }) {
     </div>
   );
 }
+// Move invoices a customer can have created now
+function moveInvoiceOptions(data, c) {
+  return (data.jobs || []).filter(j => j.customerId === c.id && (isOutJob(j) ? j.status !== "Let Go" : ["Telephone Confirmed", "Confirmed", "In Store", "Completed"].includes(j.status)))
+    .sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || ""))
+    .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))
+    // out of store inside the same move: only once the into-store invoice exists (an out-of-store move of its own can go any time)
+    .filter(x => x.pt !== "out" || isOutJob(x.j) || moveInvoiceFor(data, c, x.j, "in"));
+}
+const invOptLabel = (data, x) => x.pt === "out" ? `Out of store — ${moveRef(data, x.j)}` : x.pt === "in" ? `Into store — move ${moveRef(data, x.j)}` : `Move ${moveRef(data, x.j)}`;
 function NewInvoicePicker({ data, onPick, onClose }) {
   const [q, setQ] = useState("");
+  const [cust, setCust] = useState(null);
+  const typeBtn = { textAlign: "left", padding: "12px 14px", border: "1px solid #E9EEED", borderRadius: 10, background: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 14.5, fontWeight: 700, color: "#10211E" };
+  if (cust) {
+    const opts = moveInvoiceOptions(data, cust);
+    return (
+      <Modal title={`New invoice — ${cust.name || "customer"}`} onClose={onClose}>
+        <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 8 }}>What is this invoice for?</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {opts.map(x => <button key={x.j.id + x.pt} onClick={() => onPick(cust, x)} style={typeBtn}>{x.pt === "out" ? "🏬 " : "🚚 "}{invOptLabel(data, x)}<span style={{ display: "block", fontSize: 12.5, fontWeight: 500, color: "#6A7B77" }}>{gbpPlain(x.j.price)} · {x.j.status}</span></button>)}
+          <button onClick={() => onPick(cust, null)} style={typeBtn}>📝 Other — blank invoice</button>
+        </div>
+        {!opts.length && <div style={{ fontSize: 12.5, color: "#94A4A0", marginTop: 8 }}>No move invoices waiting for this customer (moves are invoiced once telephone confirmed or confirmed; storage is under Invoices to create).</div>}
+        <Btn variant="grey" style={{ width: "100%", marginTop: 10 }} onClick={() => setCust(null)}>← Choose another customer</Btn>
+      </Modal>
+    );
+  }
   const list = (data.customers || []).filter(c => { const t = q.trim().toLowerCase(); return !t || [c.name, c.company, c.ref, c.postcode, c.phone].filter(Boolean).join(" ").toLowerCase().includes(t); }).sort((a, b) => (Number(b.ref) || 0) - (Number(a.ref) || 0)).slice(0, 40);
   return (
     <Modal title="New invoice — choose customer" onClose={onClose}>
       <Input value={q} onChange={setQ} placeholder="Search name, ref, postcode…" />
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-        {list.map(c => <button key={c.id} onClick={() => onPick(c)} style={{ textAlign: "left", padding: "10px 12px", border: "1px solid #E9EEED", borderRadius: 10, background: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}><b>{c.ref ? c.ref + " " : ""}{c.name}</b><span style={{ color: "#6A7B77" }}>{c.postcode ? " · " + c.postcode : ""}</span></button>)}
+        {list.map(c => <button key={c.id} onClick={() => setCust(c)} style={{ textAlign: "left", padding: "10px 12px", border: "1px solid #E9EEED", borderRadius: 10, background: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}><b>{c.ref ? c.ref + " " : ""}{c.name}</b><span style={{ color: "#6A7B77" }}>{c.postcode ? " · " + c.postcode : ""}</span></button>)}
       </div>
     </Modal>
   );
@@ -6719,10 +6772,8 @@ function InvoicesView({ data, setView }) {
       </div>
       {open && <InvoiceModal data={data} custId={open.custId} invId={open.invId} draft={open.draft} onClose={() => setOpen(null)} />}
       {review && <StorageInvoiceReview data={data} due={due} onClose={() => setReview(false)} />}
-      {picker && <NewInvoicePicker data={data} onClose={() => setPicker(false)} onPick={c => {
+      {picker && <NewInvoicePicker data={data} onClose={() => setPicker(false)} onPick={(c, opt) => {
         setPicker(false);
-        const opt = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "In Store", "Completed"].includes(j.status)).sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || ""))
-          .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))[0];
         const draft = opt ? buildMoveInvoice(data, c, opt.j, opt.pt) : { id: uid(), no: nextInvoiceNo(data), kind: "other", date: todayISO(), due: addDaysISO(todayISO(), Number(getInvSettings().terms) || 7), title: "", lines: [{ desc: "", amount: "" }], vat: true, payments: [], notes: "", createdAt: new Date().toISOString() };
         setOpen({ custId: c.id, draft });
       }} />}
@@ -9530,7 +9581,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   const phone = device === "phone";
   const editCust = editRecId ? (data.customers || []).find(c => (c.storageInv || []).some(r => r.id === editRecId)) : null;
   const editRec = editCust ? (editCust.storageInv || []).find(r => r.id === editRecId) : null;
-  const loadConts = rec => { const cs = (rec.containers || []).map(c => ({ id: uid(), number: c.number || "", items: (c.items || []).map(it => ({ id: uid(), name: it.name || "", qty: it.qty || 1, conditions: Array.isArray(it.conditions) ? it.conditions : (it.condition ? [it.condition] : []), positions: Array.isArray(it.positions) ? it.positions : (it.position ? [it.position] : []), packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })); return cs.length ? cs : [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] }]; };
+  const loadConts = rec => { const cs = (rec.containers || []).map(c => ({ id: uid(), number: c.number || "", items: (c.items || []).map(it => ({ id: uid(), name: it.name || "", qty: it.qty || 1, conditions: Array.isArray(it.conditions) && it.conditions.length ? it.conditions : (it.condition ? [it.condition] : ["OK"]), positions: Array.isArray(it.positions) ? it.positions : (it.position ? [it.position] : []), packedBy: it.packedBy || "", dismantle: it.dismantle || "" })) })); return cs.length ? cs : [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] }]; };
   const DRAFT_KEY = editRecId ? "storageIntakeDraft_" + editRecId : "storageIntakeDraft";
   const saved = (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || sessionStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; } })();
   const src = saved || (editRec ? { customerId: editCust.id, date: editRec.date, location: editRec.location, crew: editRec.crew, containers: loadConts(editRec), custSig: editRec.custSig, empSig: editRec.empSig, empName: editRec.empName } : null);
@@ -9539,7 +9590,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   const [date, setDate] = useState(src?.date ?? todayISO());
   const [location, setLocation] = useState(src?.location ?? (getStorageLocs()[0] || "Wild & Lye"));
   const [crew, setCrew] = useState(src?.crew ?? []);
-  const [containers, setContainers] = useState(src?.containers ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] }]);
+  const [containers, setContainers] = useState((src?.containers && src.containers.map(c => ({ ...c, items: (c.items || []).map(it => ({ ...it, conditions: Array.isArray(it.conditions) && it.conditions.length ? it.conditions : ["OK"] })) }))) ?? [{ id: uid(), number: "", items: [{ id: uid(), name: "", qty: 1, conditions: ["OK"], positions: [], packedBy: "", dismantle: "" }] }]);
   const [custSig, setCustSig] = useState(src?.custSig ?? "");
   const [empSig, setEmpSig] = useState(src?.empSig ?? "");
   const [empName, setEmpName] = useState(src?.empName ?? "");
@@ -9619,7 +9670,11 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
     if (field === "conditions") list = val === "OK" ? ["OK"] : list.filter(x => x !== "OK");
     return { ...it, [field]: list };
   }) } : c)); };
-  const removeTag = (ci, ii, field, val) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => j === ii ? { ...it, [field]: (it[field] || []).filter(x => x !== val) } : it) } : c));
+  const removeTag = (ci, ii, field, val) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.map((it, j) => {
+    if (j !== ii) return it;
+    const left = (it[field] || []).filter(x => x !== val);
+    return { ...it, [field]: field === "conditions" && !left.length ? ["OK"] : left }; // no damage noted = OK
+  }) } : c));
   const removeItem = (ci, ii) => setContainers(cs => cs.map((c, i) => i === ci ? { ...c, items: c.items.filter((_, j) => j !== ii) } : c));
   const toggleCrew = name => setCrew(cr => cr.includes(name) ? cr.filter(z => z !== name) : [...cr, name]);
   const addCond = () => { const v = newCond.trim(); if (!v || conds.includes(v)) { setNewCond(""); return; } const nx = [...conds, v]; setConds(nx); saveConditions(nx); setNewCond(""); };
@@ -9753,7 +9808,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
                       <div style={{ marginBottom: phone ? 8 : 0 }}>
                         {(it.conditions || []).length > 0 && (
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 5 }}>
-                            {it.conditions.map(cd => <span key={cd} onClick={() => removeTag(ci, ii, "conditions", cd)} style={{ fontSize: 12, fontWeight: 700, color: "#8A4B12", background: "#FDEBD3", border: "1px solid #F5D6A8", borderRadius: 999, padding: "3px 9px", cursor: "pointer" }}>{cd} ✕</span>)}
+                            {it.conditions.map(cd => <span key={cd} onClick={() => removeTag(ci, ii, "conditions", cd)} style={{ fontSize: 12, fontWeight: 700, color: cd === "OK" ? "#15803D" : "#8A4B12", background: cd === "OK" ? "#E9F7EE" : "#FDEBD3", border: cd === "OK" ? "1px solid #BBE6C9" : "1px solid #F5D6A8", borderRadius: 999, padding: "3px 9px", cursor: "pointer" }}>{cd} ✕</span>)}
                           </div>
                         )}
                         <select value="" onChange={e => { addTag(ci, ii, "conditions", e.target.value); e.target.value = ""; }} style={selStyle}>
