@@ -1332,7 +1332,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B287";
+const BUILD_NO = "B288";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -9568,6 +9568,10 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
   };
   const [prefillMsg, setPrefillMsg] = useState("");
   const applyStoreDay = (cid, sjId) => {
+    // the inventory's location follows the storage job it's for
+    const cc = cid ? (data.customers || []).find(x => x.id === cid) : null;
+    const sjob = cc && sjId ? getStorageJobs(cc).find(j => j.id === sjId) : null;
+    if (sjob && sjob.location) setLocation(sjob.location);
     const sd = cid ? findStoreDay(cid, sjId) : null;
     if (!sd) { setPrefillMsg(""); return; }
     if (sd.date) setDate(sd.date);
@@ -9715,7 +9719,7 @@ function StorageIntakeForm({ data, setView, presetCustomerId, editRecId, presetJ
         })()}
         <div style={{ display: "flex", gap: 10 }}>
           <div style={{ flex: 1 }}><Field label="Date"><Input type="date" value={date} onChange={setDate} /></Field></div>
-          <div style={{ flex: 1 }}><Field label="Storage location"><Select value={location} onChange={setLocation} options={getStorageLocs()} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Storage location"><Select value={location} onChange={setLocation} options={[...new Set([...getStorageLocs(), ...(location ? [location] : [])])]} /></Field></div>
         </div>
         <Field label="Crew"><PickChips options={crewOpts} selectedIds={crew} takenIds={new Set()} onToggle={toggleCrew} empty="No staff — add under Company." /></Field>
       </Card>
