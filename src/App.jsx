@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B294";
+const BUILD_NO = "B295";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -10424,6 +10424,25 @@ function StorageView({ data, setView }) {
           <Stat label="Containers" value={totContainers} />
           <div style={{ width: 1, background: "#DCEAE7" }} />
           <Stat label="Total value" value={money(totValue)} />
+        </div>
+        {/* totals for each storage location (every saved location, even if empty) */}
+        <div style={{ borderTop: "1px solid #DCEAE7", marginTop: 12, paddingTop: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 44px 74px 84px", gap: 6, fontSize: 10.5, fontWeight: 800, color: "#94A4A0", textTransform: "uppercase", letterSpacing: ".04em", padding: "0 2px 4px" }}>
+            <span>Location</span><span style={{ textAlign: "right" }}>Jobs</span><span style={{ textAlign: "right" }}>Containers</span><span style={{ textAlign: "right" }}>Value</span>
+          </div>
+          {[...new Set([...getStorageLocs(), ...locNames])].sort((a, b) => a.localeCompare(b)).map(loc => {
+            const g = groups[loc] || [];
+            const n = g.reduce((t, { c, j }) => t + jobContainerCount(c, j), 0);
+            const v = g.reduce((t, { j }) => t + (Number(j.value) || 0), 0);
+            return (
+              <div key={loc} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 44px 74px 84px", gap: 6, fontSize: 13.5, padding: "5px 2px", borderTop: "1px solid #E8F1EF", color: g.length ? "#10211E" : "#94A4A0" }}>
+                <span style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{loc}</span>
+                <span style={{ textAlign: "right", fontWeight: 700 }}>{g.length}</span>
+                <span style={{ textAlign: "right", fontWeight: 700 }}>{n}</span>
+                <span style={{ textAlign: "right", fontWeight: 700 }}>{money(v)}</span>
+              </div>
+            );
+          })}
         </div>
       </Card>
 
