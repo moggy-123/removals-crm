@@ -1332,7 +1332,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B289";
+const BUILD_NO = "B290";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6646,30 +6646,41 @@ function CustomerInvoices({ data, c }) {
     </>
   );
 }
+// Home: only the invoices that need creating (moves booked but not invoiced, storage due)
 function InvoicesHomeCard({ data, setView }) {
   const role = CURRENT_USER.role;
   if (role === "crew" || role === "viewer") return null;
-  const all = allInvoices(data).map(x => ({ ...x, t: invTotals(x.inv) }));
-  const overdue = all.filter(x => x.t.status === "Overdue");
-  const owed = all.reduce((s, x) => s + (x.t.status === "Cancelled" ? 0 : Math.max(0, x.t.balance)), 0);
-  const due = storageDue(data).length;
-  if (!all.length && !due) return null;
+  // moves already marked paid in full (e.g. old imported moves) don't need an invoice raising
+  const moves = (data.customers || []).flatMap(c => moveInvoiceOptions(data, c).filter(x => !x.j.balancePaid).map(x => ({ c, ...x })));
+  const store = storageDue(data);
+  if (!moves.length && !store.length) return null;
+  const row = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 0", borderTop: "1px solid #F0F4F3", cursor: "pointer", fontSize: 13.5 };
   return (
-    <div onClick={() => setView({ screen: "invoices" })} style={{ background: "#fff", border: "1px solid #E3E9E8", borderRadius: 14, padding: "12px 14px", marginBottom: 14, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-      <div>
-        <div style={{ fontWeight: 800, fontSize: 15 }}>💷 Invoices</div>
-        <div style={{ fontSize: 12.5, color: "#6A7B77", marginTop: 2 }}>{gbpPlain(owed)} owed{overdue.length ? <span style={{ color: "#B91C1C", fontWeight: 800 }}> · {overdue.length} overdue</span> : ""}{due ? <span style={{ color: "#B45309", fontWeight: 800 }}> · {due} storage to invoice</span> : ""}</div>
-      </div>
-      <span style={{ fontSize: 13, fontWeight: 800, color: TEAL }}>Open ›</span>
+    <div style={{ background: "#fff", border: "1px solid #E3E9E8", borderRadius: 14, padding: "12px 14px", marginBottom: 14 }}>
+      <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>🧾 Invoices to create ({moves.length + store.length})</div>
+      {moves.slice(0, 8).map(x => (
+        <div key={x.j.id + x.pt} onClick={() => setView({ screen: "customerDetail", id: x.c.id })} style={row}>
+          <div style={{ minWidth: 0 }}><b>{x.c.ref ? x.c.ref + " " : ""}{x.c.name}</b><span style={{ color: "#6A7B77" }}> · {invOptLabel(data, x)}</span></div>
+          <span style={{ fontWeight: 800, color: "#10211E", flexShrink: 0 }}>{gbpPlain(x.j.price)}</span>
+        </div>
+      ))}
+      {moves.length > 8 && <div style={{ fontSize: 12, color: "#94A4A0", paddingTop: 4 }}>+{moves.length - 8} more</div>}
+      {store.length > 0 && (
+        <div onClick={() => setView({ screen: "invoices" })} style={row}>
+          <div><b>📦 {store.length} storage invoice{store.length !== 1 ? "s" : ""}</b><span style={{ color: "#6A7B77" }}> · check &amp; create</span></div>
+          <span style={{ fontSize: 13, fontWeight: 800, color: TEAL }}>Open ›</span>
+        </div>
+      )}
     </div>
   );
 }
 // Move invoices a customer can have created now
 function moveInvoiceOptions(data, c) {
-  return (data.jobs || []).filter(j => j.customerId === c.id && (isOutJob(j) ? j.status !== "Let Go" : ["Telephone Confirmed", "Confirmed", "In Store", "Completed"].includes(j.status)))
+  // a move (into store or out of store) is invoiced once it's booked: telephone confirmed or confirmed
+  return (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "In Store", "Completed"].includes(j.status))
     .sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || ""))
     .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))
-    // out of store inside the same move: only once the into-store invoice exists (an out-of-store move of its own can go any time)
+    // out of store inside the same move: only once the into-store invoice exists
     .filter(x => x.pt !== "out" || isOutJob(x.j) || moveInvoiceFor(data, c, x.j, "in"));
 }
 const invOptLabel = (data, x) => x.pt === "out" ? `Out of store — ${moveRef(data, x.j)}` : x.pt === "in" ? `Into store — move ${moveRef(data, x.j)}` : `Move ${moveRef(data, x.j)}`;
@@ -6686,7 +6697,7 @@ function NewInvoicePicker({ data, onPick, onClose }) {
           {opts.map(x => <button key={x.j.id + x.pt} onClick={() => onPick(cust, x)} style={typeBtn}>{x.pt === "out" ? "🏬 " : "🚚 "}{invOptLabel(data, x)}<span style={{ display: "block", fontSize: 12.5, fontWeight: 500, color: "#6A7B77" }}>{gbpPlain(x.j.price)} · {x.j.status}</span></button>)}
           <button onClick={() => onPick(cust, null)} style={typeBtn}>📝 Other — blank invoice</button>
         </div>
-        {!opts.length && <div style={{ fontSize: 12.5, color: "#94A4A0", marginTop: 8 }}>No move invoices waiting for this customer (moves are invoiced once telephone confirmed or confirmed; storage is under Invoices to create).</div>}
+        {!opts.length && <div style={{ fontSize: 12.5, color: "#94A4A0", marginTop: 8 }}>No move invoices waiting for this customer (moves, including out of store, are invoiced once telephone confirmed or confirmed; storage is under Invoices to create).</div>}
         <Btn variant="grey" style={{ width: "100%", marginTop: 10 }} onClick={() => setCust(null)}>← Choose another customer</Btn>
       </Modal>
     );
