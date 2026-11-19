@@ -40,7 +40,14 @@ function slugId(room, name) {
 function getRefStart() { const v = parseInt(localStorage.getItem(REF_KEY), 10); return Number.isFinite(v) ? v : 1000; }
 function setRefStart(n) { localStorage.setItem(REF_KEY, String(parseInt(n, 10) || 0)); }
 const STORLOC_KEY = "removals_storage_locs";
-function getStorageLocs() { try { const a = JSON.parse(localStorage.getItem(STORLOC_KEY) || "null"); return Array.isArray(a) && a.length ? a : ["Wild & Lye"]; } catch { return ["Wild & Lye"]; } }
+// Storage locations: the ones added on this device + every location already used on a storage job (so they show on all devices)
+let LIVE_LOCS = [];
+function getStorageLocs() {
+  let a = [];
+  try { const x = JSON.parse(localStorage.getItem(STORLOC_KEY) || "null"); if (Array.isArray(x)) a = x; } catch {}
+  const all = [...new Set([...a, ...LIVE_LOCS].map(v => String(v || "").trim()).filter(Boolean))];
+  return all.length ? all : ["Wild & Lye"];
+}
 // A customer can have several storage jobs. Migrate an old single `storage` object into one job.
 // Storage dates come from the move plan: into-store day = date in, out-of-store day = date out
 let LIVE_JOBS = [];
@@ -1325,7 +1332,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B286";
+const BUILD_NO = "B287";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6314,7 +6321,7 @@ function buildStorageInvoice(no, d) {
     id: uid(), no, kind: "storage", storageJobId: d.sj.id, periodFrom: d.from, periodTo: d.to, date: todayISO(), due: d.from > todayISO() ? d.from : todayISO(),
     title: `Storage ${fmtUK(d.from)} – ${fmtUK(d.to)}`,
     lines: [
-      { desc: `Storage${d.sj.location ? " at " + d.sj.location : ""}${Number(d.containers) ? `, ${d.containers} container${Number(d.containers) !== 1 ? "s" : ""}` : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.rate ?? d.sj.rate4w) },
+      { desc: `Storage${Number(d.containers) ? `, ${d.containers} container${Number(d.containers) !== 1 ? "s" : ""}` : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.rate ?? d.sj.rate4w) },
       ...(storeMpAmount(d.mpSj || d.sj) > 0 ? [{ desc: `MoveProtect storage cover, goods valued ${gbpPlain((d.mpSj || d.sj).value)} @ 0.1% per week × 4 weeks`, amount: storeMpAmount(d.mpSj || d.sj), extra: "mp" }] : []),
     ],
     vat: true, payments: [], notes: "", createdAt: new Date().toISOString(),
@@ -10162,7 +10169,11 @@ function StorageJobForm({ data, customer, job, forMove, onClose }) {
           {moves.map(m => { const d = storeDayOf(m); return <option key={m.id} value={m.id}>{moveRef(data, m)}{d ? ` · ${fmtUK(d.date)} · ${d.type || "Move"}` : ""}</option>; })}
         </select>
       </Field>
-      <Field label="Location of storage"><Select value={f.location} onChange={v => set("location", v)} options={locs} /></Field>
+      <Field label="Location of storage" hint="pick one, or type a new one below and tap Add — it's saved for next time"><Select value={f.location} onChange={v => set("location", v)} options={locs} /></Field>
+      <div style={{ display: "flex", gap: 8, margin: "-4px 0 12px", alignItems: "center" }}>
+        <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="New location, e.g. Unit 4 Avonmouth" /></div>
+        <Btn size="sm" variant="grey" onClick={addLoc} disabled={!newLoc.trim()}>+ Add</Btn>
+      </div>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Storage charge per 4 weeks" hint="£ ex VAT"><Input value={String(f.rate4w ?? "")} onChange={v => set("rate4w", v)} placeholder="0.00" /></Field></div>
         <div style={{ flex: 1 }}><Field label="Invoice from" hint="blank = current 4 weeks"><Input type="date" value={f.billFrom} onChange={v => set("billFrom", v)} /></Field></div>
@@ -10173,10 +10184,6 @@ function StorageJobForm({ data, customer, job, forMove, onClose }) {
       {f.mpCover && !(Number(f.value) > 0) ? <div style={{ fontSize: 12, color: "#B45309", marginBottom: 8 }}>Enter the value of goods above so MoveProtect can be worked out.</div> : null}
       {f.mpCover && Number(f.value) > 0 ? <div style={{ fontSize: 12, color: "#6A7B77", marginBottom: 8 }}>MoveProtect: {gbpPlain(storeMpAmount(f))} ex VAT every 4 weeks.</div> : null}
       {Number(f.rate4w) > 0 && f.dateIn ? <div style={{ fontSize: 12, color: "#6A7B77", marginTop: -4, marginBottom: 10 }}>Invoiced in advance every 4 weeks from {fmtUK(f.dateIn)} · {gbpPlain(r2(Number(f.rate4w) + storeMpAmount(f)) * (1 + VAT_RATE))} inc VAT each time. They appear under Invoices to create.</div> : null}
-      <div style={{ display: "flex", gap: 8, margin: "0 0 10px", alignItems: "flex-end" }}>
-        <div style={{ flex: 1 }}><Input value={newLoc} onChange={setNewLoc} placeholder="Add a storage location…" /></div>
-        <Btn size="sm" onClick={addLoc} disabled={!newLoc.trim()}>Add location</Btn>
-      </div>
       <Field label="Storage value (£)"><Input type="number" inputMode="decimal" value={f.value} onChange={v => set("value", v)} /></Field>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Date into store" hint={planD && planD.dateIn ? "from move plan" : undefined}>{planD && planD.dateIn ? <div style={{ ...inputStyle, background: "#F3F6F5", color: "#43534F" }}>{fmtUK(planD.dateIn)}</div> : <Input type="date" value={f.dateIn} onChange={v => set("dateIn", v)} />}</Field></div>
@@ -11167,6 +11174,7 @@ function MainApp() {
   const setView = useCallback((v) => { try { sessionStorage.setItem("removals_view", JSON.stringify(v)); } catch {} setViewState(v); setData(loadData()); }, []);
 
   LIVE_JOBS = data.jobs || [];
+  LIVE_LOCS = (data.customers || []).flatMap(c => [...(Array.isArray(c.storageJobs) ? c.storageJobs : []), ...(Array.isArray(c.storageInv) ? c.storageInv : [])].map(x => x && x.location));
   const NAV = [
     { id: "dashboard", icon: "dashboard", label: "Dashboard", phone: "Home" },
     { id: "enquiries", icon: "enquiries", label: "Enquiries", phone: "Enquiries" },
