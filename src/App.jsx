@@ -1325,7 +1325,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B284";
+const BUILD_NO = "B285";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6207,7 +6207,20 @@ function quoteStoreRate(data, sj) {
   const w = Number(qx.storageWeekly) || 0, n = Number(qx.storageContainers) || 0;
   return w > 0 ? { rate4w: r2(w * (n || 1) * 4), weekly: w, containers: n || 1 } : null;
 }
-function storeRate(data, sj) { return Number(sj.rate4w) > 0 ? Number(sj.rate4w) : ((quoteStoreRate(data, sj) || {}).rate4w || 0); }
+function storeRate(data, sj, c) { return c ? storeRateInfo(data, c, sj).rate : Number(sj.rate4w) > 0 ? Number(sj.rate4w) : ((quoteStoreRate(data, sj) || {}).rate4w || 0); }
+// Storage is only invoiced once its storage inventory is completed (signed) — the containers on it are what's charged
+function storeInvsDone(c, sj) { return ((c && c.storageInv) || []).filter(r => r && !r.draft && r.jobId === sj.id); }
+function storeContainersUsed(c, sj) { const done = storeInvsDone(c, sj); return done.length ? done.reduce((n, r) => n + (r.containers || []).length, 0) : null; }
+// 4-week charge = £ per container per week (quote) × containers used (inventory) × 4 — unless a charge was
+// typed in for that same number of containers, which is remembered
+function storeRateInfo(data, c, sj) {
+  const q = quoteStoreRate(data, sj);
+  const used = storeContainersUsed(c, sj);
+  const weekly = Number(sj.weekly) || (q ? q.weekly : 0);
+  const n = used != null ? used : (q ? q.containers : 0);
+  if (Number(sj.rate4w) > 0 && (used == null || Number(sj.rateContainers) === used || !weekly)) return { rate: Number(sj.rate4w), weekly, containers: n, used };
+  return { rate: weekly && n ? r2(weekly * n * 4) : (Number(sj.rate4w) || 0), weekly, containers: n, used };
+}
 function storeMpAmount(sj) { return sj && sj.mpCover && Number(sj.value) > 0 ? r2(Number(sj.value) * STORE_MP_WEEKLY * 4) : 0; }
 const STORE_PERIOD = 28;
 function storagePeriodsDue(job, upTo, rateOverride) {
@@ -6225,15 +6238,17 @@ function storagePeriodsDue(job, upTo, rateOverride) {
   }
   return out;
 }
-function storageDue(data) {
+function storageDue(data, waiting) {
   const today = todayISO(), due = [];
   (data.customers || []).forEach(c => {
     getStorageJobs(c).forEach(sj => {
       if (sj.id === "legacy") return;
-      storagePeriodsDue(sj, today, storeRate(data, sj)).forEach(p => {
-        if ((c.invoices || []).some(x => x.kind === "storage" && x.storageJobId === sj.id && x.periodFrom === p.from && !x.void)) return;
-        due.push({ c, sj, ...p, rate: storeRate(data, sj) });
-      });
+      const ri = storeRateInfo(data, c, sj);
+      // a rate is needed to work out the periods; with no rate yet, still flag it once the inventory is done
+      const periods = storagePeriodsDue(sj, today, ri.rate || 1).filter(p => !(c.invoices || []).some(x => x.kind === "storage" && x.storageJobId === sj.id && x.periodFrom === p.from && !x.void));
+      if (!periods.length) return;
+      if (ri.used == null) { if (waiting) waiting.push({ c, sj, n: periods.length }); return; }
+      periods.forEach(p => due.push({ c, sj, ...p, rate: ri.rate, weekly: ri.weekly, containers: ri.containers }));
     });
   });
   return due.sort((a, b) => a.from.localeCompare(b.from));
@@ -6264,7 +6279,7 @@ function buildStorageInvoice(no, d) {
     id: uid(), no, kind: "storage", storageJobId: d.sj.id, periodFrom: d.from, periodTo: d.to, date: todayISO(), due: d.from > todayISO() ? d.from : todayISO(),
     title: `Storage ${fmtUK(d.from)} – ${fmtUK(d.to)}`,
     lines: [
-      { desc: `Storage${d.sj.location ? " at " + d.sj.location : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.rate ?? d.sj.rate4w) },
+      { desc: `Storage${d.sj.location ? " at " + d.sj.location : ""}${Number(d.containers) ? `, ${d.containers} container${Number(d.containers) !== 1 ? "s" : ""}` : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.rate ?? d.sj.rate4w) },
       ...(storeMpAmount(d.mpSj || d.sj) > 0 ? [{ desc: `MoveProtect storage cover, goods valued ${gbpPlain((d.mpSj || d.sj).value)} @ 0.1% per week × 4 weeks`, amount: storeMpAmount(d.mpSj || d.sj), extra: "mp" }] : []),
     ],
     vat: true, payments: [], notes: "", createdAt: new Date().toISOString(),
@@ -6276,7 +6291,7 @@ async function createStorageInvoices(data, list) {
   const jobUpd = {};
   list.forEach(d => {
     (byCust[d.c.id] = byCust[d.c.id] || []).push(buildStorageInvoice(no++, d));
-    if (d.mpSj || d.rate != null) jobUpd[d.sj.id] = { rate4w: r2(d.rate ?? d.sj.rate4w), ...(d.mpSj ? { mpCover: !!d.mpSj.mpCover, value: Number(d.mpSj.value) || 0 } : {}) };
+    if (d.mpSj || d.rate != null) jobUpd[d.sj.id] = { rate4w: r2(d.rate ?? d.sj.rate4w), ...(Number(d.containers) ? { rateContainers: Number(d.containers) } : {}), ...(Number(d.weekly) ? { weekly: Number(d.weekly) } : {}), ...(d.mpSj ? { mpCover: !!d.mpSj.mpCover, value: Number(d.mpSj.value) || 0 } : {}) };
   });
   Object.keys(byCust).forEach(cid => {
     const c = (cur.customers || []).find(x => x.id === cid); if (!c) return;
@@ -6470,9 +6485,15 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
 // ── List rows + customer card + Home card + Invoices screen
 // Check / change each storage invoice before it's made: 4-week charge (from the quote), MoveProtect and goods value
 function StorageInvoiceReview({ data, due, onClose }) {
-  const [rows, setRows] = useState(() => due.map(d => ({ ...d, rate: String(r2(d.rate || 0)), mp: !!d.sj.mpCover, value: String(d.sj.value || ""), on: true })));
+  const [rows, setRows] = useState(() => due.map(d => ({ ...d, rate: String(r2(d.rate || 0)), containers: String(d.containers || ""), weekly: d.weekly ? String(r2(d.weekly)) : "", mp: !!d.sj.mpCover, value: String(d.sj.value || ""), on: true })));
   const [busy, setBusy] = useState(false);
-  const upd = (i, k, v) => setRows(a => a.map((r, ix) => ix === i ? { ...r, [k]: v } : r));
+  // changing the containers or the weekly price works the 4-week charge out again (it can still be typed over)
+  const upd = (i, k, v) => setRows(a => a.map((r, ix) => {
+    if (ix !== i) return r;
+    const nr = { ...r, [k]: v };
+    if ((k === "containers" || k === "weekly") && Number(nr.weekly) > 0 && Number(nr.containers) > 0) nr.rate = String(r2(Number(nr.weekly) * Number(nr.containers) * 4));
+    return nr;
+  }));
   const mpOf = r => r.mp && Number(r.value) > 0 ? r2(Number(r.value) * STORE_MP_WEEKLY * 4) : 0;
   const pick = rows.filter(r => r.on);
   const go = async () => {
@@ -6480,11 +6501,11 @@ function StorageInvoiceReview({ data, due, onClose }) {
     if (pick.some(r => !(Number(r.rate) > 0))) { alert("Enter the 4-week storage charge for each invoice."); return; }
     if (pick.some(r => r.mp && !(Number(r.value) > 0))) { alert("Enter the value of goods for MoveProtect."); return; }
     setBusy(true);
-    await createStorageInvoices(data, pick.map(r => ({ ...r, rate: r2(r.rate), mpSj: { ...r.sj, mpCover: r.mp, value: Number(r.value) || 0 } })));
+    await createStorageInvoices(data, pick.map(r => ({ ...r, rate: r2(r.rate), containers: Number(r.containers) || 0, weekly: Number(r.weekly) || 0, mpSj: { ...r.sj, mpCover: r.mp, value: Number(r.value) || 0 } })));
   };
   return (
     <Modal title="Storage invoices to create" onClose={onClose}>
-      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 10 }}>Charges come from the customer's quote (£ per container per week × containers × 4 weeks). Change anything here — it's remembered for their next invoice.</div>
+      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 10 }}>Charge = £ per container per week (from the quote) × containers used (from the storage inventory) × 4 weeks. Change anything here — it's remembered for their next invoice.</div>
       {rows.map((r, i) => {
         const q = quoteStoreRate(data, r.sj);
         const net = r2((Number(r.rate) || 0) + mpOf(r));
@@ -6493,8 +6514,12 @@ function StorageInvoiceReview({ data, due, onClose }) {
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
               <input type="checkbox" checked={r.on} onChange={e => upd(i, "on", e.target.checked)} style={{ width: 18, height: 18 }} /> {r.c.ref ? r.c.ref + " " : ""}{r.c.name}
             </label>
-            <div style={{ fontSize: 12.5, color: "#6A7B77", margin: "2px 0 8px 26px" }}>{fmtUK(r.from)} – {fmtUK(r.to)}{r.sj.location ? ` · ${r.sj.location}` : ""}{q ? ` · quote: ${gbpPlain(q.weekly)}/wk × ${q.containers} container${q.containers !== 1 ? "s" : ""}` : ""}</div>
+            <div style={{ fontSize: 12.5, color: "#6A7B77", margin: "2px 0 8px 26px" }}>{fmtUK(r.from)} – {fmtUK(r.to)}{r.sj.location ? ` · ${r.sj.location}` : ""} · inventory: {storeContainersUsed(r.c, r.sj)} container{storeContainersUsed(r.c, r.sj) !== 1 ? "s" : ""}{q ? ` · quoted ${q.containers}` : ""}</div>
             {r.on && <>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: 1 }}><Field label="Containers"><Input type="number" inputMode="numeric" value={r.containers} onChange={v => upd(i, "containers", v)} /></Field></div>
+                <div style={{ flex: 1 }}><Field label="£ / container / week"><Input inputMode="decimal" value={r.weekly} onChange={v => upd(i, "weekly", v)} placeholder="£" /></Field></div>
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ flex: 1 }}><Field label="4-week charge" hint="£ ex VAT"><Input value={r.rate} onChange={v => upd(i, "rate", v)} /></Field></div>
                 <div style={{ flex: 1 }}><Field label="Goods value" hint="for MoveProtect"><Input value={r.value} onChange={v => upd(i, "value", v)} placeholder="£" /></Field></div>
@@ -6592,7 +6617,8 @@ function InvoicesView({ data, setView }) {
   const [review, setReview] = useState(false);
   const [sv, setSv] = useState(getInvSettings);
   const all = allInvoices(data).map(x => ({ ...x, t: invTotals(x.inv) })).sort((a, b) => (b.inv.no || 0) - (a.inv.no || 0));
-  const due = storageDue(data);
+  const waiting = [];
+  const due = storageDue(data, waiting);
   const today = todayISO(), ym = today.slice(0, 7);
   const lastM = (() => { const d = new Date(today + "T12:00"); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
   const inPeriod = dt => period === "All dates" ? true : period === "This month" ? (dt || "").startsWith(ym) : period === "Last month" ? (dt || "").startsWith(lastM) : period === "Last 3 months" ? (dt || "") >= addDaysISO(today, -92) : period === "This year" ? (dt || "").startsWith(today.slice(0, 4)) : true;
@@ -6634,6 +6660,9 @@ function InvoicesView({ data, setView }) {
         <div style={{ fontSize: 12.5, color: "#92400E", margin: "4px 0 8px" }}>{due.slice(0, 6).map(d => `${d.c.ref ? d.c.ref + " " : ""}${d.c.name} · ${fmtUK(d.from)}–${fmtUK(d.to)} · ${gbpPlain(r2(Number(d.rate) + storeMpAmount(d.sj)) * (1 + VAT_RATE))}`).join("\n").split("\n").map((l, i) => <div key={i}>{l}</div>)}{due.length > 6 ? <div>…and {due.length - 6} more</div> : null}</div>
         {!ro && <Btn variant="amber" disabled={busy} onClick={() => setReview(true)}>Check &amp; create</Btn>}
       </Card>}
+      {waiting.length > 0 && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#6A7B77", background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "9px 12px", marginBottom: 12 }}>
+        📋 Storage waiting for its storage inventory to be completed before it can be invoiced: {waiting.map(w => `${w.c.ref ? w.c.ref + " " : ""}${w.c.name}`).join(", ")}
+      </div>}
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <div style={{ flex: 2 }}><Input value={q} onChange={setQ} placeholder="Search invoice no., name, ref…" /></div>
         <div style={{ flex: 1 }}><Select value={period} onChange={setPeriod} options={["All dates", "This month", "Last month", "Last 3 months", "This year"]} /></div>
