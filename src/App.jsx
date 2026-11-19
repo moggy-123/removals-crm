@@ -1332,7 +1332,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B292";
+const BUILD_NO = "B293";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6351,7 +6351,9 @@ function storageCredits(c, exceptInvId) {
 }
 function buildStorageInvoice(no, d) {
   return {
-    id: uid(), no, kind: "storage", storageJobId: d.sj.id, periodFrom: d.from, periodTo: d.to, date: todayISO(), due: d.from > todayISO() ? d.from : todayISO(),
+    id: uid(), no, kind: "storage", storageJobId: d.sj.id, periodFrom: d.from, periodTo: d.to,
+    // dated the start of the 4 weeks (the into-store date for the first one) unless changed
+    date: d.invDate || d.from, due: (d.invDate || d.from) > todayISO() ? (d.invDate || d.from) : todayISO(),
     title: `Storage ${fmtUK(d.from)} – ${fmtUK(d.to)}`,
     lines: [
       { desc: `Storage${Number(d.containers) ? `, ${d.containers} container${Number(d.containers) !== 1 ? "s" : ""}` : ""}, 4 weeks ${fmtUK(d.from)} – ${fmtUK(d.to)}`, amount: r2(d.rate ?? d.sj.rate4w) },
@@ -6560,7 +6562,7 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
 // ── List rows + customer card + Home card + Invoices screen
 // Check / change each storage invoice before it's made: 4-week charge (from the quote), MoveProtect and goods value
 function StorageInvoiceReview({ data, due, onClose }) {
-  const [rows, setRows] = useState(() => due.map(d => ({ ...d, rate: String(r2(d.rate || 0)), containers: String(d.containers || ""), weekly: d.weekly ? String(r2(d.weekly)) : "", mp: !!d.sj.mpCover, value: String(d.sj.value || ""), on: true })));
+  const [rows, setRows] = useState(() => due.map(d => ({ ...d, rate: String(r2(d.rate || 0)), containers: String(d.containers || ""), weekly: d.weekly ? String(r2(d.weekly)) : "", mp: !!d.sj.mpCover, value: String(d.sj.value || ""), invDate: d.from, on: true })));
   const [busy, setBusy] = useState(false);
   // changing the containers or the weekly price works the 4-week charge out again (it can still be typed over)
   const upd = (i, k, v) => setRows(a => a.map((r, ix) => {
@@ -6591,6 +6593,7 @@ function StorageInvoiceReview({ data, due, onClose }) {
             </label>
             <div style={{ fontSize: 12.5, color: "#6A7B77", margin: "2px 0 8px 26px" }}>{fmtUK(r.from)} – {fmtUK(r.to)}{r.sj.location ? ` · ${r.sj.location}` : ""} · inventory: {storeContainersUsed(r.c, r.sj)} container{storeContainersUsed(r.c, r.sj) !== 1 ? "s" : ""}{q ? ` · quoted ${q.containers}` : ""}</div>
             {r.on && <>
+              <Field label="Invoice date" hint={r.invDate === r.from ? "start of these 4 weeks" : undefined}><Input type="date" value={r.invDate} onChange={v => upd(i, "invDate", v || r.from)} /></Field>
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ flex: 1 }}><Field label="Containers"><Input type="number" inputMode="numeric" value={r.containers} onChange={v => upd(i, "containers", v)} /></Field></div>
                 <div style={{ flex: 1 }}><Field label="£ / container / week"><Input inputMode="decimal" value={r.weekly} onChange={v => upd(i, "weekly", v)} placeholder="£" /></Field></div>
