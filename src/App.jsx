@@ -1258,7 +1258,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B279";
+const BUILD_NO = "B280";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4690,6 +4690,7 @@ function MoveManageModal({ data, job, onClose }) {
   const [f, setF] = useState({ price: job.price ?? "", deposit: job.deposit ?? "", depositPaid: !!job.depositPaid, balancePaid: !!job.balancePaid, status: job.status || "Provisional" });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const price = Number(f.price) || 0;
+  const depAmt = depositFor(data, job.enquiryId, price);
   const balanceDue = price - (Number(f.deposit) || 0);
   const [assign, setAssign] = useState(false);
   const [changing, setChanging] = useState(false); // change crew / vans on a confirmed move (sickness, van off road…)
@@ -4732,7 +4733,7 @@ function MoveManageModal({ data, job, onClose }) {
       return (ss || vs) ? `Day ${i + 1}:${ss ? ` ${ss} more staff` : ""}${ss && vs ? " and" : ""}${vs ? ` ${vs} more vehicle${vs !== 1 ? "s" : ""}` : ""}` : null;
     }).filter(Boolean);
     if (shortfalls.length && !confirm(`This move is below the planned resources:\n\n${shortfalls.join("\n")}\n\nCarry on anyway?`)) return;
-    persist(to === "Confirmed" ? { stages: days, status: "Confirmed", deposit: Math.round(price * 0.6), depositPaid: true } : { stages: days, status: to });
+    persist(to === "Confirmed" ? { stages: days, status: "Confirmed", deposit: depAmt, depositPaid: true } : { stages: days, status: to });
   };
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
   const letGoMove = async () => {
@@ -4807,7 +4808,7 @@ function MoveManageModal({ data, job, onClose }) {
       )}
 
       {f.status === "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={() => confirmMove(TEL_CONF)}>📞 {assign && target === TEL_CONF ? "Save as telephone confirmed" : "Telephone confirmed — book crew & vehicles"}</Btn>}
-      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}><Icon name="check" size={16} /> {(assign && target === "Confirmed") || f.status === TEL_CONF ? `Confirm — take 60% deposit (${gbp(Math.round(price * 0.6))})` : "Confirm — book crew & vehicles"}</Btn>}
+      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}><Icon name="check" size={16} /> {(assign && target === "Confirmed") || f.status === TEL_CONF ? `Confirm — take 60% deposit (${gbp(depAmt)})` : "Confirm — book crew & vehicles"}</Btn>}
       {f.status === "Confirmed" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={completeMove}><Icon name="check" size={16} /> Mark move complete</Btn>}
       {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
       {f.status !== "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
@@ -5056,7 +5057,7 @@ function BookMoveModal({ data, e, initial, onClose, onBook }) {
         <button style={seg(status === TEL_CONF)} onClick={() => setStatus(TEL_CONF)}>📞 Tel. confirmed</button>
         <button style={seg(status === "Confirmed")} onClick={() => setStatus("Confirmed")}>Confirmed</button>
       </div>
-      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? "The date is definite. Deposit is marked as paid (60%) — change it on the move if not." : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
+      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? `The date is definite. Deposit of ${gbp(depositFor(data, e.id, e.quoteTotal))} (60%${splitStoreLines(e).outLines.length && splitStoreLines(e).inLines.length ? ", not counting the out-of-store charge" : ""}) is marked as paid — change it on the move if not.` : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
       {planned.map((d, i) => (
         <div key={i} style={needRes ? { background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 12, padding: "10px 12px 2px", marginBottom: 10 } : {}}>
           <Field label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate) && !isOutDay(d)} hint={isOutDay(d) ? "add later when known" : undefined}>
@@ -5380,7 +5381,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       moveDate: stages.map(st => st.date).filter(Boolean).sort()[0] || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: e.quoteTotal || 0,
-      deposit: newStatus === "Confirmed" ? Math.round((Number(e.quoteTotal) || 0) * 0.6) : 0, depositPaid: newStatus === "Confirmed", balancePaid: false,
+      deposit: newStatus === "Confirmed" ? depositFor(data, e.id, e.quoteTotal) : 0, depositPaid: newStatus === "Confirmed", balancePaid: false,
       status: newStatus, notes: "", createdAt: new Date().toISOString(),
     };
     let d2 = upsertLocal(data, "jobs", job);
@@ -5962,6 +5963,16 @@ function moveInvoiceParts(data, j) {
   const sp = splitStoreLines(e);
   return sp.outLines.length && sp.inLines.length ? ["in", "out"] : ["all"]; // only split when the quote has both
 }
+// Deposit = 60% of everything except the out-of-store charge (that's paid when they come out)
+function depositFor(data, enquiryId, price) {
+  const e = (data.enquiries || []).find(x => x.id === enquiryId);
+  const sp = splitStoreLines(e);
+  const p = Number(price) || 0;
+  if (!sp.outLines.length || !sp.inLines.length) return Math.round(p * 0.6);
+  const inNet = sp.inLines.reduce((s2, l) => s2 + (Number(l.amount) || 0), 0);
+  const allNet = inNet + sp.outLines.reduce((s2, l) => s2 + (Number(l.amount) || 0), 0);
+  return Math.round(p * (allNet > 0 ? inNet / allNet : 1) * 0.6);
+}
 function buildMoveInvoice(data, c, j, part = "all") {
   const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
   const stagesAll = jobStages(j);
@@ -6466,7 +6477,7 @@ function CustomerDetail({ data, id, setView }) {
     survey_time: latestEnq.surveyTime || "",
     date: latestEnq.preferredDate ? fmtDate(latestEnq.preferredDate) : (latestEnq.moveMonth ? fmtMonth(latestEnq.moveMonth) : ""),
     price: latestEnq.quoteTotal ? gbp(latestEnq.quoteTotal) : "",
-    deposit: latestEnq.quoteTotal ? gbp(Math.round(latestEnq.quoteTotal * 0.6)) : "",
+    deposit: latestEnq.quoteTotal ? gbp(depositFor(data, latestEnq.id, latestEnq.quoteTotal)) : "",
   } : {};
   const [showEdit, setShowEdit] = useState(false);
   const [jobForm, setJobForm] = useState(null);
@@ -8130,7 +8141,7 @@ function JobDetailScreen({ data, j, setView }) {
     if (!f.stages || !f.stages.length || bad.length) { alert(`Book named crew and at least one vehicle for every day first.\n\nStill needed on day ${bad.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     if (to !== "Confirmed") { setF(p => ({ ...p, status: to })); await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: to }))); return; }
     const price = Number(f.price) || 0;
-    const dep = Math.round(price * 0.6);
+    const dep = depositFor(data, j.enquiryId, price);
     setF(p => ({ ...p, status: "Confirmed", deposit: dep, depositPaid: true }));
     await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: "Confirmed", deposit: dep, depositPaid: true })));
   }
@@ -8241,7 +8252,7 @@ function JobDetailScreen({ data, j, setView }) {
       )}
       {isPencilled(f.status) && (
         <Btn variant="primary" style={{ width: "100%", marginTop: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}>
-          <Icon name="check" size={16} /> {confirming === "Confirmed" || confirming === true || f.status === TEL_CONF ? `Confirm move — take 60% deposit (${gbp(Math.round((Number(f.price) || 0) * 0.6))})` : "Confirm move — book crew & vehicles"}
+          <Icon name="check" size={16} /> {confirming === "Confirmed" || confirming === true || f.status === TEL_CONF ? `Confirm move — take 60% deposit (${gbp(depositFor(data, j.enquiryId, f.price))})` : "Confirm move — book crew & vehicles"}
         </Btn>
       )}
       {f.status === "Confirmed" && (
