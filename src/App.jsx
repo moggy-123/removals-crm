@@ -46,7 +46,8 @@ function getStorageLocs() { try { const a = JSON.parse(localStorage.getItem(STOR
 let LIVE_JOBS = [];
 function planStoreDates(job) {
   const st = jobStages(job);
-  const out = st.find(isOutDay);
+  const oj = outJobOf(LIVE_JOBS, job);
+  const out = oj ? { date: oj.status === "Let Go" ? "" : (jobStages(oj).map(x => x.date).filter(Boolean).sort()[0] || "") } : st.find(isOutDay);
   const into = st.find(x => /into stor|to stor/i.test(x.type || "") && !isOutDay(x)) || st.filter(x => x.date && !isOutDay(x)).sort((a, b) => a.date.localeCompare(b.date))[0];
   return { dateIn: (into && into.date) || "", dateOut: out ? (out.date || "") : null };
 }
@@ -144,6 +145,72 @@ const holdsResources = st => RES_STATUSES.includes(st);
 // "Out of store" days are usually dated later, when the customer's ready — they don't need a date (or crew) to book
 const isOutDay = st => /out of stor|from stor|ex[- ]?stor|redeliver/i.test((st && st.type) || "");
 const outPending = st => isOutDay(st) && !st.date;
+// Out of store is its own move (own plan, date, crew, vans, status), linked to the into-store move.
+// The link is kept on the job (out_of) and on each of its days as a back-up.
+const NOT_BOOKED = "Not booked";
+const outParentId = j => (j && (j.outOf || ((j.stages || []).find(s => s && s.outOf) || {}).outOf)) || "";
+const isOutJob = j => !!outParentId(j);
+const outJobOf = (jobs, parent) => parent && !isOutJob(parent) ? (jobs || []).find(x => x.id !== parent.id && outParentId(x) === parent.id) || null : null;
+const parentJobOf = (jobs, j) => { const p = outParentId(j); return p ? (jobs || []).find(x => x.id === p) || null : null; };
+const jobEnquiryId = (jobs, j) => (j && (j.enquiryId || (parentJobOf(jobs, j) || {}).enquiryId)) || "";
+// Where tapping a move goes: its enquiry (an out-of-store move goes to the into-store move's enquiry)
+function jobView(j) {
+  const eid = jobEnquiryId(LIVE_JOBS, j);
+  return eid ? { screen: "enquiryDetail", id: eid } : { screen: "jobDetail", id: j.id };
+}
+// A move plan with both into-store and out-of-store days is booked as two moves
+function splitPlanDays(stages) {
+  const all = Array.isArray(stages) ? stages : [];
+  const inDays = all.filter(d => !isOutDay(d)), outDays = all.filter(isOutDay);
+  return inDays.length && outDays.length ? { inDays, outDays, split: true } : { inDays: all, outDays: [], split: false };
+}
+// Quote lines marked as the out-of-store charge (so they stay recognised once the out day leaves the plan)
+function flagOutLines(e) {
+  const days = (e && e.stages) || [];
+  return ((e && e.quoteLines) || []).map((l, i) => (l && !l.out && (OUT_RE.test(l.desc || "") || OUT_RE.test((days[i] && days[i].type) || ""))) ? { ...l, out: true } : l);
+}
+function outStatusFor(stages) { return (stages || []).some(s => s.date) ? "Provisional" : NOT_BOOKED; }
+function makeOutJob(parent, outDays, price, status) {
+  const stages = outDays.map(d => ({ id: uid(), type: d.type || "Out of store", date: d.date || "", time: d.time || "", vehicleIds: d.vehicleIds || [], crew: d.crew || [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "", outOf: parent.id }));
+  return {
+    id: parent.id + "out", outOf: parent.id, customerId: parent.customerId, enquiryId: null, startTime: "",
+    fromAddress1: parent.fromAddress1, fromAddress2: parent.fromAddress2, fromTown: parent.fromTown, fromPostcode: parent.fromPostcode, fromAccess: parent.fromAccess,
+    toAddress1: parent.toAddress1, toAddress2: parent.toAddress2, toTown: parent.toTown, toPostcode: parent.toPostcode, toAccess: parent.toAccess,
+    crew: [...new Set(stages.flatMap(x => x.crew))], vehicleIds: [...new Set(stages.flatMap(x => x.vehicleIds))], vehicle: "",
+    stages, moveDate: stages.map(x => x.date).filter(Boolean).sort()[0] || "",
+    volumeCuFt: parent.volumeCuFt, volumeM3: parent.volumeM3, weightKg: parent.weightKg,
+    price: Number(price) || 0, deposit: 0, depositPaid: false, balancePaid: false,
+    status: status || outStatusFor(stages), notes: "", createdAt: new Date().toISOString(), updatedAt: Date.now(),
+  };
+}
+// Older bookings had the out-of-store day inside the into-store move: move it out into its own move.
+function splitOldOutDays(d) {
+  let changed = false;
+  let jobs = (d.jobs || []).slice(), enqs = (d.enquiries || []).slice();
+  (d.jobs || []).forEach(j => {
+    if (isOutJob(j) || j.status === "Let Go") return;
+    const sp = splitPlanDays(jobStages(j));
+    if (!sp.split || jobs.some(x => outParentId(x) === j.id)) return;
+    const ei = enqs.findIndex(x => x.id === j.enquiryId);
+    const e = ei >= 0 ? enqs[ei] : null;
+    let outPrice = 0;
+    if (e) {
+      const lines = flagOutLines(e);
+      outPrice = quoteTotal(lines.filter(l => l && l.out), e.quoteVat !== false);
+      enqs[ei] = { ...e, quoteLines: lines, stages: splitPlanDays(e.stages).inDays, updatedAt: Date.now() };
+    }
+    const held = holdsResources(j.status) && sp.outDays.every(s => s.date && (s.crew || []).length && (s.vehicleIds || []).length);
+    const oStatus = held ? (j.status === TEL_CONF ? TEL_CONF : "Confirmed") : outStatusFor(sp.outDays);
+    const inPrice = outPrice && Number(j.price) >= outPrice ? Math.round((Number(j.price) - outPrice) * 100) / 100 : Number(j.price) || 0;
+    const inStages = sp.inDays;
+    const pj = { ...j, stages: inStages, moveDate: inStages.map(x => x.date).filter(Boolean).sort()[0] || "", price: inPrice,
+      crew: [...new Set(inStages.flatMap(x => x.crew || []))], vehicleIds: [...new Set(inStages.flatMap(x => x.vehicleIds || []))], updatedAt: Date.now() };
+    jobs = jobs.map(x => x.id === j.id ? pj : x);
+    jobs.push(makeOutJob(pj, sp.outDays, outPrice, oStatus));
+    changed = true;
+  });
+  return changed ? { ...d, jobs, enquiries: enqs } : d;
+}
 // Date changes on a telephone confirmed / confirmed move: what moved, and whether its crew & vans are free on the new date
 function heldDateChanges(data, job, newStages, byIndex) {
   if (!job || !holdsResources(job.status)) return [];
@@ -184,7 +251,7 @@ function takenOnDate(data, date, exceptJobId) {
   return { veh, crew };
 }
 // Calendar colours (all views): quotes red, provisional yellow, telephone confirmed purple, confirmed blue, vehicle green, staff holiday orange
-const CAL_COL = { quote: "#DC2626", Provisional: "#EAB308", "Telephone Confirmed": "#7C3AED", Confirmed: "#2563EB", "In Store": "#2563EB", Completed: "#94A3B8", vehicle: "#16A34A", staff: "#EA580C" };
+const CAL_COL = { "Not booked": "#94A3B8", quote: "#DC2626", Provisional: "#EAB308", "Telephone Confirmed": "#7C3AED", Confirmed: "#2563EB", "In Store": "#2563EB", Completed: "#94A3B8", vehicle: "#16A34A", staff: "#EA580C" };
 const PROPERTY_TYPES = ["Detached house", "Semi-detached house", "Terraced house", "End of terrace house", "Townhouse", "Cottage", "House",
   "Detached bungalow", "Semi-detached bungalow", "Bungalow", "Flat / Apartment", "Maisonette", "Farmhouse", "Barn conversion",
   "Mobile / park home", "Office", "Commercial unit", "Storage Unit", "Other"];
@@ -1258,7 +1325,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B282";
+const BUILD_NO = "B283";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1407,7 +1474,8 @@ function calQuoteName(data, en) {
   return [c.ref ? String(c.ref) : "", out ? `(${out})` : "", base].filter(Boolean).join(" ");
 }
 function moveSeqOf(data, job) {
-  const sib = (data.jobs || []).filter(j => j.customerId === job.customerId).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "") || (a.id || "").localeCompare(b.id || ""));
+  if (isOutJob(job)) { const p = parentJobOf(data.jobs, job); if (p) return moveSeqOf(data, p); }
+  const sib = (data.jobs || []).filter(j => j.customerId === job.customerId && !isOutJob(j)).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "") || (a.id || "").localeCompare(b.id || ""));
   const i = sib.findIndex(j => j.id === job.id);
   return i >= 0 ? i + 1 : 1;
 }
@@ -1500,7 +1568,8 @@ const volText = (data, j) => { const v = jobVolume(data, j); return v ? `${v.toL
 function moveRef(data, job) {
   const c = (data.customers || []).find(x => x.id === job.customerId);
   const seq = moveSeqOf(data, job);
-  return (c && c.ref) ? `${c.ref}/${seq}` : `Move ${seq}`;
+  const sfx = isOutJob(job) ? " out" : "";
+  return (c && c.ref) ? `${c.ref}/${seq}${sfx}` : `Move ${seq}${sfx}`;
 }
 // Mark an enquiry lost (the reason shows on the customer screen under that enquiry).
 function withLost(d, en, reason) {
@@ -1738,19 +1807,21 @@ function isMissedSurvey(e, todayIso = todayISO()) {
     && !["Surveyed", "Quoted", "Won", "Lost", "Let Go", "Not quoted"].includes(e.status));
 }
 function missedSurveys(data) { const t = todayISO(); return (data.enquiries || []).filter(e => isMissedSurvey(e, t)).sort((a, b) => a.surveyDate.localeCompare(b.surveyDate)); }
-function autoCompletePastMoves(d) {
+function autoCompletePastMoves(d0) {
+  const d = splitOldOutDays(d0);
   const todayIso = todayISO();
-  let changed = false;
+  let changed = d !== d0;
   const jobs = (d.jobs || []).map(j => {
-    if (isPencilled(j.status) || j.status === "Let Go") return j;
+    if (isPencilled(j.status) || j.status === "Let Go" || j.status === NOT_BOOKED) return j;
     const st = jobStages(j);
     const dates = st.map(s => s.date).filter(Boolean);
     if (!dates.length || !dates.every(dt => dt < todayIso)) return j;
     // Gone into store but not out yet → "In Store", not completed. "Not out yet" = the Out of store day isn't dated or
     // is still to come; or (no Out of store day in the plan) a storage job for this move with no date out.
-    const out = st.find(isOutDay);
+    const oj = outJobOf(d.jobs, j);
+    const out = oj ? (oj.status === "Let Go" ? null : { date: jobStages(oj).map(x => x.date).filter(Boolean).sort()[0] || "" }) : isOutJob(j) ? null : st.find(isOutDay);
     const sj = (d.customers || []).flatMap(c => Array.isArray(c.storageJobs) ? c.storageJobs : []).find(x => x.moveJobId === j.id);
-    const stillIn = out ? (!out.date || out.date >= todayIso) : !!(sj && !(sj.dateOut && sj.dateOut <= todayIso));
+    const stillIn = out ? (!out.date || out.date >= todayIso) : !isOutJob(j) && !oj && !!(sj && !(sj.dateOut && sj.dateOut <= todayIso));
     if (stillIn) { if (j.status === "In Store") return j; changed = true; return { ...j, status: "In Store", updatedAt: Date.now() }; }
     if (j.status === "Completed") return j;
     changed = true; return { ...j, status: "Completed", balancePaid: true, updatedAt: Date.now() };
@@ -1819,7 +1890,7 @@ function Dashboard({ data, setView, setData }) {
   const twoWeeksIso = isoAdd(todayIso, { days: 14 });
   const inWindow = iso => !!iso && iso >= todayIso && iso <= twoWeeksIso;
   const pastProvisional = jobs.filter(j => isPencilled(j.status)).map(j => ({ j, last: jobLatestDate(j) })).filter(x => x.last && x.last < todayIso).sort((a, b) => a.last.localeCompare(b.last));
-  const changeDate = j => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id });
+  const changeDate = j => setView(jobView(j));
   async function removeBooking(j) {
     const nDays = jobStages(j).length;
     if (!confirm(`Remove this provisional booking for ${custName(data, j.customerId)} and its ${nDays} day${nDays !== 1 ? "s" : ""}?\n\nThe move (and its days) will be deleted. If it came from an enquiry, that enquiry goes back to "Quoted".`)) return;
@@ -2001,7 +2072,7 @@ function Dashboard({ data, setView, setData }) {
                 ? `${vehTypesSummary(st.vehTypes) || "Vehicle TBC"} · ${Number(st.staffCount) || "—"} crew (planned)`
                 : `${vehNames || "No vehicle"}${(st.crew || []).length ? " · " + st.crew.join(", ") : ""}`;
               return (
-                <Card key={"tm" + (j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
+                <Card key={"tm" + (j.id || "") + (st.id || ix)} onClick={() => setView(jobView(j))} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>Today{st.time ? ` · ${st.time}` : ""} · {st.type || "Move"}</div>
@@ -2077,7 +2148,7 @@ function Dashboard({ data, setView, setData }) {
       {dashShow === "moves" && (
         <div style={{ marginBottom: 18 }}>
           {todaysMovesList.length === 0 ? <Empty icon="truck" text="No moves today" /> : todaysMovesList.map(({ j, st }, ix) => (
-            <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
+            <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(jobView(j))} style={{ borderColor: "#CDE7E2", background: "#F3FAF8" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{fmtDate(st.date)} ({dow(st.date)}){st.time ? ` · ${st.time}` : ""}{st.type ? ` · ${st.type}` : ""}</div>
@@ -2103,7 +2174,7 @@ function Dashboard({ data, setView, setData }) {
               ? `${vehTypesSummary(st.vehTypes) || "Vehicle TBC"} · ${Number(st.staffCount) || "—"} crew (planned)`
               : `${vehNames || "No vehicle"}${(st.crew || []).length ? " · " + st.crew.length + " crew" : ""}`;
             return (
-            <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
+            <Card key={(j.id || "") + (st.id || ix)} onClick={() => setView(jobView(j))}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.type || "Move"}{st.time ? ` · ${st.time}` : ""}</div>
@@ -3761,6 +3832,15 @@ function QuoteModal({ data, enquiry, onClose }) {
   // Keep the linked move's price in step with the quote total
   function withMovePrice(d, rec) {
     const job = (d.jobs || []).find(j => j.enquiryId === enquiry.id);
+    const oj = outJobOf(d.jobs, job);
+    if (oj) { // split moves: into-store move gets the quote less the out-of-store lines, which go on the out-of-store move
+      const sp = splitStoreLines(rec);
+      const outP = quoteTotal(sp.outLines, rec.quoteVat !== false);
+      const inP = Math.max(0, Math.round(((Number(rec.quoteTotal) || 0) - outP) * 100) / 100);
+      if (Number(job.price) !== inP) d = upsertLocal(d, "jobs", { ...job, price: inP });
+      if (Number(oj.price) !== outP) d = upsertLocal(d, "jobs", { ...oj, price: outP });
+      return d;
+    }
     return job && Number(job.price) !== Number(rec.quoteTotal) ? upsertLocal(d, "jobs", { ...job, price: rec.quoteTotal }) : d;
   }
   async function saveDraft() {
@@ -3864,17 +3944,18 @@ function Row({ label, value }) {
   );
 }
 
-function MovePlanModal({ data, enquiry, onClose }) {
-  const linkedJob = (data.jobs || []).find(j => j.enquiryId === enquiry.id);
+function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
+  // ownJob = an out-of-store move: its plan lives on the move itself, not on the enquiry
+  const linkedJob = ownJob || (data.jobs || []).find(j => j.enquiryId === enquiry.id);
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const crewOpts = crewOptions(data);
   const vname = id => ((data.vehicles || []).find(v => v.id === id) || {}).name;
-  const [days, setDays] = useState(() => (Array.isArray(enquiry.stages) ? enquiry.stages : []).map((d, i) => {
+  const [days, setDays] = useState(() => ownJob ? jobStages(ownJob).map(d => ({ ...d, crew: d.crew || [], vehicleIds: d.vehicleIds || [], vehTypes: d.vehTypes || {} })) : (Array.isArray(enquiry.stages) ? enquiry.stages : []).map((d, i) => {
     const js = linkedJob ? (linkedJob.stages || [])[i] : null;
     // once booked, the move's own dates are the real ones (a blank day stays blank)
     return { ...d, date: js ? (js.date || "") : (d.date || ""), crew: (d.crew && d.crew.length ? d.crew : (js?.crew || [])), vehicleIds: (d.vehicleIds && d.vehicleIds.length ? d.vehicleIds : (js?.vehicleIds || [])) };
   }));
-  const addDay = () => setDays(d => [...d, { id: uid(), type: "Move", date: "", staffCount: "", vehTypes: {}, crew: [], vehicleIds: [], notes: "" }]);
+  const addDay = () => setDays(d => [...d, { id: uid(), type: ownJob ? "Out of store" : "Move", date: "", staffCount: "", vehTypes: {}, crew: [], vehicleIds: [], notes: "" }]);
   const removeDay = (i) => setDays(d => d.filter((_, ix) => ix !== i));
   const setDay = (i, k, v) => setDays(d => d.map((x, ix) => ix === i ? { ...x, [k]: v } : x));
   const setVeh = (i, vt, n) => setDays(d => d.map((x, ix) => {
@@ -3915,12 +3996,13 @@ function MovePlanModal({ data, enquiry, onClose }) {
     days.forEach((d, i) => { if (d.date) (d.vehicleIds || []).forEach(vid => { const vv = (data.vehicles || []).find(x => x.id === vid); if (vv && vehOutOn(vv, d.date)) clashes.push(`${vv.name} on day ${i + 1} (${fmtUK(d.date)})`); }); });
     if (clashes.length) { alert(`These vehicles are booked out for servicing/MOT and can't be used:\n\n${clashes.join("\n")}\n\nRemove them or move the maintenance date.`); return; }
     // Plan deleted (no days left) before any move exists → step back to "Surveyed".
+    if (ownJob && !days.length) { alert("The out-of-store move needs at least one day."); return; }
     const stepBack = !days.length && !linkedJob && enquiry.status === "Quoted";
-    let d = upsertLocal(data, "enquiries", { ...enquiry, stages: days, ...(stepBack ? { status: "Surveyed", surveyDone: true } : {}) });
+    let d = ownJob ? data : upsertLocal(data, "enquiries", { ...enquiry, stages: days, ...(stepBack ? { status: "Surveyed", surveyDone: true } : {}) });
     if (linkedJob) {
       const newStages = days.map((day, i) => {
         const ex = (linkedJob.stages || [])[i] || {};
-        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || "", time: ex.time || "", vehicleIds: day.vehicleIds || [], crew: day.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "" };
+        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || "", time: ex.time || "", vehicleIds: day.vehicleIds || [], crew: day.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "", ...(ownJob ? { outOf: outParentId(ownJob) } : {}) };
       });
       const allVeh = [...new Set(newStages.flatMap(s => s.vehicleIds || []))];
       const allCrew = [...new Set(newStages.flatMap(s => s.crew || []))];
@@ -3931,7 +4013,7 @@ function MovePlanModal({ data, enquiry, onClose }) {
   }
   const stepBtn = { width: 34, height: 34, borderRadius: 9, border: "1.5px solid #E3E9E8", background: "#F7FAF9", color: TEAL_D, fontSize: 18, fontWeight: 700, cursor: "pointer", lineHeight: 1 };
   return (
-    <Modal title="Move plan" onClose={onClose}>
+    <Modal title={ownJob ? "Out of store plan" : "Move plan"} onClose={onClose}>
       <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>{linkedJob ? "Assign the staff and vehicles for each day. Saving updates the move and the calendar." : "Scope the days for this move. These carry onto the move when you create it."}</div>
       {(enquiry.fromAccess || enquiry.toAccess) && (
         <div style={{ fontSize: 12.5, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 9, padding: "9px 11px", marginBottom: 12 }}>
@@ -4691,12 +4773,14 @@ function MoveManageModal({ data, job, onClose }) {
   const [f, setF] = useState({ price: job.price ?? "", deposit: job.deposit ?? "", depositPaid: !!job.depositPaid, balancePaid: !!job.balancePaid, status: job.status || "Provisional" });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const price = Number(f.price) || 0;
-  const depAmt = depositFor(data, job.enquiryId, price);
+  const outMove = isOutJob(job);
+  const depAmt = outMove ? 0 : depositFor(data, job.enquiryId, price); // no deposit on an out-of-store move
+  const outKid = outJobOf(data.jobs, job);
   const balanceDue = price - (Number(f.deposit) || 0);
   const [assign, setAssign] = useState(false);
   const [changing, setChanging] = useState(false); // change crew / vans on a confirmed move (sickness, van off road…)
   const [shortWarn, setShortWarn] = useState(null); // list of short days, shown as a banner before saving
-  const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", staffCount: st.staffCount || "", vehTypes: st.vehTypes || {}, crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "" })));
+  const [days, setDays] = useState(() => jobStages(job).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", staffCount: st.staffCount || "", vehTypes: st.vehTypes || {}, crew: st.crew || [], vehicleIds: st.vehicleIds || [], notes: st.notes || "", ...(st.outOf ? { outOf: st.outOf } : {}) })));
   const crewOpts = crewOptions(data);
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const bookedOn = date => {
@@ -4724,9 +4808,9 @@ function MoveManageModal({ data, job, onClose }) {
   const confirmMove = (to = "Confirmed") => {
     if (typeof to !== "string") to = "Confirmed";
     if ((!assign && f.status !== TEL_CONF) || target !== to) { setTarget(to); setAssign(true); return; }
-    const noDate = days.map((st, i) => (st.date || isOutDay(st)) ? null : i + 1).filter(Boolean);
+    const noDate = days.map((st, i) => (st.date || (!outMove && isOutDay(st))) ? null : i + 1).filter(Boolean);
     if (days.length && noDate.length) { alert(`Set the date for every day in the move plan first.\n\nNo date on day ${noDate.join(", ")}.`); return; }
-    const bad = days.map((st, i) => !outPending(st) && (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+    const bad = days.map((st, i) => !(outPending(st) && !outMove) && (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
     if (!days.length || bad.length) { alert(`Book the crew and at least one vehicle for every day first.\n\nStill needed on day ${bad.join(", ")}.`); return; }
     const shortfalls = days.map((d, i) => {
       const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -4734,18 +4818,20 @@ function MoveManageModal({ data, job, onClose }) {
       return (ss || vs) ? `Day ${i + 1}:${ss ? ` ${ss} more staff` : ""}${ss && vs ? " and" : ""}${vs ? ` ${vs} more vehicle${vs !== 1 ? "s" : ""}` : ""}` : null;
     }).filter(Boolean);
     if (shortfalls.length && !confirm(`This move is below the planned resources:\n\n${shortfalls.join("\n")}\n\nCarry on anyway?`)) return;
-    persist(to === "Confirmed" ? { stages: days, status: "Confirmed", deposit: depAmt, depositPaid: true } : { stages: days, status: to });
+    persist(to === "Confirmed" && !outMove ? { stages: days, status: "Confirmed", deposit: depAmt, depositPaid: true } : { stages: days, status: to });
   };
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
   const letGoMove = async () => {
     if (!confirm("Let this move go?\n\nIt'll be kept for your records but removed from the calendar, availability and upcoming moves. You can reinstate it later.")) return;
     let d2 = upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: "Let Go" });
+    if (outKid && outKid.status !== "Completed") d2 = upsertLocal(d2, "jobs", { ...outKid, status: "Let Go" });
     const enq = (data.enquiries || []).find(x => x.id === job.enquiryId);
     if (enq) d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Let Go" });
     await saveAndReload(d2);
   };
   const reinstateMove = async () => {
-    let d2 = upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: "Provisional" });
+    let d2 = upsertLocal(data, "jobs", { ...job, price: Number(f.price) || 0, deposit: Number(f.deposit) || 0, depositPaid: f.depositPaid, balancePaid: f.balancePaid, status: outMove ? outStatusFor(jobStages(job)) : "Provisional" });
+    if (outKid && outKid.status === "Let Go") d2 = upsertLocal(d2, "jobs", { ...outKid, status: outStatusFor(jobStages(outKid)) });
     const enq = (data.enquiries || []).find(x => x.id === job.enquiryId);
     if (enq && enq.status === "Let Go") d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Won" });
     await saveAndReload(d2);
@@ -4753,13 +4839,22 @@ function MoveManageModal({ data, job, onClose }) {
   const reopenConfirmed = () => persist({ status: "Confirmed" });
   const revertProvisional = () => persist({ status: "Provisional" });
   async function removeMove() {
+    if (outMove) { // out of store goes back to "Not booked" (the plan days stay, dates, crew & vans cleared)
+      if (!confirm("Cancel the out-of-store booking? It goes back to Not booked — the date, crew and vans are cleared.")) return;
+      const st = jobStages(job).map(x => ({ ...x, date: "", crew: [], vehicleIds: [] }));
+      await persist({ stages: st, moveDate: "", crew: [], vehicleIds: [], vehicle: "", status: NOT_BOOKED });
+      return;
+    }
     if (!confirm("Remove this move and send the enquiry back to Quoted? Day assignments will be lost.")) return;
     addTombstone(job.id);
     SAVING_IN_PROGRESS = true; showSavingOverlay();
     try { await deleteRecord("jobs", job.id); } catch {}
-    let d2 = { ...data, jobs: (data.jobs || []).filter(x => x.id !== job.id) };
+    if (outKid) { addTombstone(outKid.id); try { await deleteRecord("jobs", outKid.id); } catch {} }
+    let d2 = { ...data, jobs: (data.jobs || []).filter(x => x.id !== job.id && !(outKid && x.id === outKid.id)) };
     const enq = (d2.enquiries || []).find(x => x.id === job.enquiryId);
-    if (enq) { d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Quoted", quoteStatus: "Sent" }); d2 = altReopen(d2, enq); }
+    // the out-of-store day goes back into the plan
+    const back = outKid ? jobStages(outKid).map(({ outOf, ...x }) => ({ ...x, date: "", crew: [], vehicleIds: [] })) : [];
+    if (enq) { d2 = upsertLocal(d2, "enquiries", { ...enq, status: "Quoted", quoteStatus: "Sent", ...(back.length ? { stages: [...(enq.stages || []), ...back] } : {}) }); d2 = altReopen(d2, enq); }
     const stamped = stampData(d2);
     setDB(JSON.stringify(stamped));
     try { await pushChangedOnly(stamped); } catch {}
@@ -4809,10 +4904,10 @@ function MoveManageModal({ data, job, onClose }) {
       )}
 
       {f.status === "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={() => confirmMove(TEL_CONF)}>📞 {assign && target === TEL_CONF ? "Save as telephone confirmed" : "Telephone confirmed — book crew & vehicles"}</Btn>}
-      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}><Icon name="check" size={16} /> {(assign && target === "Confirmed") || f.status === TEL_CONF ? `Confirm — take 60% deposit (${gbp(depAmt)})` : "Confirm — book crew & vehicles"}</Btn>}
+      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}><Icon name="check" size={16} /> {(assign && target === "Confirmed") || f.status === TEL_CONF ? (outMove ? "Confirm out of store" : `Confirm — take 60% deposit (${gbp(depAmt)})`) : "Confirm — book crew & vehicles"}</Btn>}
       {f.status === "Confirmed" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={completeMove}><Icon name="check" size={16} /> Mark move complete</Btn>}
       {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
-      {f.status !== "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
+      {f.status !== "Provisional" && f.status !== NOT_BOOKED && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
 
       {["Provisional", TEL_CONF, "Confirmed"].includes(f.status) && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={letGoMove}>Let this move go</Btn>}
       {f.status === "Let Go" && (
@@ -4830,7 +4925,7 @@ function MoveManageModal({ data, job, onClose }) {
         }
         persist(changing || assign ? { stages: days } : undefined);
       }}><Icon name="check" size={16} /> Save</Btn>
-      <Btn variant="danger" style={{ width: "100%" }} onClick={removeMove}><Icon name="trash" size={14} /> Remove move — back to Quoted</Btn>
+      {!(outMove && f.status === NOT_BOOKED) && <Btn variant="danger" style={{ width: "100%" }} onClick={removeMove}><Icon name="trash" size={14} /> {outMove ? "Cancel booking — back to Not booked" : `Remove move — back to Quoted${outKid ? " (and its out of store)" : ""}`}</Btn>}
     </Modal>
   );
 }
@@ -5024,8 +5119,12 @@ function FmSeg({ items, value, onChange, big }) {
 // Booking a move: choose Provisional or Confirmed and set the date for every day (from the move plan).
 function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
   // job = an existing provisional / telephone confirmed move being moved up; otherwise a new booking
-  const planned = job ? jobStages(job) : (Array.isArray(e.stages) && e.stages.length ? e.stages : [{ type: "Move", date: "" }]);
-  const choices = job ? (job.status === TEL_CONF ? ["Confirmed"] : [TEL_CONF, "Confirmed"]) : ["Provisional", TEL_CONF, "Confirmed"];
+  // An out-of-store move is booked on its own: its date is needed like any other move
+  const outMode = !!(job && isOutJob(job));
+  const inPlan = splitPlanDays(e.stages).inDays;
+  const planned = job ? jobStages(job) : (inPlan.length ? inPlan : [{ type: "Move", date: "" }]);
+  const choices = job && job.status !== NOT_BOOKED ? (job.status === TEL_CONF ? ["Confirmed"] : [TEL_CONF, "Confirmed"]) : ["Provisional", TEL_CONF, "Confirmed"];
+  const optOut = d => !outMode && isOutDay(d); // out-of-store day still inside a plan: date can wait
   const [status, setStatus] = useState(choices.includes(initial) ? initial : (choices.length === 1 ? choices[0] : null));
   const [dates, setDates] = useState(planned.map(d => d.date || ""));
   const [noDate, setNoDate] = useState(false);
@@ -5035,15 +5134,15 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
   const vehOpts = (data.vehicles || []).map(v => ({ id: v.id, label: [v.name, v.reg].filter(Boolean).join(" · ") }));
   const taken = i => { const t = takenOnDate(data, dates[i], job && job.id); res.forEach((r, k) => { if (k !== i && dates[k] && dates[k] === dates[i]) { r.crew.forEach(c => t.crew.add(c)); r.vehicleIds.forEach(v => t.veh.add(v)); } }); return t; };
   const toggleRes = (i, key, id) => setRes(a => a.map((r, k) => k !== i ? r : { ...r, [key]: r[key].includes(id) ? r[key].filter(x => x !== id) : [...r[key], id] }));
-  const price = Number(e.quoteTotal) || 0;
-  const missing = dates.map((d, i) => (d || isOutDay(planned[i])) ? null : i + 1).filter(Boolean);
+  const price = outMode ? (Number(job.price) || 0) : (Number(e.quoteTotal) || 0);
+  const missing = dates.map((d, i) => (d || optOut(planned[i])) ? null : i + 1).filter(Boolean);
   const go = () => {
     if (!(status === "Provisional" && noDate) && missing.length) { alert(`Pick a date for ${planned.length > 1 ? `day ${missing.join(", ")}` : "the move"} first.`); return; }
     if (needRes) {
-      const bad = res.map((r, i) => !(isOutDay(planned[i]) && !dates[i]) && (!r.crew.length || !r.vehicleIds.length) ? i + 1 : null).filter(Boolean);
+      const bad = res.map((r, i) => !(optOut(planned[i]) && !dates[i]) && (!r.crew.length || !r.vehicleIds.length) ? i + 1 : null).filter(Boolean);
       if (bad.length) { alert(`Book the crew and at least one vehicle for ${planned.length > 1 ? `day ${bad.join(", ")}` : "the move"} — ${status === TEL_CONF ? "telephone confirmed" : "confirmed"} moves hold their staff and vans.`); return; }
       const short = planned.map((d, i) => {
-        if (isOutDay(d) && !dates[i]) return null;
+        if (optOut(d) && !dates[i]) return null;
         const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
         const ss = Math.max(0, ps - res[i].crew.length), vs = Math.max(0, pv - res[i].vehicleIds.length);
         return (ss || vs) ? `${planned.length > 1 ? `Day ${i + 1}:` : ""}${ss ? ` ${ss} more staff` : ""}${ss && vs ? " and" : ""}${vs ? ` ${vs} more vehicle${vs !== 1 ? "s" : ""}` : ""}` : null;
@@ -5055,8 +5154,8 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
   const seg = on => ({ flex: 1, padding: "11px 8px", borderRadius: 10, border: on ? `2px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : "#fff", color: on ? TEAL_D : "#43534F", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" });
   return (
     !status ? (
-      <Modal title="Book this move" onClose={onClose}>
-        <div style={{ fontSize: 13.5, color: "#6A7B77", marginBottom: 12 }}>How is this move booked?</div>
+      <Modal title={outMode ? "Book out of store" : "Book this move"} onClose={onClose}>
+        <div style={{ fontSize: 13.5, color: "#6A7B77", marginBottom: 12 }}>How is this {outMode ? "out-of-store move" : "move"} booked?</div>
         {choices.map(ch => {
           const meta = ch === "Provisional" ? ["#CA8A04", "#FEFCE8", "Pencilled in — not fully committed yet"] : ch === TEL_CONF ? ["#7C3AED", "#F5F3FF", "Customer has rung to say it's definite — deposit to follow"] : ["#2563EB", "#EFF6FF", "Definite — deposit taken"];
           return (
@@ -5069,17 +5168,17 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
         <Btn variant="grey" style={{ width: "100%" }} onClick={onClose}>Cancel</Btn>
       </Modal>
     ) :
-    <Modal title="Book this move" onClose={onClose}>
+    <Modal title={outMode ? "Book out of store" : "Book this move"} onClose={onClose}>
       <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
         {choices.map(ch => <button key={ch} style={seg(status === ch)} onClick={() => setStatus(ch)}>{ch === TEL_CONF ? "📞 Tel. confirmed" : ch}</button>)}
       </div>
-      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? `The date is definite. Deposit of ${gbp(depositFor(data, e.id, e.quoteTotal))} (60%${splitStoreLines(e).outLines.length && splitStoreLines(e).inLines.length ? ", not counting the out-of-store charge" : ""}) is marked as paid — change it on the move if not.` : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
+      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" && outMode ? "The date is definite — no deposit on the out-of-store move, it's invoiced when they come out." : status === "Confirmed" ? `The date is definite. Deposit of ${gbp(depositFor(data, e.id, e.quoteTotal))} (60%${splitStoreLines(e).outLines.length && splitStoreLines(e).inLines.length ? ", not counting the out-of-store charge" : ""}) is marked as paid — change it on the move if not.` : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
       {planned.map((d, i) => (
         <div key={i} style={needRes ? { background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 12, padding: "10px 12px 2px", marginBottom: 10 } : {}}>
-          <Field label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate) && !isOutDay(d)} hint={isOutDay(d) ? "add later when known" : undefined}>
+          <Field label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate) && !optOut(d)} hint={optOut(d) ? "add later when known" : undefined}>
             <Input type="date" value={dates[i]} onChange={v => setDates(a => a.map((x, k) => k === i ? v : x))} />
           </Field>
-          {needRes && !(isOutDay(d) && !dates[i]) && <>
+          {needRes && !(optOut(d) && !dates[i]) && <>
             {(Number(d.staffCount) || Object.keys(d.vehTypes || {}).length) ? <div style={{ fontSize: 12, color: "#6A7B77", marginTop: -4, marginBottom: 8 }}>Planned: {[vehTypesSummary(d.vehTypes), Number(d.staffCount) ? `${d.staffCount} crew` : ""].filter(Boolean).join(" · ")}</div> : null}
             <Field label="Crew" required><PickChips options={crewOpts} selectedIds={res[i].crew} takenIds={taken(i).crew} takenReasons={crewReasonsOn(data, dates[i])} onToggle={id => toggleRes(i, "crew", id)} empty="No staff — add under Company." /></Field>
             <Field label="Vehicles" required><PickChips options={vehOpts} selectedIds={res[i].vehicleIds} takenIds={taken(i).veh} onToggle={id => toggleRes(i, "vehicleIds", id)} empty="No vehicles — add under Company." /></Field>
@@ -5087,7 +5186,8 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
           </>}
         </div>
       ))}
-      {e.preferredDate ? <div style={{ fontSize: 12, color: "#94A4A0", marginTop: -4, marginBottom: 10 }}>Enquiry said around {fmtDate(e.preferredDate)} — just a heads-up, not used.</div> : null}
+      {!outMode && splitPlanDays(e.stages).split && <div style={{ fontSize: 12, color: "#6A7B77", background: "#F4F7F6", borderRadius: 9, padding: "8px 11px", marginBottom: 10 }}>🏬 Out of store becomes its own move — book it later from the customer's enquiry when they have a date.</div>}
+      {!outMode && e.preferredDate ? <div style={{ fontSize: 12, color: "#94A4A0", marginTop: -4, marginBottom: 10 }}>Enquiry said around {fmtDate(e.preferredDate)} — just a heads-up, not used.</div> : null}
       {status === "Provisional" && (
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: "#374151", cursor: "pointer", marginBottom: 10 }}>
           <input type="checkbox" checked={noDate} onChange={ev => setNoDate(ev.target.checked)} style={{ width: 18, height: 18 }} /> Customer has no date yet (No date provisional)
@@ -5099,6 +5199,55 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
         <Btn variant={status === "Confirmed" ? undefined : "amber"} style={{ flex: 2, ...(status === TEL_CONF ? { background: "#7C3AED", borderColor: "#7C3AED", boxShadow: "none" } : status === "Confirmed" ? { background: "#2563EB", borderColor: "#2563EB" } : {}) }} onClick={go}><Icon name="check" size={15} /> Book {status === TEL_CONF ? "telephone confirmed" : status.toLowerCase()} move</Btn>
       </div>
     </Modal>
+  );
+}
+// The out-of-store move: its own plan, booking and status, under the into-store move
+function OutOfStoreCard({ data, e, parent }) {
+  const oj = outJobOf(data.jobs, parent);
+  const [open, setOpen] = useState(null); // "plan" | "book" | "manage"
+  if (!oj) return null;
+  const ro = isReadOnly();
+  const st = jobStages(oj);
+  const dated = st.filter(x => x.date).map(x => x.date).sort();
+  const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name;
+  const canBook = !ro && (oj.status === NOT_BOOKED || isPencilled(oj.status));
+  return (
+    <>
+      {open === "plan" && <MovePlanModal data={data} enquiry={e} job={oj} onClose={() => setOpen(null)} />}
+      {open === "manage" && <MoveManageModal data={data} job={oj} onClose={() => setOpen(null)} />}
+      {open === "book" && <BookMoveModal data={data} e={e} job={oj} onClose={() => setOpen(null)} onBook={async (stt, dates, res) => {
+        setOpen(null);
+        const stages = st.map((x, i) => ({ ...x, outOf: parent.id, date: dates[i] || "", ...(res && res[i] ? { crew: res[i].crew, vehicleIds: res[i].vehicleIds } : {}) }));
+        const allVeh = [...new Set(stages.flatMap(x => x.vehicleIds || []))];
+        await saveAndReload(upsertLocal(data, "jobs", { ...oj, stages, status: stt, moveDate: stages.map(x => x.date).filter(Boolean).sort()[0] || "",
+          crew: [...new Set(stages.flatMap(x => x.crew || []))], vehicleIds: allVeh, vehicle: allVeh.map(vname).filter(Boolean).join(", ") }));
+      }} />}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 700, color: "#111827" }}>🏬 Out of store {moveRef(data, oj)}</div>
+              <StatusBadge status={jobBadge(oj)} />
+            </div>
+            <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>
+              {st.map((d, i) => (
+                <div key={d.id || i}>{st.length > 1 ? <b style={{ color: "#10211E" }}>Day {i + 1}: </b> : null}{d.type || "Out of store"} · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}
+                  {(d.crew && d.crew.length) ? ` · ${d.crew.length} crew` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
+                  {(d.vehicleIds && d.vehicleIds.length) ? ` · ${d.vehicleIds.map(vname).filter(Boolean).join(", ")}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3 }}>{gbp(oj.price)} · invoiced when they come out{oj.balancePaid ? " · paid ✓" : ""}</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
+            <Btn size="sm" variant="grey" onClick={() => setOpen("plan")}><Icon name="calendar" size={14} /> {ro ? "Plan" : "Edit plan"}</Btn>
+            {oj.status !== NOT_BOOKED && <Btn size="sm" onClick={() => setOpen("manage")}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
+          </div>
+        </div>
+        {canBook && <Btn variant="amber" style={{ width: "100%", marginTop: 10 }} onClick={() => setOpen("book")}><Icon name="check" size={16} /> Book out of store</Btn>}
+        {!dated.length && oj.status === NOT_BOOKED && <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 6 }}>Book it when the customer has a date — it stays in store until then.</div>}
+      </Card>
+    </>
   );
 }
 function BookedNoMove({ data, e, linkedJob, onCreate }) {
@@ -5380,7 +5529,12 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       return;
     }
     const jid = uid();
-    const planned = Array.isArray(e.stages) ? e.stages : [];
+    // Into store + out of store in one plan → book the into-store move now; out of store becomes its own move
+    const sp = splitPlanDays(e.stages);
+    const planned = sp.inDays;
+    const qLines = sp.split ? flagOutLines(e) : e.quoteLines;
+    const outPrice = sp.split ? quoteTotal((qLines || []).filter(l => l && l.out), e.quoteVat !== false) : 0;
+    const inPrice = sp.split ? Math.max(0, Math.round(((Number(e.quoteTotal) || 0) - outPrice) * 100) / 100) : (e.quoteTotal || 0);
     const stages = planned.length
       // Dates come from the move plan only — the enquiry's date is just a heads-up. No plan date = "No date provisional".
       ? planned.map((d, i) => ({ id: uid(), type: d.type || "Move", date: (opts.dates && opts.dates[i]) || "", time: "", vehicleIds: (opts.res && opts.res[i] && opts.res[i].vehicleIds) || [], crew: (opts.res && opts.res[i] && opts.res[i].crew) || [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "" }))
@@ -5396,14 +5550,15 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       stages,
       moveDate: stages.map(st => st.date).filter(Boolean).sort()[0] || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
-      price: e.quoteTotal || 0,
-      deposit: newStatus === "Confirmed" ? depositFor(data, e.id, e.quoteTotal) : 0, depositPaid: newStatus === "Confirmed", balancePaid: false,
+      price: inPrice,
+      deposit: newStatus === "Confirmed" ? (sp.split ? Math.round(inPrice * 0.6) : depositFor(data, e.id, e.quoteTotal)) : 0, depositPaid: newStatus === "Confirmed", balancePaid: false,
       status: newStatus, notes: "", createdAt: new Date().toISOString(),
     };
     let d2 = upsertLocal(data, "jobs", job);
+    if (sp.split) d2 = upsertLocal(d2, "jobs", makeOutJob(job, sp.outDays, outPrice));
     // keep the enquiry's move plan dates in step with the booking
     const planWithDates = planned.length ? planned.map((d, i) => ({ ...d, date: (opts.dates && opts.dates[i]) || "" })) : e.stages;
-    d2 = upsertLocal(d2, "enquiries", { ...e, stages: planWithDates, status: "Won", quoteStatus: "Accepted" });
+    d2 = upsertLocal(d2, "enquiries", { ...e, stages: planWithDates, ...(sp.split ? { quoteLines: qLines } : {}), status: "Won", quoteStatus: "Accepted" });
     // The customer picked this option, so the other alternative quotes close themselves.
     altGroup(data, e).filter(x => x.id !== e.id && !(data.jobs || []).some(j => j.enquiryId === x.id)).forEach(x => {
       d2 = upsertLocal(d2, "enquiries", { ...x, status: "Not quoted", altClosed: true });
@@ -5608,6 +5763,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
           </div>
         </Card>
       )}
+      <OutOfStoreCard data={data} e={e} parent={linkedJob} />
       {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
       {e.followUpDate && (
@@ -5978,10 +6134,12 @@ const OUT_RE = /out of stor|from stor|ex[- ]?stor|out of the stor|redeliver|deli
 function splitStoreLines(e) {
   const lines = e && Array.isArray(e.quoteLines) ? e.quoteLines.filter(l => l.desc || Number(l.amount)) : [];
   const days = (e && e.stages) || [];
-  const isOut = (l, i) => OUT_RE.test(l.desc || "") || OUT_RE.test((days[i] && days[i].type) || "");
+  const isOut = (l, i) => !!l.out || OUT_RE.test(l.desc || "") || OUT_RE.test((days[i] && days[i].type) || "");
   return { inLines: lines.filter((l, i) => !isOut(l, i)), outLines: lines.filter((l, i) => isOut(l, i)) };
 }
 function moveInvoiceParts(data, j) {
+  if (isOutJob(j)) return ["out"];
+  if (outJobOf(data.jobs, j)) return ["in"];
   const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
   const sp = splitStoreLines(e);
   return sp.outLines.length && sp.inLines.length ? ["in", "out"] : ["all"]; // only split when the quote has both
@@ -5991,15 +6149,19 @@ function depositFor(data, enquiryId, price) {
   const e = (data.enquiries || []).find(x => x.id === enquiryId);
   const sp = splitStoreLines(e);
   const p = Number(price) || 0;
+  // already split into its own out-of-store move: the price here is the into-store part only
+  if ((data.jobs || []).some(j => j.enquiryId === enquiryId && outJobOf(data.jobs, j))) return Math.round(p * 0.6);
   if (!sp.outLines.length || !sp.inLines.length) return Math.round(p * 0.6);
   const inNet = sp.inLines.reduce((s2, l) => s2 + (Number(l.amount) || 0), 0);
   const allNet = inNet + sp.outLines.reduce((s2, l) => s2 + (Number(l.amount) || 0), 0);
   return Math.round(p * (allNet > 0 ? inNet / allNet : 1) * 0.6);
 }
 function buildMoveInvoice(data, c, j, part = "all") {
-  const e = (data.enquiries || []).find(x => x.id === j.enquiryId);
+  const e = (data.enquiries || []).find(x => x.id === jobEnquiryId(data.jobs, j));
+  const outMove = isOutJob(j);
+  const depJob = outMove ? (parentJobOf(data.jobs, j) || j) : j; // the deposit sits on the into-store move
   const stagesAll = jobStages(j);
-  const outIdx = i => OUT_RE.test((stagesAll[i] && stagesAll[i].type) || "");
+  const outIdx = i => outMove || OUT_RE.test((stagesAll[i] && stagesAll[i].type) || "");
   const st = stagesAll.filter((x, i) => part === "all" ? true : part === "out" ? outIdx(i) : !outIdx(i));
   const days = st.filter(x => x.date).map(x => x.date).sort();
   const first = days[0] || "", last = days[days.length - 1] || "";
@@ -6011,11 +6173,16 @@ function buildMoveInvoice(data, c, j, part = "all") {
   const quotedTotal = r2([...sp.inLines, ...sp.outLines].reduce((s2, l) => s2 + (Number(l.amount) || 0), 0) * (vat ? 1 + VAT_RATE : 1));
   // price on the move differs from the quote (or no quote lines): one line for the move price
   if (part === "all" && (!lines.length || (Number(j.price) && Math.abs(quotedTotal - Number(j.price)) > 0.5))) lines = [{ desc: "Removal services", amount: r2((Number(j.price) || 0) / (vat ? 1 + VAT_RATE : 1)) }];
+  // a move of its own (split from the out-of-store move): its price is what's invoiced
+  else if (part !== "all" && (outMove || outJobOf(data.jobs, j))) {
+    const partTotal = r2(lines.reduce((s2, l) => s2 + l.amount, 0) * (vat ? 1 + VAT_RATE : 1));
+    if (!lines.length || (Number(j.price) && Math.abs(partTotal - Number(j.price)) > 0.5)) lines = [{ desc: part === "out" ? "Delivery out of store" : "Removal into store", amount: r2((Number(j.price) || 0) / (vat ? 1 + VAT_RATE : 1)) }];
+  }
   const today = todayISO();
   // the deposit is taken off the into-store invoice (any left over goes on the out-of-store one)
   const net = lines.reduce((s2, l) => s2 + l.amount, 0), gross = r2(net * (vat ? 1 + VAT_RATE : 1));
-  const dep = j.depositPaid ? r2(j.deposit) : 0;
-  const inv1 = part === "out" ? (c.invoices || []).find(x => x.kind === "move" && x.jobId === j.id && x.part === "in" && !x.void) : null;
+  const dep = depJob.depositPaid ? r2(depJob.deposit) : 0;
+  const inv1 = part === "out" ? (c.invoices || []).find(x => x.kind === "move" && x.jobId === depJob.id && x.part === "in" && !x.void) : null;
   const depUsed = inv1 ? (inv1.payments || []).filter(p => p.method === "Deposit").reduce((s2, p) => s2 + (Number(p.amount) || 0), 0) : 0;
   const depHere = part === "out" ? Math.max(0, r2(dep - depUsed)) : part === "in" ? Math.min(dep, gross) : dep;
   const payments = depHere > 0 ? [{ id: uid(), date: today, amount: r2(Math.min(depHere, gross)), method: "Deposit" }] : [];
@@ -6370,7 +6537,7 @@ function CustomerInvoices({ data, c }) {
   const canInvoice = (data.jobs || []).filter(j => j.customerId === c.id && ["Telephone Confirmed", "Confirmed", "In Store", "Completed"].includes(j.status))
     .flatMap(j => moveInvoiceParts(data, j).filter(pt => !moveInvoiceFor(data, c, j, pt)).map(pt => ({ j, pt })))
     // the out-of-store invoice is only offered once the into-store one exists
-    .filter(x => x.pt !== "out" || moveInvoiceFor(data, c, x.j, "in"));
+    .filter(x => x.pt !== "out" || moveInvoiceFor(data, c, isOutJob(x.j) ? (parentJobOf(data.jobs, x.j) || x.j) : x.j, "in"));
   const owed = invs.reduce((s, i) => s + Math.max(0, invTotals(i).balance), 0);
   return (
     <>
@@ -6698,7 +6865,7 @@ function CustomerDetail({ data, id, setView }) {
       {showMoveStorage && <SectionTitle>Moves</SectionTitle>}
       {showMoveStorage && jobs.filter(j => j.status !== "Completed").length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF" }}>None yet.</div>}
       {jobs.filter(j => j.status !== "Completed").sort((a, b) => (a.moveDate || "").localeCompare(b.moveDate || "")).map(j => (
-        <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
+        <Card key={j.id} onClick={() => setView(jobView(j))}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
             <StatusBadge status={jobBadge(j)} />
@@ -6710,7 +6877,7 @@ function CustomerDetail({ data, id, setView }) {
         <>
           <SectionTitle>Completed moves</SectionTitle>
           {jobs.filter(j => j.status === "Completed").sort((a, b) => (b.moveDate || "").localeCompare(a.moveDate || "")).map(j => (
-            <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
+            <Card key={j.id} onClick={() => setView(jobView(j))}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontSize: 14, color: "#111827" }}><b style={{ color: TEAL_D }}>{moveRef(data, j)}</b> · {fmtDate(j.moveDate)} ({dow(j.moveDate)}) · {gbp(j.price)}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
                 <StatusBadge status={jobBadge(j)} />
@@ -6772,7 +6939,7 @@ function JobsList({ data, setView }) {
       </div>
       {jobs.length === 0 && <Empty icon="truck" text="No moves here" />}
       {jobs.map(j => (
-        <Card key={j.id} onClick={() => setView(j.enquiryId ? { screen: "enquiryDetail", id: j.enquiryId } : { screen: "jobDetail", id: j.id })}>
+        <Card key={j.id} onClick={() => setView(jobView(j))}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontSize: 12, fontWeight: 800, color: TEAL_D }}>{moveRef(data, j)}</div>
@@ -8064,7 +8231,7 @@ function JobDetail({ data, id, setView }) {
 function JobDetailScreen({ data, j, setView }) {
   const customer = (data.customers || []).find(c => c.id === j?.customerId);
   const [f, setF] = useState({
-    stages: jobStages(j).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", vehicleIds: st.vehicleIds || [], crew: st.crew || [], notes: st.notes || "" })),
+    stages: jobStages(j).map(st => ({ id: st.id && st.id !== "legacy" ? st.id : uid(), type: st.type || "Move", date: st.date || "", time: st.time || "", vehicleIds: st.vehicleIds || [], crew: st.crew || [], notes: st.notes || "", ...(st.outOf ? { outOf: st.outOf } : {}) })),
     price: j.price || 0, deposit: j.deposit || 0,
     depositPaid: j.depositPaid || false, balancePaid: j.balancePaid || false,
     status: (j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : (j.status || "Confirmed"), notes: j.notes || "",
@@ -8395,7 +8562,7 @@ function CalendarView({ data, setView, initialDate, initialMode, initialShow }) 
       : `${vehNames || "No vehicle"}${(st.crew || []).length ? " · " + st.crew.join(", ") : ""}`;
     const resShort = provisional ? `${plannedVeh || "Veh TBC"} · ${plannedStaff || "—"} crew` : vehNames;
     return (
-    <div onClick={() => setView(j.enquiryId ? { screen:"enquiryDetail", id:j.enquiryId } : { screen:"jobDetail", id:j.id })}
+    <div onClick={() => setView(jobView(j))}
       style={{ background:"#fff", border:"1px solid #E9EEED", borderLeft:`4px solid ${colorOf(m)}`, borderRadius:10, padding: big?"11px 13px":"7px 9px", cursor:"pointer", boxShadow:"0 1px 2px rgba(16,33,30,.05)" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
         <span style={{ flex:1, minWidth:0, fontSize: big?14.5:12.5, fontWeight:800, color:"#10211E", letterSpacing:"-.01em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{custName(data, j.customerId)}</span>
