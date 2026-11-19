@@ -127,6 +127,9 @@ const isPencilled = st => st === "Provisional" || st === TEL_CONF; // booked but
 // Telephone confirmed and confirmed moves have their crew & vans named, and hold them in availability
 const RES_STATUSES = ["Telephone Confirmed", "Confirmed", "Completed"];
 const holdsResources = st => RES_STATUSES.includes(st);
+// "Out of store" days are usually dated later, when the customer's ready — they don't need a date (or crew) to book
+const isOutDay = st => /out of stor|from stor|ex[- ]?stor|redeliver/i.test((st && st.type) || "");
+const outPending = st => isOutDay(st) && !st.date;
 // Date changes on a telephone confirmed / confirmed move: what moved, and whether its crew & vans are free on the new date
 function heldDateChanges(data, job, newStages, byIndex) {
   if (!job || !holdsResources(job.status)) return [];
@@ -1240,7 +1243,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B274";
+const BUILD_NO = "B275";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3872,6 +3875,11 @@ function MovePlanModal({ data, enquiry, onClose }) {
       const ch = heldDateChanges(data, linkedJob, days, true);
       if (ch.length && !confirm(heldDateChangeText(linkedJob, ch))) return;
     }
+    if (linkedJob && holdsResources(linkedJob.status)) {
+      const orig = jobStages(linkedJob);
+      const newly = days.map((d, i) => { const o = orig[i]; return isOutDay(d) && d.date && !(o && o.date) && (!(d.crew && d.crew.length) || !(d.vehicleIds && d.vehicleIds.length)) ? i + 1 : null; }).filter(Boolean);
+      if (newly.length) { alert(`The out-of-store day now has a date, so book the crew and at least one vehicle for it.\n\nStill needed on day ${newly.join(", ")}.`); return; }
+    }
     if (force !== true && linkedJob && RES_STATUSES.includes(linkedJob.status)) {
       // Fewer staff / vans than planned or than were booked before: warn, but let them make do.
       const before = (linkedJob.stages || []).map((st, i) => ({ ...st, id: "d" + i }));
@@ -4691,9 +4699,9 @@ function MoveManageModal({ data, job, onClose }) {
   const confirmMove = (to = "Confirmed") => {
     if (typeof to !== "string") to = "Confirmed";
     if ((!assign && f.status !== TEL_CONF) || target !== to) { setTarget(to); setAssign(true); return; }
-    const noDate = days.map((st, i) => st.date ? null : i + 1).filter(Boolean);
+    const noDate = days.map((st, i) => (st.date || isOutDay(st)) ? null : i + 1).filter(Boolean);
     if (days.length && noDate.length) { alert(`Set the date for every day in the move plan first.\n\nNo date on day ${noDate.join(", ")}.`); return; }
-    const bad = days.map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+    const bad = days.map((st, i) => !outPending(st) && (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
     if (!days.length || bad.length) { alert(`Book the crew and at least one vehicle for every day first.\n\nStill needed on day ${bad.join(", ")}.`); return; }
     const shortfalls = days.map((d, i) => {
       const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
@@ -5001,13 +5009,14 @@ function BookMoveModal({ data, e, initial, onClose, onBook }) {
   const taken = i => { const t = takenOnDate(data, dates[i]); res.forEach((r, k) => { if (k !== i && dates[k] && dates[k] === dates[i]) { r.crew.forEach(c => t.crew.add(c)); r.vehicleIds.forEach(v => t.veh.add(v)); } }); return t; };
   const toggleRes = (i, key, id) => setRes(a => a.map((r, k) => k !== i ? r : { ...r, [key]: r[key].includes(id) ? r[key].filter(x => x !== id) : [...r[key], id] }));
   const price = Number(e.quoteTotal) || 0;
-  const missing = dates.map((d, i) => d ? null : i + 1).filter(Boolean);
+  const missing = dates.map((d, i) => (d || isOutDay(planned[i])) ? null : i + 1).filter(Boolean);
   const go = () => {
     if (!(status === "Provisional" && noDate) && missing.length) { alert(`Pick a date for ${planned.length > 1 ? `day ${missing.join(", ")}` : "the move"} first.`); return; }
     if (needRes) {
-      const bad = res.map((r, i) => (!r.crew.length || !r.vehicleIds.length) ? i + 1 : null).filter(Boolean);
+      const bad = res.map((r, i) => !(isOutDay(planned[i]) && !dates[i]) && (!r.crew.length || !r.vehicleIds.length) ? i + 1 : null).filter(Boolean);
       if (bad.length) { alert(`Book the crew and at least one vehicle for ${planned.length > 1 ? `day ${bad.join(", ")}` : "the move"} — ${status === TEL_CONF ? "telephone confirmed" : "confirmed"} moves hold their staff and vans.`); return; }
       const short = planned.map((d, i) => {
+        if (isOutDay(d) && !dates[i]) return null;
         const ps = Number(d.staffCount) || 0, pv = Object.values(d.vehTypes || {}).reduce((n, v) => n + (Number(v) || 0), 0);
         const ss = Math.max(0, ps - res[i].crew.length), vs = Math.max(0, pv - res[i].vehicleIds.length);
         return (ss || vs) ? `${planned.length > 1 ? `Day ${i + 1}:` : ""}${ss ? ` ${ss} more staff` : ""}${ss && vs ? " and" : ""}${vs ? ` ${vs} more vehicle${vs !== 1 ? "s" : ""}` : ""}` : null;
@@ -5027,10 +5036,10 @@ function BookMoveModal({ data, e, initial, onClose, onBook }) {
       <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" ? "The date is definite. Deposit is marked as paid (60%) — change it on the move if not." : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
       {planned.map((d, i) => (
         <div key={i} style={needRes ? { background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 12, padding: "10px 12px 2px", marginBottom: 10 } : {}}>
-          <Field label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate)}>
+          <Field label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate) && !isOutDay(d)} hint={isOutDay(d) ? "add later when known" : undefined}>
             <Input type="date" value={dates[i]} onChange={v => setDates(a => a.map((x, k) => k === i ? v : x))} />
           </Field>
-          {needRes && <>
+          {needRes && !(isOutDay(d) && !dates[i]) && <>
             {(Number(d.staffCount) || Object.keys(d.vehTypes || {}).length) ? <div style={{ fontSize: 12, color: "#6A7B77", marginTop: -4, marginBottom: 8 }}>Planned: {[vehTypesSummary(d.vehTypes), Number(d.staffCount) ? `${d.staffCount} crew` : ""].filter(Boolean).join(" · ")}</div> : null}
             <Field label="Crew" required><PickChips options={crewOpts} selectedIds={res[i].crew} takenIds={taken(i).crew} takenReasons={crewReasonsOn(data, dates[i])} onToggle={id => toggleRes(i, "crew", id)} empty="No staff — add under Company." /></Field>
             <Field label="Vehicles" required><PickChips options={vehOpts} selectedIds={res[i].vehicleIds} takenIds={taken(i).veh} onToggle={id => toggleRes(i, "vehicleIds", id)} empty="No vehicles — add under Company." /></Field>
@@ -7986,9 +7995,14 @@ function JobDetailScreen({ data, j, setView }) {
       const ch = heldDateChanges(data, j, f.stages);
       if (ch.length && !confirm(heldDateChangeText(j, ch))) return;
     }
+    if (holdsResources(f.status)) {
+      const orig = jobStages(j);
+      const newly = (f.stages || []).map((st, i) => { const o = orig.find(x => x.id === st.id); return isOutDay(st) && st.date && !(o && o.date) && (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null; }).filter(Boolean);
+      if (newly.length) { alert(`The out-of-store day now has a date, so book the crew and at least one vehicle for it.\n\nStill needed on day ${newly.join(", ")}.`); return; }
+    }
     // only when it's being changed to telephone confirmed / confirmed here (older imported moves can still be edited)
     if (["Confirmed", TEL_CONF].includes(f.status) && f.status !== ((j.status === "Booked" || j.status === "In Progress") ? "Confirmed" : j.status)) {
-      const bad = (f.stages || []).map((st, i) => (!st.date || !(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+      const bad = (f.stages || []).map((st, i) => !outPending(st) && (!st.date || !(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
       if (!(f.stages || []).length || bad.length) { alert(`${f.status === TEL_CONF ? "Telephone confirmed" : "Confirmed"} moves need a date, named crew and at least one vehicle on every day.\n\nStill needed on day ${bad.join(", ")}.`); return; }
     }
     if (!force && j && ["Confirmed", TEL_CONF, "Booked", "In Progress"].includes(f.status)) {
@@ -8020,9 +8034,9 @@ function JobDetailScreen({ data, j, setView }) {
       setTimeout(() => { const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
       return;
     }
-    const noDate = (f.stages || []).map((st, i) => st.date ? null : i + 1).filter(Boolean);
+    const noDate = (f.stages || []).map((st, i) => (st.date || isOutDay(st)) ? null : i + 1).filter(Boolean);
     if (noDate.length) { alert(`Set the date for every day before confirming.\n\nNo date on day ${noDate.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
-    const bad = (f.stages || []).map((st, i) => (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
+    const bad = (f.stages || []).map((st, i) => !outPending(st) && (!(st.crew && st.crew.length) || !(st.vehicleIds && st.vehicleIds.length)) ? i + 1 : null).filter(Boolean);
     if (!f.stages || !f.stages.length || bad.length) { alert(`Book named crew and at least one vehicle for every day first.\n\nStill needed on day ${bad.join(", ")}.`); const el = document.getElementById("jd-days"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     if (to !== "Confirmed") { setF(p => ({ ...p, status: to })); await saveAndReload(upsertLocal(data, "jobs", buildRec({ status: to }))); return; }
     const price = Number(f.price) || 0;
