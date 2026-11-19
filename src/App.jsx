@@ -1325,7 +1325,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B285";
+const BUILD_NO = "B286";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5201,6 +5201,40 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
     </Modal>
   );
 }
+// Storage job for this move, on the enquiry: add it once the storage move is booked (confirmed)
+function EnquiryStorageCard({ data, e, move, customer, setView }) {
+  const [form, setForm] = useState(false);
+  if (!move || !customer || isOutJob(move)) return null;
+  const isStorage = jobStages(move).some(st => /store/i.test(st.type || "")) || !!e.toStore;
+  if (!isStorage || move.status === "Let Go") return null;
+  const booked = bookedMovesFor(data, customer.id).some(m => m.id === move.id);
+  const sjs = getStorageJobs(customer).filter(j => j.moveJobId === move.id);
+  const ro = isReadOnly();
+  return (
+    <>
+      {form && <StorageJobForm data={data} customer={customer} job={null} forMove={move.id} onClose={() => setForm(false)} />}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div style={{ fontWeight: 700, color: "#111827" }}>📦 Storage</div>
+          {!ro && booked && !sjs.length && <Btn size="sm" onClick={() => setForm(true)}>+ Add storage job</Btn>}
+        </div>
+        {!sjs.length && <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>{booked ? "No storage job yet — add it to start the storage inventory and invoicing." : "The storage job can be added once this move is confirmed with a date."}</div>}
+        {sjs.map(j => {
+          const n = jobContainerCount(customer, j);
+          return (
+            <div key={j.id} onClick={() => setView({ screen: "storageJob", customerId: customer.id, jobId: j.id })} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 8, padding: "9px 11px", border: "1px solid #E9EEED", borderRadius: 10, cursor: "pointer" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{j.location || "Storage"}{j.value ? ` · £${Number(j.value).toLocaleString("en-GB")}` : ""}</div>
+                <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{j.dateIn ? `In ${fmtUK(j.dateIn)}` : "Date in TBC"}{j.dateOut ? ` · Out ${fmtUK(j.dateOut)}` : ""}{n ? ` · ${n} container${n != 1 ? "s" : ""}` : ""}{storeContainersUsed(customer, j) == null ? " · inventory not completed" : ""}</div>
+              </div>
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(j) ? "#0F766E" : "#9CA3AF", background: jobInStore(j) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px", flexShrink: 0 }}>{jobInStore(j) ? "In store" : "Out"}</span>
+            </div>
+          );
+        })}
+      </Card>
+    </>
+  );
+}
 // The out-of-store move: its own plan, booking and status, under the into-store move
 function OutOfStoreCard({ data, e, parent }) {
   const oj = outJobOf(data.jobs, parent);
@@ -5764,6 +5798,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
         </Card>
       )}
       <OutOfStoreCard data={data} e={e} parent={linkedJob} />
+      <EnquiryStorageCard data={data} e={e} move={linkedJob} customer={customer} setView={setView} />
       {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
       {e.followUpDate && (
@@ -6826,7 +6861,7 @@ function CustomerDetail({ data, id, setView }) {
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: getStorageJobs(c).length ? 8 : 0 }}>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "#94A4A0" }}>Storage jobs</div>
-          <Btn size="sm" onClick={() => setJobForm("new")}>+ Add storage job</Btn>
+          <span style={{ fontSize: 11.5, color: "#94A4A0", fontWeight: 600 }}>Add from the move's enquiry</span>
         </div>
         {getStorageJobs(c).length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 8 }}>No storage jobs yet.</div>}
         {getStorageJobs(c).map((j, idx) => (
@@ -10065,23 +10100,23 @@ const BOOKED_MOVE_STATUSES = ["Confirmed", "In Progress", "In Store", "Completed
 function bookedMovesFor(data, customerId) {
   // ...and the move must be a storage job: "Moving into store" ticked on the enquiry, or an "Into store" day in the move plan.
   const isStorage = j => jobStages(j).some(st => /store/i.test(st.type || "")) || (data.enquiries || []).some(e => e.id === j.enquiryId && e.toStore);
-  return (data.jobs || []).filter(j => j.customerId === customerId && BOOKED_MOVE_STATUSES.includes(j.status) && jobStages(j).some(st => st.date) && isStorage(j));
+  return (data.jobs || []).filter(j => j.customerId === customerId && !isOutJob(j) && BOOKED_MOVE_STATUSES.includes(j.status) && jobStages(j).some(st => st.date) && isStorage(j));
 }
 // The day goods go into store: an "Into store" day if there is one, otherwise the first booked day.
 function storeDayOf(j) {
   const st = jobStages(j).filter(x => x.date);
   return st.find(x => /store/i.test(x.type || "")) || st.sort((a, b) => a.date.localeCompare(b.date))[0] || null;
 }
-function StorageJobForm({ data, customer, job, onClose }) {
+function StorageJobForm({ data, customer, job, forMove, onClose }) {
   const isNew = !job;
   const moves = bookedMovesFor(data, customer.id);
-  const [moveJobId, setMoveJobId] = useState(() => (job ? job.moveJobId || "" : (moves[0] && moves[0].id) || ""));
+  const [moveJobId, setMoveJobId] = useState(() => (job ? job.moveJobId || "" : forMove || (moves[0] && moves[0].id) || ""));
   const linkedMove = moves.find(m => m.id === moveJobId) || (data.jobs || []).find(m => m.id === moveJobId) || null;
   const storeDay = linkedMove ? storeDayOf(linkedMove) : null;
   const planD = linkedMove ? planStoreDates(linkedMove) : null;
   const [f, setF] = useState(() => job
     ? { id: job.id, location: job.location || (getStorageLocs()[0] || "Wild & Lye"), value: job.value ?? "", dateIn: job.dateIn || "", dateOut: job.dateOut || "", rate4w: job.rate4w ?? "", billFrom: job.billFrom || "", mpCover: !!job.mpCover }
-    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: (moves[0] && storeDayOf(moves[0]) && storeDayOf(moves[0]).date) || todayISO(), dateOut: "", rate4w: "", billFrom: "", mpCover: false });
+    : { id: uid(), location: getStorageLocs()[0] || "Wild & Lye", value: "", dateIn: (() => { const m = moves.find(x => x.id === forMove) || moves[0]; return (m && storeDayOf(m) && storeDayOf(m).date) || todayISO(); })(), dateOut: "", rate4w: "", billFrom: "", mpCover: false });
   const [locs, setLocs] = useState(getStorageLocs);
   const [newLoc, setNewLoc] = useState("");
   // storage price from the quote, if not set yet
