@@ -29,7 +29,10 @@ function label(key) {
   if (/^(full[ _-]?)?name/.test(k)) return "Name";
   if (/^e-?mail/.test(k)) return "Email";
   if (/^(phone|mobile|tel)/.test(k)) return "Phone";
-  if (/^(textarea|message|comments?|how[ _-]can[ _-]we[ _-]help)/.test(k)) return "Message";
+  // the form's notes box → the enquiry's notes (the app reads "Special requirements" into Notes)
+  if (/^(textarea|additional[ _-]?notes|notes|message|comments?|how[ _-]can[ _-]we[ _-]help)/.test(k)) return "Special requirements";
+  // the dropdown is "How did you hear of us" (Forminator calls it select-1)
+  if (/^(select|how[ _-]?did[ _-]?you[ _-]?hear|referr?al|source)/.test(k)) return "How did you hear of us";
   if (/^date/.test(k)) return "Move date";
   if (/^(url|page|referr?er|source[ _-]?url)/.test(k)) return "URL";
   // "select-1" → "Select"; "How did you hear of us" stays as typed
@@ -66,10 +69,10 @@ function toText(body0) {
     const val = flat(v);
     if (!val) continue;
     const L = label(k);
-    if (L === "Message") msgs.push(val.replace(/\s*\n\s*/g, " "));
+    if (L === "Special requirements") msgs.push(val.replace(/\s*\n\s*/g, " "));
     else lines.push(`${L}: ${val.replace(/\s*\n\s*/g, ", ")}`);
   }
-  if (msgs.length) lines.push("Message: " + msgs.join(" "));   // message last, so it reads to the end
+  if (msgs.length) lines.push("Special requirements: " + msgs.join(" "));   // notes last, so it reads to the end
   return lines.join("\n");
 }
 
