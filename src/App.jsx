@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B299";
+const BUILD_NO = "B300";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2727,8 +2727,9 @@ function parseEnquiryEmail(text) {
   const form = tidyFormSubmission(t); t = form.text;
   t = repairLabelValueLines(normalizeEmailLabels(t));
   const out = { referredBy: "", name: "", email: "", phone: "", fromAddress1: "", fromTown: "", fromPostcode: "", fromAccess: "", fromPropertyType: "", fromBedrooms: "", toAddress1: "", toTown: "", toPostcode: "", toAccess: "", toPropertyType: "", preferredDate: "", moveMonth: "", dateFlexible: false, notes: "" };
-  const PC = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/i;
-  const PCG = /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/gi;
+  // whole words only, so a postcode-looking bit inside a code or reference (e.g. "…3fab007dd9…") isn't picked up
+  const PC = /\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/i;
+  const PCG = /\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/gi;
   // A copied email reply: work from the customer's part; our own quoted message is kept aside.
   const reply = splitQuotedReply(t);
   const quotedPart = reply.quoted;
