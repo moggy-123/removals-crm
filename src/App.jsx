@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B301";
+const BUILD_NO = "B302";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2644,6 +2644,8 @@ function tidyAddress(a1, a2, town, pc) {
   if (!line.includes(",") && !m) return { address1: line, address2: l2, town: t, postcode };
   if (m) { if (!postcode) postcode = (m[1] + " " + m[2]).toUpperCase(); line = line.replace(PC, " "); }
   let parts = line.split(/\s*,\s*/).map(x => x.replace(/^[\s.]+|[\s.]+$/g, "").trim()).filter(Boolean);
+  // "…, Bristol" at the end is the town (Bristol is a city as well as a county)
+  if (!t && parts.length > 1 && /^(city of\s+)?bristol$/i.test(parts[parts.length - 1])) t = "Bristol" , parts.pop();
   // drop county / country and anything that's the town again
   parts = parts.filter(x => !COUNTY_RE.test(x));
   const same = (x, y) => x.toLowerCase().replace(/[^a-z]/g, "") === y.toLowerCase().replace(/[^a-z]/g, "");
