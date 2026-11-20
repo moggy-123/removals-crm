@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B298";
+const BUILD_NO = "B299";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -10330,7 +10330,6 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontWeight: 800, color: "#10211E" }}>{job.value ? money(job.value) : "No value set"}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span onClick={() => setEditing(true)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Edit</span>
               <span style={{ fontSize: 11.5, fontWeight: 800, color: jobInStore(job) ? "#0F766E" : "#9CA3AF", background: jobInStore(job) ? "#E8F5F3" : "#F1F3F2", borderRadius: 999, padding: "2px 9px" }}>{jobInStore(job) ? "In store" : "Out"}</span>
             </div>
           </div>
@@ -10338,7 +10337,8 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
             {job.dateIn ? `In ${fmtUK(job.dateIn)}` : ""}{job.dateOut ? ` · Out ${fmtUK(job.dateOut)}` : ""}{jobContainerCount(c, job) ? ` · ${jobContainerCount(c, job)} container${jobContainerCount(c, job) != 1 ? "s" : ""}` : ""}{jobContainerNos(c, job).length ? ` (${jobContainerNos(c, job).join(", ")})` : ""}
           </div>
           {jobLoose(c, job).any && <div style={{ fontSize: 12.5, color: "#6A7B77" }}>Loose: {jobLoose(c, job).notes.join("; ") || "Yes"}</div>}
-          <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn size="sm" variant="grey" onClick={() => setEditing(true)}>Edit</Btn>
             {jobInStore(job)
               ? <Btn size="sm" variant="grey" onClick={async () => { if (!confirm("Mark this storage job out of store (today)?")) return; const jobs = getStorageJobs(c).map(j => j.id === job.id ? { ...j, dateOut: todayISO(), inStore: false } : j); await saveAndReload(upsertLocal(data, "customers", { ...c, storageJobs: jobs, storage: null })); }}>Mark out of store</Btn>
               : <Btn size="sm" variant="grey" onClick={async () => { const jobs = getStorageJobs(c).map(j => j.id === job.id ? { ...j, dateOut: "", inStore: true } : j); await saveAndReload(upsertLocal(data, "customers", { ...c, storageJobs: jobs, storage: null })); }}>Mark back in store</Btn>}
@@ -10356,18 +10356,19 @@ function StorageJobDetail({ data, setView, customerId, jobId }) {
         <Card>
           {sheets.slice().reverse().map(rec => (
             <div key={rec.id} style={{ borderBottom: "1px solid #EEF3F2", padding: "4px 0" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 4px", gap: 10 }}>
-                <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer", flex: 1 }}>
+              <div style={{ padding: "6px 4px" }}>
+                <div onClick={() => openSheet(rec)} style={{ minWidth: 0, cursor: "pointer" }}>
                   <div style={{ fontWeight: 700, color: "#10211E", fontSize: 14 }}>{rec.date ? fmtUK(rec.date) : "—"}</div>
                   <div style={{ fontSize: 12.5, color: "#6A7B77" }}>{(rec.containers || []).length} container{(rec.containers || []).length !== 1 ? "s" : ""}{rec.empName ? ` · ${rec.empName}` : ""}</div>
                   {rec.draft && <div style={{ fontSize: 12, color: "#7C3AED", fontWeight: 800 }}>✏️ In progress — not signed yet</div>}
                   {rec.amendedAt && !rec.draft && <div style={{ fontSize: 12, color: "#B45309", fontWeight: 700 }}>Amended {fmtUK(String(rec.amendedAt).slice(0, 10))} · original kept</div>}
                 </div>
-                <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
-                  {!rec.draft && <span onClick={() => setView({ screen: "storageCollect", recId: rec.id })} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Collect</span>}
-                  <span onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })} style={{ color: rec.draft ? "#7C3AED" : TEAL, fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>{rec.draft ? "Continue" : "Edit"}</span>
-                  <span onClick={() => openSheet(rec)} style={{ color: TEAL, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{sheetBusy ? "…" : rec.amendedAt ? "Current" : "PDF"}</span>
-                  {rec.amendedAt && <span onClick={async () => { if (sheetBusy) return; setSheetBusy(true); await openInventoryPdf(rec, c, data, "original"); setSheetBusy(false); }} style={{ color: "#B45309", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Original</span>}
+                {/* proper buttons, like "Mark out of store" */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                  <Btn size="sm" variant="grey" onClick={() => setView({ screen: "storageIntake", editRecId: rec.id })}>{rec.draft ? "Continue" : "Edit"}</Btn>
+                  <Btn size="sm" variant="grey" onClick={() => openSheet(rec)}>{sheetBusy ? "…" : rec.amendedAt ? "PDF (current)" : "PDF"}</Btn>
+                  {rec.amendedAt && <Btn size="sm" variant="grey" onClick={async () => { if (sheetBusy) return; setSheetBusy(true); await openInventoryPdf(rec, c, data, "original"); setSheetBusy(false); }}>PDF (original)</Btn>}
+                  {!rec.draft && <Btn size="sm" variant="grey" onClick={() => setView({ screen: "storageCollect", recId: rec.id })}>Collect</Btn>}
                 </div>
               </div>
               {(rec.collections || []).length > 0 && (
