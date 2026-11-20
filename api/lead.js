@@ -12,15 +12,26 @@ const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 // Forminator's own housekeeping fields — not part of the enquiry
 const SKIP = /^(_wp_http_referer|_wpnonce|forminator_nonce|nonce|action|form_id|form_type|page_id|render_id|current_url|referer_url|forminator-multifile-hidden|consent.*|captcha.*|g-recaptcha-response|hcaptcha.*|entry_id|entry_time|form_title|form-title|quiz_.*|submission_id|honeypot.*|ip|user_agent)$/i;
 
+// Forminator address fields: the 1st is where they're moving from, the 2nd where they're moving to.
+// (The app reads "Moving from:" / "Moving to:" lines, so plain "Address:" twice lost the addresses.)
+let ADDR_SEEN = [];
 function label(key) {
   const k = String(key).toLowerCase();
+  const am = k.match(/^address[-_ ]?(\d+)?/);
+  if (am) {
+    const id = am[1] || "1";
+    if (!ADDR_SEEN.includes(id)) ADDR_SEEN.push(id);
+    const n = ADDR_SEEN.indexOf(id);
+    return n === 0 ? "Moving from" : n === 1 ? "Moving to" : "Address";
+  }
+  if (/moving[ _-]?from|current[ _-]?address|collection/.test(k)) return "Moving from";
+  if (/moving[ _-]?to|new[ _-]?address|delivery/.test(k)) return "Moving to";
   if (/^(full[ _-]?)?name/.test(k)) return "Name";
   if (/^e-?mail/.test(k)) return "Email";
   if (/^(phone|mobile|tel)/.test(k)) return "Phone";
   if (/^(textarea|message|comments?|how[ _-]can[ _-]we[ _-]help)/.test(k)) return "Message";
   if (/^date/.test(k)) return "Move date";
   if (/^(url|page|referr?er|source[ _-]?url)/.test(k)) return "URL";
-  if (/^address/.test(k)) return "Address";
   // "select-1" → "Select"; "How did you hear of us" stays as typed
   return String(key).replace(/[-_]\d+$/, "").replace(/[-_]+/g, " ").replace(/^./, c => c.toUpperCase());
 }
@@ -29,14 +40,27 @@ function flat(v) {
   if (Array.isArray(v)) return v.map(flat).filter(Boolean).join(", ");
   if (typeof v === "object") {
     // name field with prefix / first / last parts, or an address field
-    const order = ["prefix", "first-name", "first_name", "middle-name", "last-name", "last_name", "street_address", "address_line", "city", "state", "zip", "country"];
+    const order = ["prefix", "first-name", "first_name", "middle-name", "last-name", "last_name", "street_address", "address_line", "city", "state", "zip", "postcode", "country"];
     const keys = Object.keys(v).sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
-    return keys.map(k => flat(v[k])).filter(Boolean).join(/street|address|city|zip/.test(keys.join(" ")) ? ", " : " ");
+    return keys.filter(k => !(k === "country" && /^(uk|united kingdom|great britain|gb|england|wales)$/i.test(String(v[k] || "").trim()))).map(k => flat(v[k])).filter(Boolean).join(/street|address|city|zip/.test(keys.join(" ")) ? ", " : " ");
   }
   return String(v).trim();
 }
-function toText(body) {
+// Some Forminator payloads send an address as separate keys (address-1-street_address, address-1-zip …):
+// put them back together as one address, in the order the form has them.
+function groupParts(body) {
+  const out = {};
+  for (const [k, v] of Object.entries(body || {})) {
+    const m = String(k).match(/^(address[-_]\d+)[-_](street_address|address_line|city|state|zip|postcode|country)$/i);
+    if (m) { if (typeof out[m[1]] !== "object" || out[m[1]] === null) out[m[1]] = {}; out[m[1]][m[2].toLowerCase()] = v; }
+    else out[k] = v;
+  }
+  return out;
+}
+function toText(body0) {
   const lines = [], msgs = [];
+  ADDR_SEEN = [];
+  const body = groupParts(body0);
   for (const [k, v] of Object.entries(body || {})) {
     if (SKIP.test(k)) continue;
     const val = flat(v);
