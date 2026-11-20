@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B300";
+const BUILD_NO = "B301";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3012,7 +3012,8 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
     if (cust0 && cf) {
       if (!cf.name.trim()) { alert("The customer's name can't be blank."); return; }
       const keep = cContacts.filter(contactFilled);
-      const crec = { ...cust0, ...cf, name: cf.name.trim(), contacts: keep, contactsCleared: !keep.length && ((cust0.contacts || []).length > 0 || !!cust0.contactsCleared) ? true : undefined };
+      const fromAddr = (f.fromAddress1 || f.fromTown || f.fromPostcode) ? { address1: f.fromAddress1 || "", address2: f.fromAddress2 || "", town: f.fromTown || "", postcode: f.fromPostcode || "" } : {};
+      const crec = { ...cust0, ...cf, ...fromAddr, name: cf.name.trim(), contacts: keep, contactsCleared: !keep.length && ((cust0.contacts || []).length > 0 || !!cust0.contactsCleared) ? true : undefined };
       if (JSON.stringify(crec) !== JSON.stringify(cust0)) data2 = upsertLocal(data2, "customers", crec);
     }
     if (!cid) {
@@ -3093,12 +3094,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
         </div>
         <Field label="Email"><Input type="email" value={cf.email} onChange={v => setC("email", v)} /></Field>
         <ContactsEditor contacts={cContacts} onChange={setCContacts} />
-        <Field label="Customer address" hint="Their home/billing address"><Input value={cf.address1} onChange={v => setC("address1", v)} /></Field>
-        <Field label="Address line 2"><Input value={cf.address2} onChange={v => setC("address2", v)} placeholder="(optional)" /></Field>
-        <div style={{ display: "flex", gap: 10 }}>
-          <div style={{ flex: 1 }}><Field label="Town"><Input value={cf.town} onChange={v => setC("town", v)} /></Field></div>
-          <div style={{ width: 120 }}><Field label="Postcode"><Input value={cf.postcode} onChange={v => setC("postcode", v)} /></Field></div>
-        </div>
+        {/* the customer's address is their Moving from address (below) — one address, not two */}
         <Field label="Customer notes"><Textarea value={cf.notes} onChange={v => setC("notes", v)} /></Field>
       </>}
       <SectionTitle>Move details</SectionTitle>
