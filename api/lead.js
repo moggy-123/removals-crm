@@ -66,8 +66,11 @@ function toText(body0) {
   const body = groupParts(body0);
   for (const [k, v] of Object.entries(body || {})) {
     if (SKIP.test(k)) continue;
+    // Forminator's hidden/system bits (tokens, ids, page data) aren't part of the enquiry
+    if (/^(_|hidden|postdata|page[-_]?id|form[-_]?module|referr?er|current[-_]?url|.*(nonce|token|captcha|uuid)).*/i.test(k)) continue;
     const val = flat(v);
     if (!val) continue;
+    if ((/^[a-f0-9-]{10,}$/i.test(val) && /[a-f]/i.test(val) && /\d/.test(val)) || (/^[A-Za-z0-9_-]{16,}$/.test(val) && /\d/.test(val) && !/@/.test(val))) continue; // looks like a code, not something the customer typed
     const L = label(k);
     if (L === "Special requirements") msgs.push(val.replace(/\s*\n\s*/g, " "));
     else lines.push(`${L}: ${val.replace(/\s*\n\s*/g, ", ")}`);
