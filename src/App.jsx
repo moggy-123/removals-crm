@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B312";
+const BUILD_NO = "B313";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6503,7 +6503,7 @@ async function buildInvoicePdf(inv, c) {
   y += tot.length * 17 + 24;
   const dpi = invDepositInfo(inv);
   if (dpi && t.balance > 0.004) {
-    T(36, y, dpi.depPaid ? `Deposit of ${gbpPlain(dpi.dep)} (60%) received - thank you.` : `Deposit to secure your booking (60%): ${gbpPlain(dpi.dep)}`, 10.5, bold, teal);
+    T(36, y, dpi.depPaid ? `Deposit of ${gbpPlain(dpi.dep)} (60%) received - thank you.` : `Deposit to secure your booking (60%): ${gbpPlain(dpi.dep)}${dpi.paid > 0 ? `  -  ${gbpPlain(dpi.depLeft)} still to pay` : ""}`, 10.5, bold, teal);
     T(36, y + 14, `Balance of ${gbpPlain(dpi.bal)} due the day before your move.`, 10);
     y += 34;
   }
@@ -6540,7 +6540,7 @@ const invDepositInfo = inv => {
   const t = invTotals(inv);
   if (!(t.total > 0)) return null;
   const dep = r2(t.total * 0.6);
-  return { dep, bal: r2(t.total - dep), depPaid: t.paid >= dep - 0.004 };
+  return { dep, bal: r2(t.total - dep), depPaid: t.paid >= dep - 0.004, paid: t.paid, depLeft: r2(Math.max(0, dep - t.paid)) };
 };
 // Late Key Waiver choices (quote and invoice): FREE, Has keys, Not required, or an amount inc VAT
 const LK_WORDS = { FREE: "FREE", HAS: "Has keys", NA: "Not required" };
@@ -6628,6 +6628,7 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
         {(() => { const dpi = invDepositInfo(f); return dpi ? (
           <div style={{ borderTop: "1px dashed #CBD5D2", marginTop: 6, paddingTop: 6 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, color: dpi.depPaid ? "#15803D" : "#B45309" }}><span>Deposit to secure (60%){dpi.depPaid ? " ✓" : ""}</span><span>{gbpPlain(dpi.dep)}</span></div>
+            {!dpi.depPaid && dpi.paid > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#B45309", fontSize: 13 }}><span>Paid so far {gbpPlain(dpi.paid)} · still to pay</span><span>{gbpPlain(dpi.depLeft)}</span></div>}
             <div style={{ display: "flex", justifyContent: "space-between", color: "#41514E" }}><span>Balance · day before the move</span><span>{gbpPlain(dpi.bal)}</span></div>
           </div>) : null; })()}
       </div>
@@ -6647,7 +6648,7 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
           <Field label="Method"><Select value={pay.method} onChange={v => setPay(p => ({ ...p, method: v }))} options={["Bank transfer", "Card", "Cash", "Cheque"]} /></Field>
           <div style={{ display: "flex", gap: 8 }}><Btn variant="grey" style={{ flex: 1 }} onClick={() => setPay(null)}>Cancel</Btn><Btn style={{ flex: 2 }} onClick={addPayment}>Save payment</Btn></div>
         </div>
-      ) : <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#15803D" }} onClick={() => { const dpi = invDepositInfo(f); const amt = dpi && !dpi.depPaid && !t.paid ? dpi.dep : Math.max(0, t.balance); setPay({ amount: String(amt), date: todayISO(), method: "Bank transfer" }); }}>💷 Record a payment</Btn>)}
+      ) : <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#15803D" }} onClick={() => { const dpi = invDepositInfo(f); const amt = dpi && !dpi.depPaid ? dpi.depLeft : Math.max(0, t.balance); setPay({ amount: String(amt), date: todayISO(), method: "Bank transfer" }); }}>💷 Record a payment</Btn>)}
       <Field label="Notes on the invoice"><textarea value={f.notes || ""} disabled={ro} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} /></Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 6 }}>
         <Btn variant="grey" onClick={() => openInvoicePdf(f, c)}>📄 View PDF</Btn>
