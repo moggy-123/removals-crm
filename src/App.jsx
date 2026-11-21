@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B322";
+const BUILD_NO = "B323";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6238,10 +6238,20 @@ function invTotals(inv) {
   const total = r2(net + vat);
   const paid = r2((inv.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0));
   const balance = r2(total - paid);
-  const status = inv.void ? "Cancelled" : (balance <= 0.004 && total > 0) ? "Paid" : (inv.due && inv.due < todayISO()) ? "Overdue" : paid > 0 ? "Part paid" : "Unpaid";
+  const status = inv.void ? "Cancelled" : (balance < -0.004 && total > 0) ? "Overpaid" : (balance <= 0.004 && total > 0) ? "Paid" : (inv.due && inv.due < todayISO()) ? "Overdue" : paid > 0 ? "Part paid" : "Unpaid";
   return { net, vat, total, paid, balance, status };
 }
-const INV_STATUS_COL = { Paid: ["#15803D", "#ECFDF5"], "Part paid": ["#B45309", "#FFFBEB"], Unpaid: ["#1D4ED8", "#EFF6FF"], Overdue: ["#B91C1C", "#FEF2F2"], Cancelled: ["#6B7280", "#F3F4F6"] };
+// Overpayments: money paid over an invoice's total is held on the customer's account,
+// then offered on their next invoice (payment method "On account") or marked refunded (a "Refund" payment)
+const invOver = inv => { if (!inv || inv.void) return 0; const t = invTotals(inv); return t.total > 0 && t.balance < -0.004 ? r2(-t.balance) : 0; };
+const isAcctPay = p => p && p.method === "On account";
+function onAccount(c, exceptInvId) {
+  const invs = ((c && c.invoices) || []).filter(i => i.id !== exceptInvId && !i.void);
+  const over = invs.reduce((s, i) => s + invOver(i), 0);
+  const used = invs.reduce((s, i) => s + (i.payments || []).filter(isAcctPay).reduce((a, p) => a + (Number(p.amount) || 0), 0), 0);
+  return r2(Math.max(0, over - used));
+}
+const INV_STATUS_COL = { Overpaid: ["#B45309", "#FFFBEB"], Paid: ["#15803D", "#ECFDF5"], "Part paid": ["#B45309", "#FFFBEB"], Unpaid: ["#1D4ED8", "#EFF6FF"], Overdue: ["#B91C1C", "#FEF2F2"], Cancelled: ["#6B7280", "#F3F4F6"] };
 function InvBadge({ status }) { const [c, b] = INV_STATUS_COL[status] || INV_STATUS_COL.Unpaid; return <span style={{ fontSize: 11.5, fontWeight: 800, color: c, background: b, borderRadius: 99, padding: "3px 9px", whiteSpace: "nowrap" }}>{status}</span>; }
 // Save one invoice (add or replace) onto its customer
 async function saveInvoice(data, custId, inv, remove) {
@@ -6501,6 +6511,7 @@ async function buildInvoicePdf(inv, c) {
   const tot = [["Net", gbpPlain(t.net)], [`VAT @ ${Math.round(VAT_RATE * 100)}%`, gbpPlain(t.vat)], ["Total", gbpPlain(t.total)]];
   if (t.paid > 0) tot.push(["Paid", "-" + gbpPlain(t.paid)]);
   tot.push(["Balance due", gbpPlain(Math.max(0, t.balance))]);
+  if (t.balance < -0.004) tot.push(["Overpaid - on account", gbpPlain(-t.balance)]);
   tot.forEach(([k, v], i) => { const strong = k === "Total" || k === "Balance due"; T(380, y + i * 17, k, 10.5, strong ? bold : font, k === "Balance due" ? teal : black); R(552, y + i * 17, v, strong ? 11.5 : 10.5, strong ? bold : font, k === "Balance due" ? teal : black); });
   if (t.paid > 0) {
     let py = y;
@@ -6596,6 +6607,14 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
     if (!(amt > 0)) { alert("Enter the amount received."); return; }
     await persist({ ...f, payments: [...(f.payments || []), { id: uid(), date: pay.date || todayISO(), amount: amt, method: pay.method || "Bank transfer" }] });
   };
+  // money held on the customer's account from an overpaid invoice
+  const acctAvail = onAccount(c, f.id);
+  const acctHere = r2((f.payments || []).filter(isAcctPay).reduce((s2, p) => s2 + (Number(p.amount) || 0), 0));
+  const cleanLines = () => (f.lines || []).filter(l => l.desc || Number(l.amount)).map(l => ({ ...l, amount: r2(l.amount) }));
+  const applyAcct = on => persist({ ...f, lines: cleanLines(), payments: on ? [...(f.payments || []), { id: uid(), date: todayISO(), amount: r2(Math.min(acctAvail, t.balance)), method: "On account" }] : (f.payments || []).filter(p => !isAcctPay(p)) });
+  const overHere = t.total > 0 && t.balance < -0.004 ? r2(-t.balance) : 0;
+  const refundable = overHere ? r2(Math.min(overHere, onAccount({ ...c, invoices: [...(c.invoices || []).filter(x => x.id !== f.id), f] }))) : 0;
+  const refund = () => { if (!confirm(`Mark ${gbpPlain(refundable)} as refunded to the customer?`)) return; persist({ ...f, lines: cleanLines(), payments: [...(f.payments || []), { id: uid(), date: todayISO(), amount: -refundable, method: "Refund" }] }); };
   const del = async () => { if (!confirm(`Delete invoice ${invNumber(f)}? This can't be undone.`)) return; setBusy(true); await saveInvoice(data, c.id, f, true); };
   return (
     <Modal title={isNew ? "New invoice" : `Invoice ${invNumber(f)}`} onClose={onClose}>
@@ -6638,6 +6657,15 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
             <div style={{ display: "flex", justifyContent: "space-between", color: "#41514E" }}><span>Balance · day before the move</span><span>{gbpPlain(dpi.bal)}</span></div>
           </div>) : null; })()}
       </div>
+      {overHere > 0 && <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, color: "#92400E", fontSize: 14 }}><span>Overpaid · held on account</span><span>{gbpPlain(overHere)}</span></div>
+        <div style={{ fontSize: 12.5, color: "#92400E", margin: "3px 0 6px" }}>{refundable < overHere - 0.004 ? `${gbpPlain(r2(overHere - refundable))} already used on another invoice. ` : ""}{refundable > 0.004 ? "It's shown on the customer and offered on their next invoice." : "All of it has been used on another invoice."}</div>
+        {!ro && !isNew && refundable > 0.004 && <Btn variant="grey" size="sm" disabled={busy} onClick={refund}>↩ Refunded {gbpPlain(refundable)}</Btn>}
+      </div>}
+      {!ro && ((acctAvail > 0.004 && t.balance > 0.004) || acctHere > 0) && <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700, padding: "8px 12px", marginBottom: 10, cursor: "pointer", color: "#15803D", background: "#ECFDF5", border: "1px solid #BBF7D0", borderRadius: 10 }}>
+        <input type="checkbox" checked={acctHere > 0} disabled={busy} onChange={e => applyAcct(e.target.checked)} style={{ width: 18, height: 18 }} />
+        {acctHere > 0 ? `${gbpPlain(acctHere)} used from their account` : `Use ${gbpPlain(Math.min(acctAvail, t.balance))} on account (overpaid earlier)`}
+      </label>}
       {(f.payments || []).length > 0 && <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Payments</div>
         {f.payments.map(p => <div key={p.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5, padding: "4px 0", borderBottom: "1px solid #EEF3F2" }}>
@@ -6763,6 +6791,7 @@ function CustomerInvoices({ data, c }) {
   return (
     <>
       <SectionTitle>Invoices{owed > 0.004 ? ` · ${gbpPlain(owed)} owed` : ""}</SectionTitle>
+      {onAccount(c) > 0.004 && <div style={{ fontSize: 13.5, fontWeight: 800, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "8px 12px", marginBottom: 8 }}>💷 {gbpPlain(onAccount(c))} on account · overpaid, will be offered on their next invoice</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
         {invs.map(inv => <InvoiceRow key={inv.id} inv={inv} c={c} onOpen={() => setOpen({ invId: inv.id })} />)}
         {!isReadOnly() && canInvoice.map(({ j, pt }) => <Btn key={j.id + pt} variant="grey" onClick={() => setOpen({ draft: buildMoveInvoice(data, c, j, pt) })}>🧾 {pt === "out" ? `Create out-of-store invoice ${moveRef(data, j)}` : pt === "in" ? `Create into-store invoice for move ${moveRef(data, j)}` : `Create invoice for move ${moveRef(data, j)}`}</Btn>)}
@@ -6857,12 +6886,12 @@ function InvoicesView({ data, setView }) {
   const qq = q.trim().toLowerCase();
   const matches = x => !qq || [invNumber(x.inv), x.c.name, x.c.company, x.c.ref, x.c.postcode, x.inv.title].filter(Boolean).join(" ").toLowerCase().includes(qq);
   const base = all.filter(x => inPeriod(x.inv.date) && matches(x));
-  const list = base.filter(x => filter === "All" ? true : filter === "Owed" ? ["Unpaid", "Part paid", "Overdue"].includes(x.t.status) : x.t.status === filter);
+  const list = base.filter(x => filter === "All" ? true : filter === "Owed" ? ["Unpaid", "Part paid", "Overdue"].includes(x.t.status) : (x.t.status === filter || (filter === "Paid" && x.t.status === "Overpaid")));
   const owedAll = all.filter(x => x.t.status !== "Cancelled").reduce((s, x) => s + Math.max(0, x.t.balance), 0);
   const overdueAll = all.filter(x => x.t.status === "Overdue");
-  const paidThisMonth = all.reduce((s, x) => s + (x.inv.payments || []).filter(p => (p.date || "").startsWith(ym)).reduce((a, p) => a + (Number(p.amount) || 0), 0), 0);
+  const paidThisMonth = all.reduce((s, x) => s + (x.inv.payments || []).filter(p => (p.date || "").startsWith(ym) && !isAcctPay(p)).reduce((a, p) => a + (Number(p.amount) || 0), 0), 0);
   const tile = (label, val, col, onClick) => <div onClick={onClick} style={{ flex: 1, minWidth: 0, background: "#fff", border: "1px solid #E3E9E8", borderRadius: 12, padding: "10px 12px", cursor: onClick ? "pointer" : "default" }}><div style={{ fontSize: 11.5, fontWeight: 700, color: "#6A7B77" }}>{label}</div><div style={{ fontSize: 18, fontWeight: 800, color: col, marginTop: 2 }}>{val}</div></div>;
-  const sum = k => list.reduce((s, x) => s + (x.t.status === "Cancelled" ? 0 : x.t[k]), 0);
+  const sum = k => list.reduce((s, x) => s + (x.t.status === "Cancelled" ? 0 : k === "balance" ? Math.max(0, x.t[k]) : x.t[k]), 0);
   const ro = isReadOnly();
   return (
     <div>
