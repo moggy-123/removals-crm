@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B318";
+const BUILD_NO = "B319";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4584,8 +4584,7 @@ async function showPdf(src, name = "document.pdf") {
   resetZoomSoon();
 }
 
-// only = "in" / "out": just that plan (Into store or Out of store), for the PDF button on each plan card
-async function buildSurveyPdf(e, c, data, audience = "customer", only = null) {
+async function buildSurveyPdf(e, c, data, audience = "customer") {
   const forStaff = audience === "staff";
   const forOffice = audience === "office";
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
@@ -4606,7 +4605,7 @@ async function buildSurveyPdf(e, c, data, audience = "customer", only = null) {
   np();
   page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
   at("R&J Removals & Storage", M, H - 34, 16, bold, white);
-  at(only === "in" ? "Into Store Plan — STAFF COPY" : only === "out" ? "Out of Store Plan — STAFF COPY" : forOffice ? "Survey & Move Plan — OFFICE COPY" : forStaff ? "Move Plan — STAFF COPY" : "Survey & Move Plan", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
+  at(forOffice ? "Survey & Move Plan — OFFICE COPY" : forStaff ? "Move Plan — STAFF COPY" : "Survey & Move Plan", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
   const ref = c?.ref ? `Ref ${c.ref}` : "";
   if (ref) { const w = bold.widthOfTextAtSize(ref, 12); at(ref, W - M - w, H - 40, 12, bold, white); }
   y = H - 88;
@@ -4646,8 +4645,7 @@ async function buildSurveyPdf(e, c, data, audience = "customer", only = null) {
   const twoPlans = !!e.toStore || stages.some(isOutDay);
   const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? (v.reg ? `${v.name} (${v.reg})` : v.name) : ""; };
   // a direct move has one plan; a storage move has two, each its own section
-  const planGroups = (twoPlans ? [["Into store plan", stages.filter(x => !isOutDay(x))], ["Out of store plan", stages.filter(isOutDay)]] : [["Direct move plan", stages]])
-    .filter(([title]) => !only || (only === "in" ? title === "Into store plan" : title === "Out of store plan"));
+  const planGroups = twoPlans ? [["Into store plan", stages.filter(x => !isOutDay(x))], ["Out of store plan", stages.filter(isOutDay)]] : [["Direct move plan", stages]];
   planGroups.forEach(([title, grp]) => {
   heading(title);
   if (!grp.length) { at("To be confirmed.", M, y, 9.5, font, navy); y -= 16; }
@@ -4715,14 +4713,6 @@ async function buildSurveyPdf(e, c, data, audience = "customer", only = null) {
   return { bytes: out, ref: c?.ref ? String(c.ref) : "" };
 }
 
-// PDF of one plan (staff copy: crew and vehicles shown), opened from the plan's own card on the enquiry
-async function openPlanPdf(e, data, only) {
-  try {
-    const c = (data.customers || []).find(x => x.id === e.customerId) || null;
-    const { bytes, ref } = await buildSurveyPdf(e, c, data, "staff", only);
-    showPdf(new Blob([bytes], { type: "application/pdf" }), `${only === "out" ? "OutOfStore-Plan" : only === "in" ? "IntoStore-Plan" : "Move-Plan"}-${ref || "RJ"}.pdf`);
-  } catch (ex) { alert("Could not build the PDF: " + ((ex && ex.message) || ex)); }
-}
 function SurveyPdfView({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
@@ -4907,11 +4897,7 @@ function MoveManageModal({ data, job, onClose }) {
   return (
     <Modal title={`Move ${moveRef(data, job)}`} onClose={onClose}>
       <div style={{ marginBottom: 12 }}><StatusBadge status={jobBadge({ ...job, status: f.status })} /></div>
-      <Field label="Price (£)"><Input type="number" inputMode="decimal" value={f.price} onChange={v => set("price", v)} /></Field>
-      <Field label="Deposit (£)"><Input type="number" inputMode="decimal" value={f.deposit} onChange={v => set("deposit", v)} /></Field>
-      <div style={{ fontSize: 14, fontWeight: 700, color: "#10211E", margin: "2px 0 12px" }}>Balance due: {gbp(balanceDue)}</div>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 8 }}><input type="checkbox" checked={f.depositPaid} onChange={ev => set("depositPaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Deposit paid</label>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 16 }}><input type="checkbox" checked={f.balancePaid} onChange={ev => set("balancePaid", ev.target.checked)} style={{ width: 18, height: 18 }} /> Balance paid</label>
+      {/* prices, deposits and payments are handled on the invoice now */}
 
       {f.status === "Confirmed" && !changing && (
         <div style={{ marginBottom: 12 }}>
@@ -5311,10 +5297,7 @@ function OutOfStoreCard({ data, e, parent, onEditPlan }) {
             <PlanDayLines data={data} days={outDays} />
             {!outDays.length && <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 3 }}>Add the days now, or later when the customer has a date.</div>}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
-            {(!isReadOnly() || outDays.length) && <Btn size="sm" variant="grey" onClick={onEditPlan}><Icon name="calendar" size={14} /> {isReadOnly() ? "View" : outDays.length ? "Edit" : "Add"}</Btn>}
-            {outDays.length > 0 && <Btn size="sm" variant="grey" onClick={() => openPlanPdf(e, data, "out")}>📄 PDF</Btn>}
-          </div>
+          {(!isReadOnly() || outDays.length) && <Btn size="sm" variant="grey" onClick={onEditPlan}><Icon name="calendar" size={14} /> {isReadOnly() ? "View" : outDays.length ? "Edit" : "Add"}</Btn>}
         </div>
         <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 8 }}>Booked on its own once the into-store move is booked.</div>
       </Card>
@@ -5387,7 +5370,6 @@ function OutOfStoreCard({ data, e, parent, onEditPlan }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
             <Btn size="sm" variant="grey" onClick={() => setOpen("plan")}><Icon name="calendar" size={14} /> {ro ? "View" : "Edit"}</Btn>
             {oj.status !== NOT_BOOKED && <Btn size="sm" onClick={() => setOpen("manage")}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
-            {st.length > 0 && <Btn size="sm" variant="grey" onClick={() => openPlanPdf(e, data, "out")}>📄 PDF</Btn>}
           </div>
         </div>
         {canBook && <Btn variant="amber" style={{ width: "100%", marginTop: 10 }} onClick={() => setOpen("book")}><Icon name="check" size={16} /> Book out of store</Btn>}
@@ -5869,7 +5851,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
                   <div style={{ fontWeight: 800, color: "#111827" }}>{store ? "🏠 → 📦 Into store plan" : "🏠 → 🏠 Direct move plan"}</div>
                   {linkedJob && <StatusBadge status={jobBadge(linkedJob)} />}
                 </div>
-                {linkedJob && <div style={{ fontSize: 12, color: "#6B7280" }}>Move {moveRef(data, linkedJob)} · {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}</div>}
+                {linkedJob && <div style={{ fontSize: 12, color: "#6B7280" }}>Move {moveRef(data, linkedJob)} · {gbp(linkedJob.price)}</div>}
                 <PlanDayLines data={data} days={days} />
                 {linkedJob && (() => { const so = Object.values(linkedJob.signOffs || {}); if (!so.length) return null; const last = so.sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
                   return <div onClick={() => setShowSignOff(true)} style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 4, cursor: "pointer" }}>✅ Signed off{so.length > 1 ? ` (${so.length} days)` : ""} · {last.staffName}</div>; })()}
@@ -5877,7 +5859,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
                 {(!ro || days.length) && <Btn size="sm" variant="grey" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {ro ? "View" : days.length ? "Edit" : "Add"}</Btn>}
                 {linkedJob && <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
-                {days.length > 0 && <Btn size="sm" variant="grey" onClick={() => openPlanPdf(e, data, store ? "in" : null)}>📄 PDF</Btn>}
+                {linkedJob && <Btn size="sm" variant="grey" onClick={() => setShowCrew(true)}>👷 Crew view</Btn>}
               </div>
             </div>
             {canBookNew && <Btn variant="amber" style={{ width: "100%", marginTop: 10 }} onClick={() => setBookOpen("choose")}><Icon name="check" size={16} /> {store ? "Book into store" : "Book move"}</Btn>}
