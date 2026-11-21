@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B309";
+const BUILD_NO = "B310";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5174,7 +5174,7 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
   const seg = on => ({ flex: 1, padding: "11px 8px", borderRadius: 10, border: on ? `2px solid ${TEAL}` : "1.5px solid #E3E9E8", background: on ? "#E7F2F0" : "#fff", color: on ? TEAL_D : "#43534F", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" });
   return (
     !status ? (
-      <Modal title={outMode ? "Book out of store" : "Book this move"} onClose={onClose}>
+      <Modal title={outMode ? "Book out of store" : (e.toStore || splitPlanDays(e.stages).split) ? "Book into store" : "Book this move"} onClose={onClose}>
         <div style={{ fontSize: 13.5, color: "#6A7B77", marginBottom: 12 }}>How is this {outMode ? "out-of-store move" : "move"} booked?</div>
         {choices.map(ch => {
           const meta = ch === "Provisional" ? ["#CA8A04", "#FEFCE8", "Pencilled in — not fully committed yet"] : ch === TEL_CONF ? ["#7C3AED", "#F5F3FF", "Customer has rung to say it's definite — deposit to follow"] : ["#2563EB", "#EFF6FF", "Definite — deposit taken"];
@@ -5188,7 +5188,7 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
         <Btn variant="grey" style={{ width: "100%" }} onClick={onClose}>Cancel</Btn>
       </Modal>
     ) :
-    <Modal title={outMode ? "Book out of store" : "Book this move"} onClose={onClose}>
+    <Modal title={outMode ? "Book out of store" : (e.toStore || splitPlanDays(e.stages).split) ? "Book into store" : "Book this move"} onClose={onClose}>
       <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
         {choices.map(ch => <button key={ch} style={seg(status === ch)} onClick={() => setStatus(ch)}>{ch === TEL_CONF ? "📞 Tel. confirmed" : ch}</button>)}
       </div>
@@ -5252,10 +5252,41 @@ function EnquiryStorageCard({ data, e, move, customer, setView }) {
     </>
   );
 }
-// The out-of-store move: its own plan, booking and status, under the into-store move
-function OutOfStoreCard({ data, e, parent }) {
+// One line per day of a plan (used on the plan cards)
+function PlanDayLines({ data, days }) {
+  const vname = id => (((data.vehicles || []).find(v => v.id === id)) || {}).name;
+  if (!days.length) return <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>No days planned yet</div>;
+  return <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+    {days.map((d, i) => (
+      <div key={d.id || i} style={{ fontSize: 13, color: "#374151" }}>
+        <b style={{ color: "#10211E" }}>Day {i + 1}:</b> {d.type || "—"} · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}
+        {(d.crew && d.crew.length) ? ` · ${d.crew.join(", ")}` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
+        {(d.vehicleIds && d.vehicleIds.length) ? ` · ${d.vehicleIds.map(vname).filter(Boolean).join(", ")}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
+      </div>))}
+  </div>;
+}
+// The out-of-store plan: its own days, booking and status (its own move once the into-store move is booked)
+function OutOfStoreCard({ data, e, parent, onEditPlan }) {
   const oj = outJobOf(data.jobs, parent);
   const [open, setOpen] = useState(null); // "plan" | "book" | "manage"
+  if (!parent) {
+    // not booked yet: the out-of-store days of the enquiry's plan
+    if (!e.toStore && !(e.stages || []).some(isOutDay)) return null;
+    const outDays = (e.stages || []).filter(isOutDay);
+    return (
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, color: "#111827" }}>📦 → 🏠 Out of store plan</div>
+            <PlanDayLines data={data} days={outDays} />
+            {!outDays.length && <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 3 }}>Add the days now, or later when the customer has a date.</div>}
+          </div>
+          {(!isReadOnly() || outDays.length) && <Btn size="sm" variant="grey" onClick={onEditPlan}><Icon name="calendar" size={14} /> {isReadOnly() ? "View" : outDays.length ? "Edit" : "Add"}</Btn>}
+        </div>
+        <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 8 }}>Booked on its own once the into-store move is booked.</div>
+      </Card>
+    );
+  }
   if (!oj) {
     // an into-store move with no out of store yet: add it now (or any time later)
     const intoStore = parent && !isOutJob(parent) && parent.status !== "Let Go" && (jobStages(parent).some(x => /store/i.test(x.type || "") && !isOutDay(x)) || !!e.toStore);
@@ -5276,10 +5307,10 @@ function OutOfStoreCard({ data, e, parent }) {
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div>
-            <div style={{ fontWeight: 700, color: "#111827" }}>🏬 Out of store</div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>Not added yet — add it now or when the customer has a date.</div>
+            <div style={{ fontWeight: 800, color: "#111827" }}>📦 → 🏠 Out of store plan</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>No days planned yet — add them now or when the customer has a date.</div>
           </div>
-          <Btn size="sm" onClick={add}>+ Add out of store</Btn>
+          <Btn size="sm" variant="grey" onClick={add}><Icon name="calendar" size={14} /> Add</Btn>
         </div>
       </Card>
     );
@@ -5312,21 +5343,15 @@ function OutOfStoreCard({ data, e, parent }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 700, color: "#111827" }}>🏬 Out of store {moveRef(data, oj)}</div>
+              <div style={{ fontWeight: 800, color: "#111827" }}>📦 → 🏠 Out of store plan</div>
               <StatusBadge status={jobBadge(oj)} />
             </div>
-            <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>
-              {st.map((d, i) => (
-                <div key={d.id || i}>{st.length > 1 ? <b style={{ color: "#10211E" }}>Day {i + 1}: </b> : null}{d.type || "Out of store"} · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}
-                  {(d.crew && d.crew.length) ? ` · ${d.crew.length} crew` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
-                  {(d.vehicleIds && d.vehicleIds.length) ? ` · ${d.vehicleIds.map(vname).filter(Boolean).join(", ")}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
-                </div>
-              ))}
-            </div>
+            <div style={{ fontSize: 12, color: "#6B7280" }}>Move {moveRef(data, oj)}</div>
+            <PlanDayLines data={data} days={st} />
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3 }}>{gbp(oj.price)}{!ro && <span onClick={editPrice} style={{ color: TEAL, fontWeight: 700, cursor: "pointer", marginLeft: 6 }}>Edit price</span>} · invoiced when they come out{oj.balancePaid ? " · paid ✓" : ""}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
-            <Btn size="sm" variant="grey" onClick={() => setOpen("plan")}><Icon name="calendar" size={14} /> {ro ? "Plan" : "Edit plan"}</Btn>
+            <Btn size="sm" variant="grey" onClick={() => setOpen("plan")}><Icon name="calendar" size={14} /> {ro ? "View" : "Edit"}</Btn>
             {oj.status !== NOT_BOOKED && <Btn size="sm" onClick={() => setOpen("manage")}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
           </div>
         </div>
@@ -5779,32 +5804,39 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
         </div>
       </Card>
 
-      {/* Move plan — shown once the survey is complete */}
-      {showPlanCard && <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, color: "#111827" }}>Move plan</div>
-            {(!e.stages || e.stages.length === 0) ? (
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>No days planned yet</div>
-            ) : (
-              <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-                {e.stages.map((d, i) => {
-                  const two = !!e.toStore || e.stages.some(isOutDay), out = isOutDay(d);
-                  const grp = e.stages.filter(x => isOutDay(x) === out), n = grp.indexOf(d) + 1;
-                  const first = two && n === 1;
-                  return (
-                  <div key={d.id || i} style={{ fontSize: 13, color: "#374151" }}>
-                    {first && <div style={{ fontSize: 11.5, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".04em", marginTop: i ? 6 : 0 }}>{out ? "Out of store plan" : "Into store plan"}</div>}
-                    <b style={{ color: "#10211E" }}>Day {two ? n : i + 1}:</b> {d.type || "—"} · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}
-                    {(d.crew && d.crew.length) ? ` · ${d.crew.length} crew` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
-                    {(d.vehicleIds && d.vehicleIds.length) ? ` · ${d.vehicleIds.map(vname).filter(Boolean).join(", ")}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
-                  </div>); })}
+      {/* Move plans: a direct move has one; a storage move has Into store and Out of store, each booked from its own card */}
+      {(showPlanCard || linkedJob) && (() => {
+        const store = !!e.toStore || (e.stages || []).some(isOutDay) || !!outJobOf(data.jobs, linkedJob);
+        const days = linkedJob ? jobStages(linkedJob) : (e.stages || []).filter(d => !store || !isOutDay(d));
+        const ro = isReadOnly();
+        const canBookNew = !ro && !linkedJob && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status);
+        const canUpgrade = !ro && linkedJob && isPencilled(linkedJob.status);
+        return (
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 800, color: "#111827" }}>{store ? "🏠 → 📦 Into store plan" : "Move plan"}</div>
+                  {linkedJob && <StatusBadge status={jobBadge(linkedJob)} />}
+                </div>
+                {linkedJob && <div style={{ fontSize: 12, color: "#6B7280" }}>Move {moveRef(data, linkedJob)} · {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}</div>}
+                <PlanDayLines data={data} days={days} />
+                {linkedJob && (() => { const so = Object.values(linkedJob.signOffs || {}); if (!so.length) return null; const last = so.sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
+                  return <div onClick={() => setShowSignOff(true)} style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 4, cursor: "pointer" }}>✅ Signed off{so.length > 1 ? ` (${so.length} days)` : ""} · {last.staffName}</div>; })()}
               </div>
-            )}
-          </div>
-          {(!isReadOnly() || (e.stages && e.stages.length)) && <Btn size="sm" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {isReadOnly() ? "View" : (e.stages && e.stages.length) ? "Edit" : "Add"}</Btn>}
-        </div>
-      </Card>}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
+                {(!ro || days.length) && <Btn size="sm" variant="grey" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {ro ? "View" : days.length ? "Edit" : "Add"}</Btn>}
+                {linkedJob && <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
+                {linkedJob && <Btn size="sm" variant="grey" onClick={() => setShowCrew(true)}>👷 Crew view</Btn>}
+              </div>
+            </div>
+            {canBookNew && <Btn variant="amber" style={{ width: "100%", marginTop: 10 }} onClick={() => setBookOpen("choose")}><Icon name="check" size={16} /> {store ? "Book into store" : "Book move"}</Btn>}
+            {canUpgrade && <Btn variant="amber" style={{ width: "100%", marginTop: 10 }} onClick={() => setBookOpen("upgrade")}><Icon name="check" size={16} /> {store ? "Confirm into store" : "Confirm move"}</Btn>}
+            {!linkedJob && !quoteDone && !ro && days.length > 0 && <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 8 }}>Build the quote to book {store ? "it" : "the move"}.</div>}
+          </Card>
+        );
+      })()}
+      {(showPlanCard || linkedJob) && <OutOfStoreCard data={data} e={e} parent={linkedJob} onEditPlan={() => setShowPlan(true)} />}
 
       {/* Quote — shown once the move plan is complete */}
       {showQuoteCard && <Card>
@@ -5831,29 +5863,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
 
       {/* Booked but no move behind it: set the move up here (where Manage move normally sits) */}
       <BookedNoMove data={data} e={e} linkedJob={linkedJob} onCreate={markWon} />
-      {/* Manage move — below the quote once a provisional move exists */}
-      {linkedJob && (
-        <Card>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 700, color: "#111827" }}>Move {moveRef(data, linkedJob)}</div>
-                <StatusBadge status={jobBadge(linkedJob)} />
-              </div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3 }}>
-                {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}
-              </div>
-              {(() => { const so = Object.values(linkedJob.signOffs || {}); if (!so.length) return null; const last = so.sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
-                return <div onClick={() => setShowSignOff(true)} style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 4, cursor: "pointer" }}>✅ Signed off{so.length > 1 ? ` (${so.length} days)` : ""} · {last.staffName} &amp; {last.custName}{so.some(x => x.notes) ? <span style={{ color: "#B45309" }}> · 📝 note</span> : null}</div>; })()}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
-              <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {isReadOnly() ? "View" : "Manage"}</Btn>
-              <Btn size="sm" variant="grey" onClick={() => setShowCrew(true)}>👷 Crew view</Btn>
-            </div>
-          </div>
-        </Card>
-      )}
-      <OutOfStoreCard data={data} e={e} parent={linkedJob} />
       <EnquiryStorageCard data={data} e={e} move={linkedJob} customer={customer} setView={setView} />
       {nextHint && <div style={{ fontSize: 13, color: "#6A7B77", fontWeight: 600, background: "#F4F7F6", border: "1px dashed #CBD5D2", borderRadius: 12, padding: "10px 14px", marginBottom: 11 }}>{nextHint}</div>}
 
@@ -5865,10 +5874,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
 
       {/* Actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-        {!isReadOnly() && !linkedJob && quoteDone && !["Won", "Lost", "Not quoted"].includes(e.status) && <>
-          <Btn variant="amber" onClick={() => setBookOpen("choose")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book move</Btn>
-        </>}
-        {!isReadOnly() && linkedJob && isPencilled(linkedJob.status) && <Btn variant="amber" onClick={() => setBookOpen("upgrade")} style={{ flex: 1, whiteSpace: "nowrap" }}><Icon name="check" size={16} /> Book move</Btn>}
       </div>
       {(() => {
         const showFu = !linkedJob, showLost = !["Won", "Lost", "Not quoted"].includes(e.status);
@@ -10835,11 +10840,21 @@ function UsersAdmin({ data }) {
 // ── Crew: just their jobs for today, shown from 7:30am ──
 function CrewPreviewModal({ data, job, onClose }) {
   const stages = jobStages(job);
+  // storage: the into-store plan, then the out-of-store plan, each with its own days
+  const oj = outJobOf(data.jobs, job);
+  const enq = (data.enquiries || []).find(x => x.id === jobEnquiryId(data.jobs, job)) || {};
+  const store = !!oj || !!enq.toStore;
+  const PlanHead = ({ children }) => <div style={{ fontSize: 13, fontWeight: 800, color: "#10211E", background: "#fff", borderRadius: 10, padding: "8px 12px", margin: "4px 0 8px" }}>{children}</div>;
   return (
     <Modal title="What the crew see" onClose={onClose}>
       <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 10 }}>This is the job as porters and drivers see it on their phones (on the day, from 7:30am).</div>
       <div style={{ background: "#EEF3F2", borderRadius: 14, padding: 10 }}>
+        {store && <PlanHead>{isOutJob(job) ? "📦 → 🏠 Out of store plan" : "🏠 → 📦 Into store plan"}</PlanHead>}
         {stages.length ? stages.map((st, i) => <CrewJobCard key={st.id || i} data={data} j={job} st={st} />) : <div style={{ fontSize: 13, color: "#94A4A0" }}>No days booked on this move yet.</div>}
+        {oj && <>
+          <PlanHead>📦 → 🏠 Out of store plan</PlanHead>
+          {jobStages(oj).map((st, i) => <CrewJobCard key={"o" + (st.id || i)} data={data} j={oj} st={st} />)}
+        </>}
       </div>
     </Modal>
   );
