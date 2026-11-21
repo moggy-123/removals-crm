@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B317";
+const BUILD_NO = "B318";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5198,6 +5198,13 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
             </button>
           );
         })}
+        {choices.includes("Provisional") && (
+          // no date yet: pencil it in straight away, nothing else to fill in
+          <button onClick={() => onBook("Provisional", planned.map(() => ""), null)} style={{ display: "block", width: "100%", textAlign: "left", padding: "14px 16px", marginBottom: 10, borderRadius: 14, border: "2px dashed #CA8A04", background: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
+            <div style={{ fontSize: 16.5, fontWeight: 800, color: "#A16207" }}>No date provisional</div>
+            <div style={{ fontSize: 13, color: "#43534F", marginTop: 2 }}>Going ahead but no date yet — books it straight away, add the date later</div>
+          </button>
+        )}
         <Btn variant="grey" style={{ width: "100%" }} onClick={onClose}>Cancel</Btn>
       </Modal>
     ) :
