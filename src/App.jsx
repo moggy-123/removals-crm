@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B302";
+const BUILD_NO = "B303";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -1944,47 +1944,11 @@ function Dashboard({ data, setView, setData }) {
 
   return (
     <div>
-      {(() => {
-        // Two simple results for this month:
-        //  • Quotes booked — of this month's surveys, how many have been booked (and the % / £).
-        //  • Moves booked  — moves with a move date this month (count and £).
-        const ym = todayISO().slice(0, 7);
-        const jobOf = e => (data.jobs || []).find(x => x.enquiryId === e.id && x.status !== "Let Go");
-        // Quotes booked in to see: survey visits with a survey date this month.
-        const quotesDone = enquiries.filter(e => String(e.surveyDate || "").slice(0, 7) === ym);
-        const seen = quotesDone.filter(e => e.surveyDone || (e.inventory && e.inventory.length) || ["Surveyed", "Quoted", "Won", "Lost"].includes(e.status)).length;
-        const movesMonth = jobs.filter(j => j.status !== "Let Go" && String(jobMoveDate(j) || "").slice(0, 7) === ym);
-        const mMoney = Math.round(movesMonth.reduce((t, j) => t + netValue((data.enquiries || []).find(e => e.id === j.enquiryId), j), 0) * 100) / 100;
-        const monthName = new Date().toLocaleDateString("en-GB", { month: "long" });
-        const tile = { flex: 1, minWidth: 0, background: "#fff", borderRadius: 12, padding: "10px 14px", boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: "2px solid #F3F4F6", cursor: "pointer" };
-        const big = { fontSize: 24, fontWeight: 800, lineHeight: 1.2 };
-        const lab = { fontSize: 12.5, color: "#6B7280", fontWeight: 700 };
-        return (
-          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-            <div style={tile} onClick={() => { try { localStorage.setItem("removals_enq_period", "month"); localStorage.setItem("removals_enq_dateby", "survey"); } catch {} setView({ screen: "enquiries", filter: "All" }); }}>
-              <div style={lab}>Quotes booked in · {monthName}</div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ ...big, color: AMBER }}>{quotesDone.length}</span>
-                <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>to see this month</span>
-              </div>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{seen} seen · {quotesDone.length - seen} to go</div>
-            </div>
-            <div style={tile} onClick={() => setView({ screen: "calendar", calShow: "moves", calMode: "agenda", date: todayISO() })}>
-              <div style={lab}>Moving · {monthName}</div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ ...big, color: "#2563EB" }}>{movesMonth.length}</span>
-                <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>moving this month</span>
-              </div>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#41514E" }}>{gbp(mMoney)} <span style={{ fontWeight: 600, color: "#9CA3AF", fontSize: 12 }}>net</span></div>
-            </div>
-          </div>
-        );
-      })()}
-
+      {/* the two month boxes were here — those figures are in Reports and on Enquiries now */}
       <WebLeadsTray setView={setView} />
       <InvoicesHomeCard data={data} setView={setView} />
-      <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 18px", borderRadius: 10, border: "none", background: AMBER, color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 12px rgba(245,158,11,.30)" }}>
-        <Icon name="plus" size={15} /> New Enquiry
+      <button onClick={() => setView({ screen: "newEnquiry" })} style={{ width: "100%", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "15px 18px", minHeight: 56, borderRadius: 14, border: "none", background: AMBER, color: "#fff", fontSize: 18, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 3px 10px rgba(242,153,0,.28)" }}>
+        <Icon name="plus" size={20} /> New Enquiry
       </button>
 
       {/* ── To do: every reminder in one list, most urgent first ── */}
