@@ -1338,7 +1338,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B305";
+const BUILD_NO = "B306";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3068,10 +3068,10 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
       </>}
       <SectionTitle>Move details</SectionTitle>
       <Field label="Preferred move date">
-        <Input type="date" value={f.preferredDate} onChange={v => set("preferredDate", v)} />
+        <Input type="date" value={f.preferredDate} onChange={v => setF(p => ({ ...p, preferredDate: v, ...(v ? { moveMonth: "" } : {}) }))} />
         {(f.preferredDate || f.moveMonth) && <button onClick={() => setF(p => ({ ...p, preferredDate: "", moveMonth: "" }))} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: "4px 0 0" }}>Remove move date</button>}
       </Field>
-      <Field label="Or month of move" hint="If no exact date is known yet">
+      {!f.preferredDate && <Field label="Or month of move" hint="If no exact date is known yet">
         <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={f.moveMonth || ""} onChange={ev => { const v = ev.target.value; setF(p => ({ ...p, moveMonth: v, ...(v ? { exchanged: false } : {}) })); }}>
           <option value="">Select a month…</option>
           {Array.from({ length: 18 }, (_, i) => {
@@ -3080,7 +3080,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
             return <option key={ym} value={ym}>{fmtMonth(ym)}</option>;
           })}
         </select>
-      </Field>
+      </Field>}
       {/* exchanged only makes sense with an actual date; flexible with a date or a month */}
       {f.preferredDate && !f.moveMonth && <Field label="Exchanged?">
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
@@ -3149,10 +3149,6 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
         </label>
         {f.toStore && (
           <div style={{ marginTop: 10 }}>
-            <Field label="Stored at" hint="R & J Storage, or type another storage location">
-              <input list="rj-store-locs" style={inputStyle} value={f.storeAt} onChange={ev => set("storeAt", ev.target.value)} placeholder="R & J Storage" />
-              <datalist id="rj-store-locs">{[...new Set(["R & J Storage", ...getStorageLocs()])].map(x => <option key={x} value={x} />)}</datalist>
-            </Field>
             <Field label="How long in store?"><Select value={f.storeMode} onChange={v => set("storeMode", v)} options={["Days", "Weeks", "Months", "Years", "Fixed date out"]} /></Field>
             {f.storeMode === "Fixed date out"
               ? <Field label="Date out of store"><Input type="date" value={f.storeOutDate} onChange={v => set("storeOutDate", v)} /></Field>
@@ -3161,6 +3157,12 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
         )}
       </div>
 
+      {f.toStore && <div style={{ marginTop: 10 }}>
+        <Field label="Stored at" hint="R & J Storage, or type another storage location">
+              <input list="rj-store-locs" style={inputStyle} value={f.storeAt} onChange={ev => set("storeAt", ev.target.value)} placeholder="R & J Storage" />
+              <datalist id="rj-store-locs">{[...new Set(["R & J Storage", ...getStorageLocs()])].map(x => <option key={x} value={x} />)}</datalist>
+            </Field>
+      </div>}
       <SectionTitle>{f.toStore ? "Out of store — delivering to" : "Moving to"}</SectionTitle>
       {f.toStore && <div style={{ fontSize: 12, color: "#6A7B77", margin: "-4px 0 8px" }}>Where it goes when it comes out of store. Leave blank if not known yet.</div>}
       <form autoComplete="off" onSubmit={e => e.preventDefault()} style={{ display: "contents" }}>
@@ -10843,7 +10845,8 @@ function CrewJobCard({ data, j, st }) {
       </div>
       {storeAt && outMove ? <Addr label="FROM STORE" addr={storeAt} /> : <Addr label="FROM" addr={from} access={fromAccess} />}
       {!(storeAt && outMove) && (en.extraFrom || []).map((x, i) => <Addr key={"ef" + i} label={`EXTRA PICKUP ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
-      {storeAt && !outMove ? <Addr label="INTO STORE" addr={storeAt} /> : <Addr label={storeAt ? "DELIVER TO (OUT OF STORE)" : "TO"} addr={to || (storeAt ? "Address to be confirmed" : "")} access={toAccess} />}
+      {storeAt && <Addr label={outMove ? "" : "INTO STORE"} addr={outMove ? "" : storeAt} />}
+      <Addr label={storeAt ? (outMove ? "DELIVER TO (OUT OF STORE)" : "THEN OUT OF STORE TO") : "TO"} addr={to || (storeAt ? "Address to be confirmed" : "")} access={toAccess} />
       {!(storeAt && !outMove) && (en.extraTo || []).map((x, i) => <Addr key={"et" + i} label={`EXTRA DELIVERY ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
       <H>Van &amp; crew</H>
       <div style={{ fontSize: 14, color: "#10211E", fontWeight: 600 }}>🚚 {vans.join(", ") || "Van TBC"}</div>
