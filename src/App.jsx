@@ -150,7 +150,8 @@ const isPencilled = st => st === "Provisional" || st === TEL_CONF; // booked but
 const RES_STATUSES = ["Telephone Confirmed", "Confirmed", "In Store", "Completed"];
 const holdsResources = st => RES_STATUSES.includes(st);
 // "Out of store" days are usually dated later, when the customer's ready — they don't need a date (or crew) to book
-const isOutDay = st => /out of stor|from stor|ex[- ]?stor|redeliver/i.test((st && st.type) || "");
+// A day belongs to the out-of-store plan when it was added there (part "out"), or is named that way
+const isOutDay = st => !!st && (st.part === "out" || (st.part !== "in" && /out of stor|from stor|ex[- ]?stor|redeliver/i.test(st.type || "")));
 const outPending = st => isOutDay(st) && !st.date;
 // Out of store is its own move (own plan, date, crew, vans, status), linked to the into-store move.
 // The link is kept on the job (out_of) and on each of its days as a back-up.
@@ -174,11 +175,11 @@ function splitPlanDays(stages) {
 // Quote lines marked as the out-of-store charge (so they stay recognised once the out day leaves the plan)
 function flagOutLines(e) {
   const days = (e && e.stages) || [];
-  return ((e && e.quoteLines) || []).map((l, i) => (l && !l.out && (OUT_RE.test(l.desc || "") || OUT_RE.test((days[i] && days[i].type) || ""))) ? { ...l, out: true } : l);
+  return ((e && e.quoteLines) || []).map((l, i) => (l && !l.out && (OUT_RE.test(l.desc || "") || (days[i] ? isOutDay(days[i]) : false))) ? { ...l, out: true } : l);
 }
 function outStatusFor(stages) { return (stages || []).some(s => s.date) ? "Provisional" : NOT_BOOKED; }
 function makeOutJob(parent, outDays, price, status) {
-  const stages = outDays.map(d => ({ id: uid(), type: d.type || "Out of store", date: d.date || "", time: d.time || "", vehicleIds: d.vehicleIds || [], crew: d.crew || [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "", outOf: parent.id }));
+  const stages = outDays.map(d => ({ id: uid(), part: "out", type: d.type || "Out of store", date: d.date || "", time: d.time || "", vehicleIds: d.vehicleIds || [], crew: d.crew || [], staffCount: d.staffCount || "", vehTypes: d.vehTypes || {}, notes: d.notes || "", outOf: parent.id }));
   return {
     id: parent.id + "out", outOf: parent.id, customerId: parent.customerId, enquiryId: null, startTime: "",
     fromAddress1: parent.fromAddress1, fromAddress2: parent.fromAddress2, fromTown: parent.fromTown, fromPostcode: parent.fromPostcode, fromAccess: parent.fromAccess,
@@ -359,7 +360,7 @@ function storeSummary(e) {
   if (!e || !e.toStore) return "";
   const at = ` at ${storeName(e)}`;
   if (e.storeMode === "Fixed date out") return e.storeOutDate ? `Into store${at} until ${fmtUK(e.storeOutDate)}` : `Into store${at}`;
-  const q = e.storeQty; return q ? `Into store${at} for ${q} ${e.storeMode}` : `Into store${at} (${(e.storeMode || "").toLowerCase()})`;
+  const q = e.storeQty; return q ? `Into store${at} for ${q} ${e.storeMode || "weeks"}` : `Into store${at}`;
 }
 // Snap a date to the nearest given weekday (0=Sun..6=Sat), within ±3 days.
 function nearestDow(iso, target) {
@@ -1338,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B307";
+const BUILD_NO = "B308";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3939,7 +3940,9 @@ function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
     // once booked, the move's own dates are the real ones (a blank day stays blank)
     return { ...d, date: js ? (js.date || "") : (d.date || ""), crew: (d.crew && d.crew.length ? d.crew : (js?.crew || [])), vehicleIds: (d.vehicleIds && d.vehicleIds.length ? d.vehicleIds : (js?.vehicleIds || [])) };
   }));
-  const addDay = () => setDays(d => [...d, { id: uid(), type: ownJob ? "Out of store" : "Move", date: "", staffCount: "", vehTypes: {}, crew: [], vehicleIds: [], notes: "" }]);
+  // Storage moves get two plans: Into store and Out of store (a direct move has one plan)
+  const twoPlans = !ownJob && (!!enquiry.toStore || days.some(isOutDay));
+  const addDay = (part) => setDays(d => [...d, { id: uid(), ...(part ? { part } : {}), type: ownJob || part === "out" ? "Out of store" : part === "in" ? "Into store" : "Move", date: "", staffCount: "", vehTypes: {}, crew: [], vehicleIds: [], notes: "" }]);
   const removeDay = (i) => setDays(d => d.filter((_, ix) => ix !== i));
   const setDay = (i, k, v) => setDays(d => d.map((x, ix) => ix === i ? { ...x, [k]: v } : x));
   const setVeh = (i, vt, n) => setDays(d => d.map((x, ix) => {
@@ -3986,7 +3989,7 @@ function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
     if (linkedJob) {
       const newStages = days.map((day, i) => {
         const ex = (linkedJob.stages || [])[i] || {};
-        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || "", time: ex.time || "", vehicleIds: day.vehicleIds || [], crew: day.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "", ...(ownJob ? { outOf: outParentId(ownJob) } : {}) };
+        return { id: ex.id || uid(), type: day.type || "Move", date: day.date || "", time: ex.time || "", vehicleIds: day.vehicleIds || [], crew: day.crew || [], staffCount: day.staffCount || "", vehTypes: day.vehTypes || {}, notes: day.notes || ex.notes || "", ...(day.part ? { part: day.part } : {}), ...(ownJob ? { outOf: outParentId(ownJob), part: "out" } : {}) };
       });
       const allVeh = [...new Set(newStages.flatMap(s => s.vehicleIds || []))];
       const allCrew = [...new Set(newStages.flatMap(s => s.crew || []))];
@@ -4010,11 +4013,18 @@ function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
           You booked: {days.length} day{days.length !== 1 ? "s" : ""} · planned {days.reduce((n, d) => n + (Number(d.staffCount) || 0), 0)} staff{(() => { const tot = {}; days.forEach(d => Object.entries(d.vehTypes || {}).forEach(([k, v]) => tot[k] = (tot[k] || 0) + (Number(v) || 0))); const s = vehTypesSummary(tot); return s ? ` · ${s}` : ""; })()}
         </div>
       )}
-      {days.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>No days yet — add the first one.</div>}
-      {days.map((d, i) => (
+      {!twoPlans && days.length === 0 && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 10 }}>No days yet — add the first one.</div>}
+      {(twoPlans ? [["in", "🏠 → 📦  Into store plan"], ["out", "📦 → 🏠  Out of store plan"]] : [[null, null]]).map(([part, head]) => {
+        const list = days.map((d, i) => [d, i]).filter(([d]) => !part || (part === "out" ? isOutDay(d) : !isOutDay(d)));
+        const outLocked = part === "out" && !!linkedJob; // once booked, out of store is its own move with its own plan
+        return <div key={part || "all"}>
+          {head && <div style={{ fontSize: 14.5, fontWeight: 800, color: "#10211E", background: part === "out" ? "#EEF2FF" : "#EAF4F2", borderRadius: 10, padding: "9px 12px", margin: "4px 0 10px" }}>{head}</div>}
+          {part && !list.length && !outLocked && <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 8 }}>{part === "out" ? "No out-of-store days yet — add them now, or later from the enquiry when the customer has a date." : "No days yet — add the first one."}</div>}
+          {outLocked && <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 12 }}>Out of store is its own move once booked — use <b>Edit plan</b> on its Out of store card on the enquiry.</div>}
+      {list.map(([d, i], n) => (
         <Card key={d.id || i} style={{ background: "#FAFCFB" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D }}>Day {i + 1}</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: TEAL_D }}>{part === "out" ? "Out of store · " : part === "in" ? "Into store · " : ""}Day {n + 1}</div>
             <button onClick={() => removeDay(i)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 8, width: 30, height: 30, cursor: "pointer" }}>×</button>
           </div>
           <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
@@ -4063,8 +4073,11 @@ function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
           <Field label="Notes"><Input value={d.notes} onChange={v => setDay(i, "notes", v)} placeholder="(optional)" /></Field>
         </Card>
       ))}
+          {part && !outLocked && <Btn variant="grey" size="sm" onClick={() => addDay(part)} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add {part === "out" ? "out of store" : "into store"} day</Btn>}
+        </div>;
+      })}
       {linkedJob && <div style={{ fontSize: 12, color: "#0F766E", background: "#F0FDFA", border: "1px solid #CCFBF1", borderRadius: 9, padding: "8px 11px", marginBottom: 12 }}>This move is on the calendar. Saving updates its days, staff and vehicles.</div>}
-      <Btn variant="grey" size="sm" onClick={addDay} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>
+      {!twoPlans && <Btn variant="grey" size="sm" onClick={() => addDay()} style={{ marginBottom: 14 }}><Icon name="plus" size={14} /> Add day</Btn>}
       {shortWarn && <ShortBanner list={shortWarn} onBack={() => setShortWarn(null)} onSave={() => { setShortWarn(null); save(true); }} />}
       <Btn style={{ width: "100%" }} onClick={() => save()}><Icon name="check" size={16} /> {linkedJob ? "Save & update move" : "Save plan"}</Btn>
       {!linkedJob && (enquiry.stages || []).length > 0 && (
@@ -4598,12 +4611,15 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
   }
 
   const _job = (data.jobs || []).find(j => j.enquiryId === e.id);
-  const stages = (_job && Array.isArray(_job.stages) && _job.stages.length) ? _job.stages : (Array.isArray(e.stages) ? e.stages : []);
+  const _oj = _job ? outJobOf(data.jobs, _job) : null;
+  const stages = [...((_job && Array.isArray(_job.stages) && _job.stages.length) ? _job.stages : (Array.isArray(e.stages) ? e.stages : [])), ...(_oj ? jobStages(_oj).map(x => ({ ...x, part: "out" })) : [])];
+  const twoPlans = !!e.toStore || stages.some(isOutDay);
   const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? (v.reg ? `${v.name} (${v.reg})` : v.name) : ""; };
   heading("Move plan");
   if (!stages.length) { at("To be confirmed.", M, y, 9.5, font, navy); y -= 16; }
-  else stages.forEach((d, i) => {
-    ensure(40);
+  else (twoPlans ? [stages.filter(x => !isOutDay(x)), stages.filter(isOutDay)] : [stages]).forEach((grp, g) => grp.forEach((d, i) => {
+    ensure(twoPlans && i === 0 ? 56 : 40);
+    if (twoPlans && i === 0) { at(g ? "Out of store" : "Into store", M, y, 10, bold, navy); y -= 14; }
     const when = [d.date ? `${fmtUK(d.date)} (${dow(d.date)})` : "Date TBC", d.time].filter(Boolean).join(" · ");
     at(`Day ${i + 1}`, M, y, 9.5, bold, navy); at(`${d.type || "Move"}  —  ${when}`, M + 50, y, 9.5, font, navy); y -= 14;
     if (forStaff || forOffice) {
@@ -4611,7 +4627,7 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
       at("Crew:", M + 50, y, 9, bold, grey); at(crew || "-", M + 84, y, 9, font, navy); y -= 12;
       at("Vehicle:", M + 50, y, 9, bold, grey); at(vehs || "-", M + 92, y, 9, font, navy); y -= 16;
     } else { y -= 4; }
-  });
+  }));
 
   const inv = Array.isArray(e.inventory) ? e.inventory : [];
   heading("Inventory — what's moving");
@@ -5753,13 +5769,17 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
               <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>No days planned yet</div>
             ) : (
               <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-                {e.stages.map((d, i) => (
+                {e.stages.map((d, i) => {
+                  const two = !!e.toStore || e.stages.some(isOutDay), out = isOutDay(d);
+                  const grp = e.stages.filter(x => isOutDay(x) === out), n = grp.indexOf(d) + 1;
+                  const first = two && n === 1;
+                  return (
                   <div key={d.id || i} style={{ fontSize: 13, color: "#374151" }}>
-                    <b style={{ color: "#10211E" }}>Day {i + 1}:</b> {d.type || "—"} · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}
+                    {first && <div style={{ fontSize: 11.5, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".04em", marginTop: i ? 6 : 0 }}>{out ? "Out of store plan" : "Into store plan"}</div>}
+                    <b style={{ color: "#10211E" }}>Day {two ? n : i + 1}:</b> {d.type || "—"} · {d.date ? `${fmtDate(d.date)} (${dow(d.date)})` : "Date TBC"}
                     {(d.crew && d.crew.length) ? ` · ${d.crew.length} crew` : (d.staffCount ? ` · ${d.staffCount} staff` : "")}
                     {(d.vehicleIds && d.vehicleIds.length) ? ` · ${d.vehicleIds.map(vname).filter(Boolean).join(", ")}` : (vehTypesSummary(d.vehTypes) ? ` · ${vehTypesSummary(d.vehTypes)}` : "")}
-                  </div>
-                ))}
+                  </div>); })}
               </div>
             )}
           </div>
@@ -6186,7 +6206,7 @@ const OUT_RE = /out of stor|from stor|ex[- ]?stor|out of the stor|redeliver|deli
 function splitStoreLines(e) {
   const lines = e && Array.isArray(e.quoteLines) ? e.quoteLines.filter(l => l.desc || Number(l.amount)) : [];
   const days = (e && e.stages) || [];
-  const isOut = (l, i) => !!l.out || OUT_RE.test(l.desc || "") || OUT_RE.test((days[i] && days[i].type) || "");
+  const isOut = (l, i) => !!l.out || OUT_RE.test(l.desc || "") || (days[i] ? isOutDay(days[i]) : false);
   return { inLines: lines.filter((l, i) => !isOut(l, i)), outLines: lines.filter((l, i) => isOut(l, i)) };
 }
 function moveInvoiceParts(data, j) {
@@ -10839,7 +10859,7 @@ function CrewJobCard({ data, j, st }) {
   ) : null;
   return (
     <Card>
-      <div style={{ fontSize: 11, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.time ? `${st.time} · ` : ""}{st.type || "Move"}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
+      <div style={{ fontSize: 11, fontWeight: 800, color: TEAL_D, textTransform: "uppercase", letterSpacing: ".05em" }}>{st.time ? `${st.time} · ` : ""}{storeAt && !/store/i.test(st.type || "") ? (outMove ? "Out of store · " : "Into store · ") : ""}{st.type || "Move"}{volText(data, j) ? ` · 📦 ${volText(data, j)}` : ""}</div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, margin: "2px 0 8px" }}>
         <div style={{ fontSize: 18, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"}</div>
         {phone && <a href={`tel:${phone}`} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, background: TEAL, color: "#fff", fontWeight: 800, fontSize: 14, textDecoration: "none" }}>{callLabel(cust)}</a>}
