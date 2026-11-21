@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B315";
+const BUILD_NO = "B316";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4026,7 +4026,7 @@ function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
   }
   const stepBtn = { width: 34, height: 34, borderRadius: 9, border: "1.5px solid #E3E9E8", background: "#F7FAF9", color: TEAL_D, fontSize: 18, fontWeight: 700, cursor: "pointer", lineHeight: 1 };
   return (
-    <Modal title={ownJob ? "Out of store plan" : "Move plan"} onClose={onClose}>
+    <Modal title={ownJob ? "Out of store plan" : twoPlans ? "Move plans" : "Direct move plan"} onClose={onClose}>
       <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>{linkedJob ? "Assign the staff and vehicles for each day. Saving updates the move and the calendar." : "Scope the days for this move. These carry onto the move when you create it."}</div>
       {(enquiry.fromAccess || enquiry.toAccess) && (
         <div style={{ fontSize: 12.5, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 9, padding: "9px 11px", marginBottom: 12 }}>
@@ -4641,11 +4641,13 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
   const stages = [...((_job && Array.isArray(_job.stages) && _job.stages.length) ? _job.stages : (Array.isArray(e.stages) ? e.stages : [])), ...(_oj ? jobStages(_oj).map(x => ({ ...x, part: "out" })) : [])];
   const twoPlans = !!e.toStore || stages.some(isOutDay);
   const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? (v.reg ? `${v.name} (${v.reg})` : v.name) : ""; };
-  heading("Move plan");
-  if (!stages.length) { at("To be confirmed.", M, y, 9.5, font, navy); y -= 16; }
-  else (twoPlans ? [stages.filter(x => !isOutDay(x)), stages.filter(isOutDay)] : [stages]).forEach((grp, g) => grp.forEach((d, i) => {
-    ensure(twoPlans && i === 0 ? 56 : 40);
-    if (twoPlans && i === 0) { at(g ? "Out of store" : "Into store", M, y, 10, bold, navy); y -= 14; }
+  // a direct move has one plan; a storage move has two, each its own section
+  const planGroups = twoPlans ? [["Into store plan", stages.filter(x => !isOutDay(x))], ["Out of store plan", stages.filter(isOutDay)]] : [["Direct move plan", stages]];
+  planGroups.forEach(([title, grp]) => {
+  heading(title);
+  if (!grp.length) { at("To be confirmed.", M, y, 9.5, font, navy); y -= 16; }
+  else grp.forEach((d, i) => {
+    ensure(40);
     const when = [d.date ? `${fmtUK(d.date)} (${dow(d.date)})` : "Date TBC", d.time].filter(Boolean).join(" · ");
     at(`Day ${i + 1}`, M, y, 9.5, bold, navy); at(`${d.type || "Move"}  —  ${when}`, M + 50, y, 9.5, font, navy); y -= 14;
     if (forStaff || forOffice) {
@@ -4653,7 +4655,8 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
       at("Crew:", M + 50, y, 9, bold, grey); at(crew || "-", M + 84, y, 9, font, navy); y -= 12;
       at("Vehicle:", M + 50, y, 9, bold, grey); at(vehs || "-", M + 92, y, 9, font, navy); y -= 16;
     } else { y -= 4; }
-  }));
+  });
+  });
 
   const inv = Array.isArray(e.inventory) ? e.inventory : [];
   heading("Inventory — what's moving");
@@ -5839,7 +5842,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 800, color: "#111827" }}>{store ? "🏠 → 📦 Into store plan" : "Move plan"}</div>
+                  <div style={{ fontWeight: 800, color: "#111827" }}>{store ? "🏠 → 📦 Into store plan" : "🏠 → 🏠 Direct move plan"}</div>
                   {linkedJob && <StatusBadge status={jobBadge(linkedJob)} />}
                 </div>
                 {linkedJob && <div style={{ fontSize: 12, color: "#6B7280" }}>Move {moveRef(data, linkedJob)} · {gbp(linkedJob.price)}{linkedJob.deposit ? ` · dep ${gbp(linkedJob.deposit)}${linkedJob.depositPaid ? " ✓" : ""}` : ""} · bal {gbp((Number(linkedJob.price) || 0) - (Number(linkedJob.deposit) || 0))}{linkedJob.balancePaid ? " ✓" : ""}</div>}
@@ -10922,7 +10925,7 @@ function CrewPreviewModal({ data, job, onClose }) {
     <Modal title="What the crew see" onClose={onClose}>
       <div style={{ fontSize: 13, color: "#6A7B77", marginBottom: 10 }}>This is the job as porters and drivers see it on their phones (on the day, from 7:30am).</div>
       <div style={{ background: "#EEF3F2", borderRadius: 14, padding: 10 }}>
-        {store && <PlanHead>{isOutJob(job) ? "📦 → 🏠 Out of store plan" : "🏠 → 📦 Into store plan"}</PlanHead>}
+        <PlanHead>{store ? (isOutJob(job) ? "📦 → 🏠 Out of store plan" : "🏠 → 📦 Into store plan") : "🏠 → 🏠 Direct move plan"}</PlanHead>
         {stages.length ? stages.map((st, i) => <CrewJobCard key={st.id || i} data={data} j={job} st={st} />) : <div style={{ fontSize: 13, color: "#94A4A0" }}>No days booked on this move yet.</div>}
         {oj && <>
           <PlanHead>📦 → 🏠 Out of store plan</PlanHead>
