@@ -353,10 +353,13 @@ function isoAdd(iso, { days = 0, weeks = 0, months = 0 }) {
 function nextService(m) { return m && m.serviceLast && m.serviceWeeks ? isoAdd(m.serviceLast, { weeks: Number(m.serviceWeeks) || 0 }) : ""; }
 function nextMOT(m) { return m && m.motLast ? isoAdd(m.motLast, { months: 12 }) : ""; }
 function nextTacho(m) { return m && m.tachoLast ? isoAdd(m.tachoLast, { months: 24 }) : ""; }
+// Where the goods are stored: R & J's own store unless another location was entered
+const storeName = e => (e && e.toStore) ? (String(e.storeAt || "").trim() || "R & J Storage") : "";
 function storeSummary(e) {
   if (!e || !e.toStore) return "";
-  if (e.storeMode === "Fixed date out") return e.storeOutDate ? `Into store until ${fmtUK(e.storeOutDate)}` : "Into store";
-  const q = e.storeQty; return q ? `Into store for ${q} ${e.storeMode}` : `Into store (${(e.storeMode || "").toLowerCase()})`;
+  const at = ` at ${storeName(e)}`;
+  if (e.storeMode === "Fixed date out") return e.storeOutDate ? `Into store${at} until ${fmtUK(e.storeOutDate)}` : `Into store${at}`;
+  const q = e.storeQty; return q ? `Into store${at} for ${q} ${e.storeMode}` : `Into store${at} (${(e.storeMode || "").toLowerCase()})`;
 }
 // Snap a date to the nearest given weekday (0=Sun..6=Sat), within ±3 days.
 function nearestDow(iso, target) {
@@ -1335,7 +1338,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B304";
+const BUILD_NO = "B305";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -2881,7 +2884,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
     fromAddress1: e.fromAddress1 || "", fromAddress2: e.fromAddress2 || "", fromTown: e.fromTown || "", fromPostcode: e.fromPostcode || "",
     fromPropertyType: normalizePropertyType(e.fromPropertyType), fromBedrooms: e.fromBedrooms || "", fromFloor: e.fromFloor || "", fromAccess: e.fromAccess || "",
     toAddress1: e.toAddress1 || "", toAddress2: e.toAddress2 || "", toTown: e.toTown || "", toPostcode: e.toPostcode || "",
-    toStore: !!e.toStore, storeMode: e.storeMode || "Weeks", storeQty: e.storeQty ?? "", storeOutDate: e.storeOutDate || "",
+    toStore: !!e.toStore, storeAt: e.storeAt || "", storeMode: e.storeMode || "Weeks", storeQty: e.storeQty ?? "", storeOutDate: e.storeOutDate || "",
     toPropertyType: normalizePropertyType(e.toPropertyType), toFloor: e.toFloor || "", toAccess: e.toAccess || "",
     notes: e.notes || "", stages: Array.isArray(e.stages) ? e.stages : [],
     referredBy: normalizeReferral(e.referredBy),
@@ -2962,7 +2965,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
         fromPropertyType: normalizePropertyType(q.fromPropertyType), fromBedrooms: q.fromBedrooms || "", fromFloor: q.fromFloor || "", fromAccess: q.fromAccess || "",
         toAddress1: q.toAddress1 || "", toAddress2: q.toAddress2 || "", toTown: q.toTown || "", toPostcode: q.toPostcode || "",
         toPropertyType: normalizePropertyType(q.toPropertyType), toFloor: q.toFloor || "", toAccess: q.toAccess || "",
-        toStore: !!q.toStore, storeMode: q.storeMode || p.storeMode,
+        toStore: !!q.toStore, storeAt: q.storeAt || "", storeMode: q.storeMode || p.storeMode,
         extraFrom: Array.isArray(q.extraFrom) ? q.extraFrom : [], extraTo: Array.isArray(q.extraTo) ? q.extraTo : [],
         referredBy: normalizeReferral(q.referredBy) || p.referredBy }));
     } else if (cust) {
@@ -3146,6 +3149,10 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
         </label>
         {f.toStore && (
           <div style={{ marginTop: 10 }}>
+            <Field label="Stored at" hint="R & J Storage, or type another storage location">
+              <input list="rj-store-locs" style={inputStyle} value={f.storeAt} onChange={ev => set("storeAt", ev.target.value)} placeholder="R & J Storage" />
+              <datalist id="rj-store-locs">{[...new Set(["R & J Storage", ...getStorageLocs()])].map(x => <option key={x} value={x} />)}</datalist>
+            </Field>
             <Field label="How long in store?"><Select value={f.storeMode} onChange={v => set("storeMode", v)} options={["Days", "Weeks", "Months", "Years", "Fixed date out"]} /></Field>
             {f.storeMode === "Fixed date out"
               ? <Field label="Date out of store"><Input type="date" value={f.storeOutDate} onChange={v => set("storeOutDate", v)} /></Field>
@@ -3154,7 +3161,8 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
         )}
       </div>
 
-      <SectionTitle>{f.toStore ? "Moving to (or store address)" : "Moving to"}</SectionTitle>
+      <SectionTitle>{f.toStore ? "Out of store — delivering to" : "Moving to"}</SectionTitle>
+      {f.toStore && <div style={{ fontSize: 12, color: "#6A7B77", margin: "-4px 0 8px" }}>Where it goes when it comes out of store. Leave blank if not known yet.</div>}
       <form autoComplete="off" onSubmit={e => e.preventDefault()} style={{ display: "contents" }}>
       <Field label="Address"><Input value={f.toAddress1} onChange={v => set("toAddress1", v)} placeholder="House/flat & street" noAutofill /></Field>
       <Field label="Address line 2"><Input value={f.toAddress2} onChange={v => set("toAddress2", v)} placeholder="(optional)" /></Field>
@@ -4195,7 +4203,7 @@ async function buildQuotePdf(e, c) {
     return "length to be confirmed";
   })();
   const toFull = toAddrFull;
-  const storeLine = e.toStore ? `Into store - ${storeLen}${toAddrFull ? "  (then delivered out of store to the address below)" : ""}` : "";
+  const storeLine = e.toStore ? `Into store at ${storeName(e)} - ${storeLen}${toAddrFull ? "  (then delivered out of store to the address below)" : ""}` : "";
   const surveyWhen = e.surveyDate ? fmtUK(e.surveyDate) : "";
   const moveWhen = e.preferredDate ? fmtUK(e.preferredDate) : (e.moveMonth ? fmtMonth(e.moveMonth) : "");
 
@@ -10797,7 +10805,10 @@ function CrewPreviewModal({ data, job, onClose }) {
 const CREW_OPENS_AT = "07:30";
 function crewAddress(parts) { return parts.filter(Boolean).join(", "); }
 function CrewJobCard({ data, j, st }) {
-  const en = (data.enquiries || []).find(e => e.id === j.enquiryId) || {};
+  const en = (data.enquiries || []).find(e => e.id === jobEnquiryId(data.jobs, j)) || {};
+  // storage moves: into store → TO the store; out of store → FROM the store, TO the delivery address
+  const outMove = isOutJob(j) || isOutDay(st);
+  const storeAt = en.toStore ? storeName(en) : "";
   const cust = (data.customers || []).find(c => c.id === j.customerId) || {};
   const phone = callPhone(cust);
   const vans = (st.vehicleIds || []).map(id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? v.name : ""; }).filter(Boolean);
@@ -10830,10 +10841,10 @@ function CrewJobCard({ data, j, st }) {
         <div style={{ fontSize: 18, fontWeight: 800, color: "#10211E" }}>{cust.name || "Customer"}</div>
         {phone && <a href={`tel:${phone}`} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, background: TEAL, color: "#fff", fontWeight: 800, fontSize: 14, textDecoration: "none" }}>{callLabel(cust)}</a>}
       </div>
-      <Addr label="FROM" addr={from} access={fromAccess} />
-      {(en.extraFrom || []).map((x, i) => <Addr key={"ef" + i} label={`EXTRA PICKUP ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
-      <Addr label={en.toStore ? "TO (STORE)" : "TO"} addr={to} access={toAccess} />
-      {(en.extraTo || []).map((x, i) => <Addr key={"et" + i} label={`EXTRA DELIVERY ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
+      {storeAt && outMove ? <Addr label="FROM STORE" addr={storeAt} /> : <Addr label="FROM" addr={from} access={fromAccess} />}
+      {!(storeAt && outMove) && (en.extraFrom || []).map((x, i) => <Addr key={"ef" + i} label={`EXTRA PICKUP ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
+      {storeAt && !outMove ? <Addr label="INTO STORE" addr={storeAt} /> : <Addr label={storeAt ? "DELIVER TO (OUT OF STORE)" : "TO"} addr={to || (storeAt ? "Address to be confirmed" : "")} access={toAccess} />}
+      {!(storeAt && !outMove) && (en.extraTo || []).map((x, i) => <Addr key={"et" + i} label={`EXTRA DELIVERY ${i + 2}${x.note ? " · " + x.note : ""}`} addr={crewAddress([x.address1, x.town, x.postcode])} />)}
       <H>Van &amp; crew</H>
       <div style={{ fontSize: 14, color: "#10211E", fontWeight: 600 }}>🚚 {vans.join(", ") || "Van TBC"}</div>
       <div style={{ fontSize: 14, color: "#10211E", fontWeight: 600 }}>👷 {(st.crew || []).join(", ") || "—"}</div>
