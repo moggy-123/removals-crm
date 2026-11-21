@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B311";
+const BUILD_NO = "B312";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6613,11 +6613,11 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
       {f.kind === "move" && !ro && <div style={{ background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 10, padding: "8px 12px", marginTop: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Customer took</div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}><input type="checkbox" checked={hasEx("mp")} onChange={e => toggleEx("mp", e.target.checked)} style={{ width: 18, height: 18 }} /> MoveProtect · {mpPct}% · {gbpPlain(r2(baseNet * mpPct / 100))}</label>
-        <div style={{ fontSize: 14, padding: "6px 0 2px" }}>Late Key Waiver</div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", paddingBottom: 4 }}>
-          {[["HAS", "Has keys"], ["NA", "Not required"]].map(([k, l]) => <button key={k} type="button" onClick={() => setLk(k)} style={{ border: `1.5px solid ${lkChoice === k ? TEAL : "#E3E9E8"}`, background: lkChoice === k ? "#EAF4F2" : "#fff", color: lkChoice === k ? TEAL_D : "#41514E", borderRadius: 999, padding: "7px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{l}</button>)}
-          <span style={{ display: "flex", alignItems: "center", gap: 4, border: `1.5px solid ${lkChoice === "amt" ? TEAL : "#E3E9E8"}`, borderRadius: 999, padding: "2px 10px", background: lkChoice === "amt" ? "#EAF4F2" : "#fff" }}>£<input value={lkAmt} inputMode="decimal" placeholder="amount" onChange={e => { setLkAmt(e.target.value); setLk("amt", e.target.value); }} style={{ border: "none", outline: "none", background: "transparent", width: 70, fontSize: 14, fontFamily: "inherit" }} /><span style={{ fontSize: 11, color: "#94A4A0" }}>inc VAT</span></span>
-        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer", flexWrap: "wrap" }}>
+          <input type="checkbox" checked={lkChoice === "amt" && !!lkLine} onChange={e => setLk(e.target.checked ? "amt" : "", lkAmt)} style={{ width: 18, height: 18 }} /> Late Key Waiver
+          {lkLine || !lkVal ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#41514E" }}>· £<input value={lkAmt} inputMode="decimal" placeholder="amount" onClick={e => e.preventDefault()} onChange={e => { setLkAmt(e.target.value); setLk("amt", e.target.value); }} style={{ border: "1px solid #E3E9E8", borderRadius: 8, padding: "3px 6px", width: 70, fontSize: 14, fontFamily: "inherit" }} /> inc VAT</span>
+            : <span style={{ color: "#41514E" }}>· {gbpPlain(lkVal)} inc VAT</span>}
+        </label>
         {credits.map(cr => <label key={cr.sjId} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer", color: "#15803D" }}><input type="checkbox" checked={cr.on} onChange={e => toggleCredit(cr, e.target.checked)} style={{ width: 18, height: 18 }} /> Storage overpaid · credit {gbpPlain(cr.amount)} net</label>)}
         <div style={{ fontSize: 11.5, color: "#94A4A0" }}>From the quote · lines are net, VAT added below</div>
       </div>}
