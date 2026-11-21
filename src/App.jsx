@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B310";
+const BUILD_NO = "B311";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3897,10 +3897,17 @@ function QuoteModal({ data, enquiry, onClose }) {
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
         <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>Late Key Waiver</span>
-        <select style={{ ...inputStyle, width: 110 }} value={extra.lateKey ?? "FREE"} onChange={ev => setEx("lateKey", ev.target.value)}>
-          <option value="FREE">FREE</option>
-          {[80, 100, 120, 140, 160, 180, 200].map(v => <option key={v} value={v}>£{v.toFixed(2)}</option>)}
-        </select>
+        {(() => { const v = String(extra.lateKey ?? "FREE"); const preset = ["FREE", "HAS", "NA", "80", "100", "120", "140", "160", "180", "200"].includes(v);
+          return <>
+            <select style={{ ...inputStyle, width: 130 }} value={preset ? v : "OTHER"} onChange={ev => setEx("lateKey", ev.target.value === "OTHER" ? "" : ev.target.value)}>
+              <option value="FREE">FREE</option>
+              <option value="HAS">Has keys</option>
+              <option value="NA">Not required</option>
+              {[80, 100, 120, 140, 160, 180, 200].map(n => <option key={n} value={n}>£{n.toFixed(2)}</option>)}
+              <option value="OTHER">Other amount…</option>
+            </select>
+            {!preset && <input style={{ ...inputStyle, width: 90 }} inputMode="decimal" value={v} onChange={ev => setEx("lateKey", ev.target.value)} placeholder="£" />}
+          </>; })()}
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
         <span style={{ fontSize: 13, color: "#374151", flex: 1 }}>Storage £/container/week (ex VAT)</span>
@@ -4292,7 +4299,7 @@ async function buildQuotePdf(e, c) {
     }
     const vT = 204 + nL * rowH, tT = 204 + (nL + 1) * rowH, lkT = 204 + (nL + 2) * rowH, mpT = 204 + (nL + 3) * rowH;
     const ex = e.quoteExtra || {};
-    const lk = ex.lateKey, lkText = (lk && lk !== "FREE" && Number(lk) > 0) ? gbpPlain(lk) : "FREE";
+    const lk = ex.lateKey, lkText = lkLabel(lk);
     const mpPct = Number(ex.mpPct) || 10;
     const mp = Math.round(subtotal * (mpPct / 100) * 100) / 100;
     L(descX, base(vT), "Vat @ 20%", fs); R(x1 - 4, base(vT), e.quoteVat ? gbpPlain(vatAmt) : "", fs);
@@ -4838,7 +4845,7 @@ function MoveManageModal({ data, job, onClose }) {
       return (ss || vs) ? `Day ${i + 1}:${ss ? ` ${ss} more staff` : ""}${ss && vs ? " and" : ""}${vs ? ` ${vs} more vehicle${vs !== 1 ? "s" : ""}` : ""}` : null;
     }).filter(Boolean);
     if (shortfalls.length && !confirm(`This move is below the planned resources:\n\n${shortfalls.join("\n")}\n\nCarry on anyway?`)) return;
-    persist(to === "Confirmed" && !outMove ? { stages: days, status: "Confirmed", deposit: depAmt, depositPaid: true } : { stages: days, status: to });
+    persist({ stages: days, status: to }); // deposits are taken on the invoice now
   };
   const completeMove = () => persist({ status: "Completed", balancePaid: true });
   const letGoMove = async () => {
@@ -4924,7 +4931,7 @@ function MoveManageModal({ data, job, onClose }) {
       )}
 
       {f.status === "Provisional" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#6D28D9", borderColor: "#DDD6FE", background: "#F5F3FF" }} onClick={() => confirmMove(TEL_CONF)}>📞 {assign && target === TEL_CONF ? "Save as telephone confirmed" : "Telephone confirmed — book crew & vehicles"}</Btn>}
-      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}><Icon name="check" size={16} /> {(assign && target === "Confirmed") || f.status === TEL_CONF ? (outMove ? "Confirm out of store" : `Confirm — take 60% deposit (${gbp(depAmt)})`) : "Confirm — book crew & vehicles"}</Btn>}
+      {isPencilled(f.status) && <Btn variant="primary" style={{ width: "100%", marginBottom: 10, background: "#2563EB", boxShadow: "0 4px 12px rgba(37,99,235,.26)" }} onClick={() => confirmMove("Confirmed")}><Icon name="check" size={16} /> {(assign && target === "Confirmed") || f.status === TEL_CONF ? (outMove ? "Confirm out of store" : "Confirm — deposit received") : "Confirm — book crew & vehicles"}</Btn>}
       {f.status === "Confirmed" && <Btn variant="primary" style={{ width: "100%", marginBottom: 10 }} onClick={completeMove}><Icon name="check" size={16} /> Mark move complete</Btn>}
       {f.status === "Completed" && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={reopenConfirmed}>Reopen (back to confirmed)</Btn>}
       {f.status !== "Provisional" && f.status !== NOT_BOOKED && <Btn variant="grey" style={{ width: "100%", marginBottom: 10 }} onClick={revertProvisional}>Change back to provisional</Btn>}
@@ -5192,7 +5199,7 @@ function BookMoveModal({ data, e, job, initial, onClose, onBook }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
         {choices.map(ch => <button key={ch} style={seg(status === ch)} onClick={() => setStatus(ch)}>{ch === TEL_CONF ? "📞 Tel. confirmed" : ch}</button>)}
       </div>
-      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Confirmed" && outMode ? "The date is definite — no deposit on the out-of-store move, it's invoiced when they come out." : status === "Confirmed" ? `The date is definite. Deposit of ${gbp(depositFor(data, e.id, e.quoteTotal))} (60%${splitStoreLines(e).outLines.length && splitStoreLines(e).inLines.length ? ", not counting the out-of-store charge" : ""}) is marked as paid — change it on the move if not.` : status === TEL_CONF ? "Customer has rung to say it's definite — waiting for the deposit to confirm it." : "Pencilled in — the customer hasn't fully committed yet."}</div>
+      <div style={{ fontSize: 12.5, color: "#6A7B77", marginBottom: 12 }}>{status === "Provisional" ? "Holds the date — crew and vans can wait." : `${status === "Confirmed" ? "The date is definite." : "Customer has said yes — waiting for the deposit."} The invoice opens next${outMode ? "" : ", showing the 60% deposit to secure the booking"}.`}</div>
       {planned.map((d, i) => (
         <div key={i} style={needRes ? { background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 12, padding: "10px 12px 2px", marginBottom: 10 } : {}}>
           <Field label={planned.length > 1 ? `Day ${i + 1} · ${d.type || "Move"}` : `${d.type || "Move"} date`} required={!(status === "Provisional" && noDate) && !optOut(d)} hint={optOut(d) ? "add later when known" : undefined}>
@@ -5336,6 +5343,7 @@ function OutOfStoreCard({ data, e, parent, onEditPlan }) {
         setOpen(null);
         const stages = st.map((x, i) => ({ ...x, outOf: parent.id, date: dates[i] || "", ...(res && res[i] ? { crew: res[i].crew, vehicleIds: res[i].vehicleIds } : {}) }));
         const allVeh = [...new Set(stages.flatMap(x => x.vehicleIds || []))];
+        try { if (RES_STATUSES.includes(stt)) sessionStorage.setItem("removals_open_invoice", oj.id); } catch {}
         await saveAndReload(upsertLocal(data, "jobs", { ...oj, stages, status: stt, moveDate: stages.map(x => x.date).filter(Boolean).sort()[0] || "",
           crew: [...new Set(stages.flatMap(x => x.crew || []))], vehicleIds: allVeh, vehicle: allVeh.map(vname).filter(Boolean).join(", ") }));
       }} />}
@@ -5599,6 +5607,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   const [showInv, setShowInv] = useState(false);
   const [showQuote, setShowQuote] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
+  const [invOpen, setInvOpen] = useState(null); // invoice shown straight after booking
   const [showMove, setShowMove] = useState(false);
   const [showCrew, setShowCrew] = useState(false);
   const [showSignOff, setShowSignOff] = useState(false);
@@ -5608,6 +5617,17 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
   const [showChaseDate, setShowChaseDate] = useState(false);
   useEffect(() => {
     try { if (sessionStorage.getItem("removals_open_plan") === id) { sessionStorage.removeItem("removals_open_plan"); setShowPlan(true); } } catch {}
+    try {
+      const jid = sessionStorage.getItem("removals_open_invoice");
+      const jb = jid && (data.jobs || []).find(x => x.id === jid);
+      if (jb && jobEnquiryId(data.jobs, jb) === id) {
+        sessionStorage.removeItem("removals_open_invoice");
+        const cu = (data.customers || []).find(x => x.id === jb.customerId);
+        const pt = moveInvoiceParts(data, jb)[0];
+        const had = cu && moveInvoiceFor(data, cu, jb, pt);
+        if (cu) setInvOpen(had ? { custId: cu.id, invId: had.id } : { custId: cu.id, draft: buildMoveInvoice(data, cu, jb, pt) });
+      }
+    } catch {}
     try { if (sessionStorage.getItem("removals_open_edit") === id) { sessionStorage.removeItem("removals_open_edit"); setShowEdit(true); } } catch {}
     try { if (sessionStorage.getItem("removals_rebook") === id) { sessionStorage.removeItem("removals_rebook"); setRebook(true); } } catch {}
     try { if (sessionStorage.getItem("removals_open_quote") === id) { sessionStorage.removeItem("removals_open_quote"); setShowQuote(true); } } catch {}
@@ -5662,7 +5682,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       moveDate: stages.map(st => st.date).filter(Boolean).sort()[0] || "",
       volumeCuFt: e.volumeCuFt, volumeM3: e.volumeM3, weightKg: e.weightKg,
       price: inPrice,
-      deposit: newStatus === "Confirmed" ? (sp.split ? Math.round(inPrice * 0.6) : depositFor(data, e.id, e.quoteTotal)) : 0, depositPaid: newStatus === "Confirmed", balancePaid: false,
+      deposit: 0, depositPaid: false, balancePaid: false, // the deposit is taken against the invoice that opens next
       status: newStatus, notes: "", createdAt: new Date().toISOString(),
     };
     let d2 = upsertLocal(data, "jobs", job);
@@ -5679,7 +5699,8 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
     setDB(JSON.stringify(stamped));
     try { await pushChangedOnly(stamped); } catch {}
     SAVING_IN_PROGRESS = false;
-    try { sessionStorage.setItem("removals_open_plan", e.id); } catch {}
+    // telephone confirmed / confirmed → show the invoice (with its 60% deposit); provisional → the plan
+    try { if (RES_STATUSES.includes(newStatus)) sessionStorage.setItem("removals_open_invoice", jid); else sessionStorage.setItem("removals_open_plan", e.id); } catch {}
     setView({ screen: "enquiryDetail", id: e.id });
     window.location.reload();
   }
@@ -5718,7 +5739,8 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
         const stages = jobStages(linkedJob).map((x, i) => ({ ...x, date: dates[i] || "", ...(res && res[i] ? { crew: res[i].crew, vehicleIds: res[i].vehicleIds } : {}) }));
         const rec = { ...linkedJob, stages, status: st, moveDate: stages.map(x => x.date).filter(Boolean).sort()[0] || linkedJob.moveDate || "",
           crew: [...new Set(stages.flatMap(x => x.crew || []))], vehicleIds: [...new Set(stages.flatMap(x => x.vehicleIds || []))],
-          ...(st === "Confirmed" ? { deposit: depositFor(data, linkedJob.enquiryId, linkedJob.price), depositPaid: true } : {}) };
+          };
+        try { if (RES_STATUSES.includes(st)) sessionStorage.setItem("removals_open_invoice", linkedJob.id); } catch {}
         await saveAndReload(upsertLocal(data, "jobs", rec));
       }} />}
       {followUpOpen && <FollowUpModal data={data} enquiry={e} onClose={() => setFollowUpOpen(false)} />}
@@ -5727,6 +5749,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       {showChaseDate && <ChaseDateModal data={data} enquiry={e} onClose={() => setShowChaseDate(false)} />}
       {showQuote && <QuoteModal data={data} enquiry={e} onClose={() => setShowQuote(false)} />}
       {showPlan && <MovePlanModal data={data} enquiry={e} onClose={() => setShowPlan(false)} />}
+      {invOpen && <InvoiceModal data={data} custId={invOpen.custId} invId={invOpen.invId} draft={invOpen.draft} onClose={() => setInvOpen(null)} />}
       {showMove && linkedJob && <MoveManageModal data={data} job={linkedJob} onClose={() => setShowMove(false)} />}
       {showCrew && linkedJob && <CrewPreviewModal data={data} job={linkedJob} onClose={() => setShowCrew(false)} />}
       {showSignOff && linkedJob && <SignOffRecordModal data={data} job={linkedJob} onClose={() => setShowSignOff(false)} />}
@@ -6220,7 +6243,12 @@ async function saveInvoice(data, custId, inv, remove) {
   if (!c) return;
   const list = Array.isArray(c.invoices) ? c.invoices : [];
   const next = remove ? list.filter(x => x.id !== inv.id) : (list.some(x => x.id === inv.id) ? list.map(x => x.id === inv.id ? { ...inv, updatedAt: Date.now() } : x) : [...list, { ...inv, updatedAt: Date.now() }]);
-  await saveAndReload(upsertLocal(cur, "customers", { ...c, invoices: next }));
+  let d2 = upsertLocal(cur, "customers", { ...c, invoices: next });
+  // 60% deposit paid on a telephone-confirmed move's invoice → the booking is confirmed
+  const dpi = !remove && invDepositInfo(inv);
+  const jb = dpi && dpi.depPaid && (cur.jobs || []).find(x => x.id === inv.jobId);
+  if (jb && jb.status === TEL_CONF) d2 = upsertLocal(d2, "jobs", { ...jb, status: "Confirmed" });
+  await saveAndReload(d2);
 }
 // ── Move invoice: one invoice for the whole move, lines from the quote, deposit shown as paid
 // part: "all" (normal move), "in" (into store — out-of-store charge left off) or "out" (out-of-store charge, when they come out)
@@ -6473,6 +6501,12 @@ async function buildInvoicePdf(inv, c) {
     (inv.payments || []).forEach((p, i) => T(36, py + 15 + i * 13, `${fmtUK(p.date)}  ${p.method || ""}  ${gbpPlain(p.amount)}`, 9.5, font, grey));
   }
   y += tot.length * 17 + 24;
+  const dpi = invDepositInfo(inv);
+  if (dpi && t.balance > 0.004) {
+    T(36, y, dpi.depPaid ? `Deposit of ${gbpPlain(dpi.dep)} (60%) received - thank you.` : `Deposit to secure your booking (60%): ${gbpPlain(dpi.dep)}`, 10.5, bold, teal);
+    T(36, y + 14, `Balance of ${gbpPlain(dpi.bal)} due the day before your move.`, 10);
+    y += 34;
+  }
   if (inv.notes) { wrap(inv.notes, 520, 10).forEach((w, i) => T(36, y + i * 13, w, 10)); y += wrap(inv.notes, 520, 10).length * 13 + 14; }
   // how to pay
   page.drawRectangle({ x: 36, y: H - y - 62, width: 524, height: 66, color: rgb(0.97, 0.98, 0.98), borderColor: line, borderWidth: 0.8 });
@@ -6500,6 +6534,17 @@ function emailInvoice(inv, c) {
   const body = `Hi ${first},\n\nPlease find your invoice ${invNumber(inv)} for ${inv.title || "your removal"}.\n\nTotal: ${gbpPlain(t.total)}${t.paid > 0 ? `\nPaid: ${gbpPlain(t.paid)}` : ""}\nBalance due: ${gbpPlain(Math.max(0, t.balance))} by ${fmtUK(inv.due)}\n\nBank transfer to HSBC, R J Removals Ltd, sort code 40 14 18, account 91611836. Please use reference ${invNumber(inv)}${c.ref ? " / " + c.ref : ""}.\n\nMany thanks,\nR&J Removals & Storage\n0117 9611112`;
   window.location.href = `mailto:${quoteMailTo(c)}?subject=${encodeURIComponent(`Invoice ${invNumber(inv)} – R&J Removals`)}&body=${encodeURIComponent(body)}`;
 }
+// A move invoice (not out of store) shows the 60% deposit that secures the booking and the balance after it
+const invDepositInfo = inv => {
+  if (!inv || inv.kind !== "move" || inv.part === "out") return null;
+  const t = invTotals(inv);
+  if (!(t.total > 0)) return null;
+  const dep = r2(t.total * 0.6);
+  return { dep, bal: r2(t.total - dep), depPaid: t.paid >= dep - 0.004 };
+};
+// Late Key Waiver choices (quote and invoice): FREE, Has keys, Not required, or an amount inc VAT
+const LK_WORDS = { FREE: "FREE", HAS: "Has keys", NA: "Not required" };
+const lkLabel = v => LK_WORDS[v] || (Number(v) > 0 ? gbpPlain(v) : "FREE");
 // ── Invoice screen (view, edit lines, take payments, PDF, email)
 function InvoiceModal({ data, custId, invId, draft, onClose }) {
   const c = (data.customers || []).find(x => x.id === custId);
@@ -6519,7 +6564,16 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
   const qx = (enq && enq.quoteExtra) || {};
   const mpPct = Number(qx.mpPct) || 10;
   const baseNet = r2((f.lines || []).filter(l => !l.extra).reduce((s2, l) => s2 + (Number(l.amount) || 0), 0));
-  const lkVal = qx.lateKey && qx.lateKey !== "FREE" ? r2(qx.lateKey) : 0;
+  const lkVal = qx.lateKey && Number(qx.lateKey) > 0 ? r2(qx.lateKey) : 0;
+  const lkLine = (f.lines || []).find(l => l.extra === "lk");
+  const lkChoice = f.keyWaiver || (lkLine ? "amt" : "");
+  const [lkAmt, setLkAmt] = useState(() => lkLine ? String(r2(Number(lkLine.amount) * (1 + VAT_RATE))) : (lkVal ? String(lkVal) : ""));
+  const setLk = (choice, amtInc) => setF(p => {
+    const rest = (p.lines || []).filter(l => l.extra !== "lk");
+    const a = r2(Number(amtInc) || 0);
+    if (choice === "amt" && a > 0) return { ...p, keyWaiver: "amt", lines: [...rest, { desc: "Late Key Waiver", amount: r2(a / (1 + VAT_RATE)), extra: "lk" }] };
+    return { ...p, keyWaiver: choice, lines: rest };
+  });
   const hasEx = k => (f.lines || []).some(l => l.extra === k);
   const credits = f.kind === "move" ? [...(f.lines || []).filter(l => l.extra === "sc").map(l => ({ sjId: l.sjId, amount: -l.amount, line: l, on: true })), ...storageCredits(c, f.id).filter(cr => !(f.lines || []).some(l => l.extra === "sc" && l.sjId === cr.sjId)).map(cr => ({ ...cr, on: false }))] : [];
   const toggleCredit = (cr, on) => setF(p => ({ ...p, lines: on ? [...(p.lines || []), cr.line] : (p.lines || []).filter(l => !(l.extra === "sc" && l.sjId === cr.sjId)) }));
@@ -6559,7 +6613,11 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
       {f.kind === "move" && !ro && <div style={{ background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 10, padding: "8px 12px", marginTop: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Customer took</div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}><input type="checkbox" checked={hasEx("mp")} onChange={e => toggleEx("mp", e.target.checked)} style={{ width: 18, height: 18 }} /> MoveProtect · {mpPct}% · {gbpPlain(r2(baseNet * mpPct / 100))}</label>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}><input type="checkbox" checked={hasEx("lk")} onChange={e => toggleEx("lk", e.target.checked)} style={{ width: 18, height: 18 }} /> Late Key Waiver · {lkVal ? `${gbpPlain(lkVal)} inc VAT (${gbpPlain(r2(lkVal / (1 + VAT_RATE)))} net)` : "FREE"}</label>
+        <div style={{ fontSize: 14, padding: "6px 0 2px" }}>Late Key Waiver</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", paddingBottom: 4 }}>
+          {[["HAS", "Has keys"], ["NA", "Not required"]].map(([k, l]) => <button key={k} type="button" onClick={() => setLk(k)} style={{ border: `1.5px solid ${lkChoice === k ? TEAL : "#E3E9E8"}`, background: lkChoice === k ? "#EAF4F2" : "#fff", color: lkChoice === k ? TEAL_D : "#41514E", borderRadius: 999, padding: "7px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{l}</button>)}
+          <span style={{ display: "flex", alignItems: "center", gap: 4, border: `1.5px solid ${lkChoice === "amt" ? TEAL : "#E3E9E8"}`, borderRadius: 999, padding: "2px 10px", background: lkChoice === "amt" ? "#EAF4F2" : "#fff" }}>£<input value={lkAmt} inputMode="decimal" placeholder="amount" onChange={e => { setLkAmt(e.target.value); setLk("amt", e.target.value); }} style={{ border: "none", outline: "none", background: "transparent", width: 70, fontSize: 14, fontFamily: "inherit" }} /><span style={{ fontSize: 11, color: "#94A4A0" }}>inc VAT</span></span>
+        </div>
         {credits.map(cr => <label key={cr.sjId} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer", color: "#15803D" }}><input type="checkbox" checked={cr.on} onChange={e => toggleCredit(cr, e.target.checked)} style={{ width: 18, height: 18 }} /> Storage overpaid · credit {gbpPlain(cr.amount)} net</label>)}
         <div style={{ fontSize: 11.5, color: "#94A4A0" }}>From the quote · lines are net, VAT added below</div>
       </div>}
@@ -6567,6 +6625,11 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
         {[["Net", t.net], [`VAT @ ${Math.round(VAT_RATE * 100)}%`, t.vat], ["Total", t.total], ...(t.paid ? [["Paid", -t.paid]] : []), ["Balance due", Math.max(0, t.balance)]].map(([k, v]) => (
           <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontWeight: k === "Total" || k === "Balance due" ? 800 : 500, color: k === "Balance due" ? TEAL_D : "#10211E" }}><span>{k}</span><span>{v < 0 ? "-" : ""}{gbpPlain(Math.abs(v))}</span></div>
         ))}
+        {(() => { const dpi = invDepositInfo(f); return dpi ? (
+          <div style={{ borderTop: "1px dashed #CBD5D2", marginTop: 6, paddingTop: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, color: dpi.depPaid ? "#15803D" : "#B45309" }}><span>Deposit to secure (60%){dpi.depPaid ? " ✓" : ""}</span><span>{gbpPlain(dpi.dep)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#41514E" }}><span>Balance · day before the move</span><span>{gbpPlain(dpi.bal)}</span></div>
+          </div>) : null; })()}
       </div>
       {(f.payments || []).length > 0 && <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Payments</div>
@@ -6584,7 +6647,7 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
           <Field label="Method"><Select value={pay.method} onChange={v => setPay(p => ({ ...p, method: v }))} options={["Bank transfer", "Card", "Cash", "Cheque"]} /></Field>
           <div style={{ display: "flex", gap: 8 }}><Btn variant="grey" style={{ flex: 1 }} onClick={() => setPay(null)}>Cancel</Btn><Btn style={{ flex: 2 }} onClick={addPayment}>Save payment</Btn></div>
         </div>
-      ) : <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#15803D" }} onClick={() => setPay({ amount: String(Math.max(0, t.balance)), date: todayISO(), method: "Bank transfer" })}>💷 Record a payment</Btn>)}
+      ) : <Btn variant="grey" style={{ width: "100%", marginBottom: 10, color: "#15803D" }} onClick={() => { const dpi = invDepositInfo(f); const amt = dpi && !dpi.depPaid && !t.paid ? dpi.dep : Math.max(0, t.balance); setPay({ amount: String(amt), date: todayISO(), method: "Bank transfer" }); }}>💷 Record a payment</Btn>)}
       <Field label="Notes on the invoice"><textarea value={f.notes || ""} disabled={ro} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} /></Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 6 }}>
         <Btn variant="grey" onClick={() => openInvoicePdf(f, c)}>📄 View PDF</Btn>
