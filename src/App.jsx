@@ -1338,7 +1338,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B306";
+const BUILD_NO = "B307";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -4586,9 +4586,10 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
   };
   kv("Moving from", fromAddr);
   (e.extraFrom || []).forEach((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); if (a) kv(`+ Pickup ${i + 2}`, a + (s.note ? `  (${s.note})` : "")); });
-  kv("Moving to", toAddr);
-  (e.extraTo || []).forEach((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); if (a) kv(`+ Delivery ${i + 2}`, a + (s.note ? `  (${s.note})` : "")); });
+  // storage goes between the two: from → into store → out of store to
   if (storeSummary(e)) kv("Storage", storeSummary(e));
+  kv(e.toStore ? "Out of store to" : "Moving to", toAddr || (e.toStore ? "To be confirmed" : ""));
+  (e.extraTo || []).forEach((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); if (a) kv(`+ Delivery ${i + 2}`, a + (s.note ? `  (${s.note})` : "")); });
 
   if (e.fromAccess || e.toAccess) {
     heading("Access — please read");
