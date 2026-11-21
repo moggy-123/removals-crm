@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B319";
+const BUILD_NO = "B320";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5859,7 +5859,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
                 {(!ro || days.length) && <Btn size="sm" variant="grey" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {ro ? "View" : days.length ? "Edit" : "Add"}</Btn>}
                 {linkedJob && <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
-                {linkedJob && <Btn size="sm" variant="grey" onClick={() => setShowCrew(true)}>👷 Crew view</Btn>}
               </div>
             </div>
             {canBookNew && <Btn variant="amber" style={{ width: "100%", marginTop: 10 }} onClick={() => setBookOpen("choose")}><Icon name="check" size={16} /> {store ? "Book into store" : "Book move"}</Btn>}
@@ -11234,6 +11233,7 @@ function SignOffRecordModal({ data, job, onClose }) {
 }
 function CrewApp() {
   const [data, setData] = useState(loadData);
+  const [inv, setInv] = useState(null); // { customerId, jobId } — storage inventory open
   const [, setSyncStatus] = useState("");
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -11250,7 +11250,7 @@ function CrewApp() {
   const today = todayISO();
   const me = (CURRENT_USER.staffName || "").trim().toLowerCase();
   const mine = !me ? [] : (data.jobs || [])
-    .filter(j => ["Confirmed", "In Store", "Completed", "Booked", "In Progress"].includes(j.status))
+    .filter(j => [TEL_CONF, "Confirmed", "In Store", "Completed", "Booked", "In Progress"].includes(j.status))
     .flatMap(j => jobStages(j).filter(st => st.date === today && (st.crew || []).some(c => String(c).trim().toLowerCase() === me)).map(st => ({ j, st })))
     .sort((a, b) => (a.st.time || "99").localeCompare(b.st.time || "99"));
   return (
@@ -11268,7 +11268,26 @@ function CrewApp() {
         {!me ? <Card><div style={{ fontWeight: 700 }}>Your login isn't linked to a staff member yet.</div><div style={{ fontSize: 13, color: "#6A7B77", marginTop: 4 }}>Ask Dave to link you in Company → Users &amp; access.</div></Card>
           : hm < CREW_OPENS_AT ? <Card style={{ textAlign: "center", padding: "30px 18px" }}><div style={{ fontSize: 34 }}>🕢</div><div style={{ fontWeight: 800, fontSize: 16, marginTop: 6 }}>Your jobs for today will appear at 7:30am</div><div style={{ fontSize: 13, color: "#6A7B77", marginTop: 4 }}>Check back then.</div></Card>
           : mine.length === 0 ? <Card style={{ textAlign: "center", padding: "30px 18px" }}><div style={{ fontWeight: 800, fontSize: 16 }}>No jobs for you today</div><div style={{ fontSize: 13, color: "#6A7B77", marginTop: 4 }}>If you think that's wrong, ring the office.</div></Card>
-          : mine.map(({ j, st }, i) => <CrewJobCard key={(j.id || "") + (st.id || i)} data={data} j={j} st={st} />)}
+          : inv ? <div>
+              <StorageIntakeForm data={data} setView={() => setInv(null)} presetCustomerId={inv.customerId} presetJobId={inv.jobId} editRecId={inv.recId} />
+            </div>
+          : mine.map(({ j, st }, i) => {
+              // into store: the crew do the storage inventory on the day
+              const en = (data.enquiries || []).find(x => x.id === jobEnquiryId(data.jobs, j)) || {};
+              const intoStore = !isOutJob(j) && !isOutDay(st) && (en.toStore || /into stor/i.test(st.type || ""));
+              const cu = (data.customers || []).find(x => x.id === j.customerId);
+              const sj = cu ? getStorageJobs(cu).find(x => x.moveJobId === j.id) : null;
+              const rec = cu && sj ? (cu.storageInv || []).find(r => r && r.jobId === sj.id) : null;
+              return <div key={(j.id || "") + (st.id || i)}>
+                <CrewJobCard data={data} j={j} st={st} />
+                {intoStore && <div style={{ margin: "-4px 0 14px" }}>
+                  {sj ? <Btn variant={rec && !rec.draft ? "grey" : "amber"} style={{ width: "100%" }} onClick={() => setInv({ customerId: cu.id, jobId: sj.id, recId: rec ? rec.id : undefined })}>
+                      📦 {rec ? (rec.draft ? "Continue storage inventory" : "Storage inventory ✓ — view / edit") : "Start storage inventory"}
+                    </Btn>
+                    : <div style={{ fontSize: 12.5, color: "#9A5B00", background: "#FFF6E6", border: "1px solid #F2C77A", borderRadius: 10, padding: "8px 11px" }}>📦 Storage inventory — ring the office to set up the storage job first.</div>}
+                </div>}
+              </div>;
+            })}
       </div>
     </div>
   );
