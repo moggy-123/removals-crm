@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B308";
+const BUILD_NO = "B309";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3942,7 +3942,26 @@ function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
   }));
   // Storage moves get two plans: Into store and Out of store (a direct move has one plan)
   const twoPlans = !ownJob && (!!enquiry.toStore || days.some(isOutDay));
-  const addDay = (part) => setDays(d => [...d, { id: uid(), ...(part ? { part } : {}), type: ownJob || part === "out" ? "Out of store" : part === "in" ? "Into store" : "Move", date: "", staffCount: "", vehTypes: {}, crew: [], vehicleIds: [], notes: "" }]);
+  // Fixed dates on the enquiry go straight onto the plan's first day: contracts exchanged → the move
+  // date; a fixed date out of store → the out-of-store day. (A preferred date that isn't fixed is only a guide.)
+  const fixedIn = !ownJob && enquiry.exchanged && enquiry.preferredDate ? enquiry.preferredDate : "";
+  const fixedOut = (enquiry && enquiry.toStore && enquiry.storeMode === "Fixed date out" && enquiry.storeOutDate) ? enquiry.storeOutDate : "";
+  const fixedFor = (part, list) => (part === "out" || (ownJob && !part)) ? (list.some(isOutDay) || (ownJob && list.length) ? "" : fixedOut) : (list.some(x => !isOutDay(x)) ? "" : fixedIn);
+  const addDay = (part) => setDays(d => [...d, { id: uid(), ...(part ? { part } : {}), type: ownJob || part === "out" ? "Out of store" : part === "in" ? "Into store" : "Move", date: linkedJob && !ownJob ? "" : fixedFor(part, d), staffCount: "", vehTypes: {}, crew: [], vehicleIds: [], notes: "" }]);
+  useEffect(() => {
+    if (linkedJob && !ownJob) return;
+    setDays(d => {
+      let changed = false;
+      const firstIn = d.findIndex(x => !isOutDay(x)), firstOut = d.findIndex(isOutDay);
+      const nd = d.map((x, i) => {
+        if (x.date) return x;
+        const fx = ownJob ? (i === 0 ? fixedOut : "") : i === firstIn ? fixedIn : i === firstOut ? fixedOut : "";
+        if (!fx) return x;
+        changed = true; return { ...x, date: fx };
+      });
+      return changed ? nd : d;
+    });
+  }, []);
   const removeDay = (i) => setDays(d => d.filter((_, ix) => ix !== i));
   const setDay = (i, k, v) => setDays(d => d.map((x, ix) => ix === i ? { ...x, [k]: v } : x));
   const setVeh = (i, vt, n) => setDays(d => d.map((x, ix) => {
