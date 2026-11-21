@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B321";
+const BUILD_NO = "B322";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5604,7 +5604,7 @@ function EnquiryFileMaker({ data, e, customer, linkedJob, setView, quoteDone, ac
           {!linkedJob && <Btn variant="grey" style={sb} onClick={act.setFollowUp}>⏰ Call back</Btn>}
           {!["Won", "Lost", "Not quoted"].includes(e.status) && <Btn variant="grey" style={{ ...sb, color: "#B91C1C" }} onClick={act.markLost}>✕ Mark Lost</Btn>}
           {!["Won", "Lost", "Not quoted"].includes(e.status) && !linkedJob && !surveyed && <Btn variant="grey" style={{ ...sb, color: "#4B5563" }} onClick={() => markNotQuotedFlow(data, e)}>🚫 Didn't quote</Btn>}
-          {canDelete() && <Btn variant="danger" style={{ ...sb, marginLeft: "auto" }} onClick={act.del}><Icon name="trash" size={15} /> Delete</Btn>}
+          {canDelete() && <Btn variant="danger" style={{ ...sb, marginLeft: "auto" }} onClick={act.del}><Icon name="trash" size={15} /> Delete enquiry</Btn>}
         </>}
       </div>
     </div>
@@ -5921,7 +5921,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
           )}
           <div style={{ display: "grid", gridTemplateColumns: canDelete() ? "1fr 1fr" : "1fr", gap: 8, marginTop: 8 }}>
             <Btn style={eq} onClick={() => setShowEdit(true)}><Icon name="edit" size={15} /> Edit</Btn>
-            {canDelete() && <Btn variant="danger" style={eq} onClick={del}><Icon name="trash" size={15} /> Delete</Btn>}
+            {canDelete() && <Btn variant="danger" style={eq} onClick={del}><Icon name="trash" size={15} /> Delete enquiry</Btn>}
           </div>
         </>;
       })()}
