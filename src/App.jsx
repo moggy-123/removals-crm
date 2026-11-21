@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B316";
+const BUILD_NO = "B317";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3961,7 +3961,7 @@ function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
       let changed = false;
       const firstIn = d.findIndex(x => !isOutDay(x)), firstOut = d.findIndex(isOutDay);
       const nd = d.map((x, i) => {
-        if (x.date) return x;
+        if (x.date || x.dateCleared) return x;
         const fx = ownJob ? (i === 0 ? fixedOut : "") : i === firstIn ? fixedIn : i === firstOut ? fixedOut : "";
         if (!fx) return x;
         changed = true; return { ...x, date: fx };
@@ -4054,7 +4054,10 @@ function MovePlanModal({ data, enquiry, job: ownJob, onClose }) {
             <button onClick={() => removeDay(i)} style={{ background: "#FEE2E2", color: "#DC2626", border: "none", borderRadius: 8, width: 30, height: 30, cursor: "pointer" }}>×</button>
           </div>
           <Field label="Type"><DayTypeSelect value={d.type} onChange={v => setDay(i, "type", v)} /></Field>
-          <Field label="Date" hint="Optional"><Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} /></Field>
+          <Field label="Date" hint="Optional">
+            <Input type="date" value={d.date} onChange={v => setDay(i, "date", v)} />
+            {d.date && <button type="button" onClick={() => setDays(ds => ds.map((x, ix) => ix === i ? { ...x, date: "", dateCleared: true } : x))} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 700, fontSize: 12.5, cursor: "pointer", padding: "5px 0 0", fontFamily: "inherit" }}>✕ Remove date</button>}
+          </Field>
           {(() => { const c = heldDateChanges(data, linkedJob, days, true).find(x => x.i === i); return c ? <HeldDateNote c={{ ...c, kind: linkedJob.status === TEL_CONF ? "telephone confirmed" : "confirmed" }} /> : null; })()}
           {linkedJob && RES_STATUSES.includes(linkedJob.status) ? (
             <>
@@ -8651,7 +8654,10 @@ function JobDetailScreen({ data, j, setView }) {
                 Planned:{st.staffCount ? ` ${st.staffCount} staff` : ""}{st.staffCount && vehTypesSummary(st.vehTypes) ? " ·" : ""}{vehTypesSummary(st.vehTypes) ? ` ${vehTypesSummary(st.vehTypes)}` : ""}
               </div>
             ) : null}
-            <Field label="Date"><Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} /></Field>
+            <Field label="Date">
+              <Input type="date" value={st.date} onChange={v => setStage(idx, "date", v)} />
+              {st.date && <button type="button" onClick={() => setStage(idx, "date", "")} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 700, fontSize: 12.5, cursor: "pointer", padding: "5px 0 0", fontFamily: "inherit" }}>✕ Remove date</button>}
+            </Field>
             {(() => { const c = heldDateChanges(data, j, f.stages).find(x => x.i === idx); return c ? <HeldDateNote c={{ ...c, kind: j.status === TEL_CONF ? "telephone confirmed" : "confirmed" }} /> : null; })()}
             <Field label="Time"><Input type="time" value={st.time} onChange={v => setStage(idx, "time", v)} /></Field>
             {RES_STATUSES.includes(f.status) || confirming ? (
