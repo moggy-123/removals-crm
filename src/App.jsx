@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B320";
+const BUILD_NO = "B321";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -5798,19 +5798,18 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
       {customer && <CallFirstNote cust={customer} onCall={() => logComm(customer.id, { type: "Call" })} />}
       {customer && <OtherContacts customer={customer} onLog={en => logComm(customer.id, en)} />}
 
+      {/* at a glance: where from, where to, how big — everything else is in Edit and on the PDFs */}
       <Card>
-        <Row label="Move date" value={e.preferredDate ? fmtDate(e.preferredDate) + (e.dateFlexible ? " (flexible)" : "") : (e.moveMonth ? fmtMonth(e.moveMonth) + " (month)" : "TBC")} />
-        <Row label="From" value={[e.fromAddress1, e.fromAddress2, e.fromTown, e.fromPostcode].filter(Boolean).join(", ")} />
-        {(e.extraFrom || []).map((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); return a ? <Row key={"ef" + i} label={`+ Pickup ${i + 2}`} value={a + (s.note ? ` (${s.note})` : "")} /> : null; })}
-        <Row label="From property" value={[e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.fromFloor].filter(Boolean).join(" · ")} />
-        {e.fromAccess && <Row label="From access" value={e.fromAccess} />}
-        {storeSummary(e) && <Row label="Storage" value={storeSummary(e)} />}
-        <Row label="To" value={[e.toAddress1, e.toAddress2, e.toTown, e.toPostcode].filter(Boolean).join(", ")} />
-        {(e.extraTo || []).map((s, i) => { const a = [s.address1, s.town, s.postcode].filter(Boolean).join(", "); return a ? <Row key={"et" + i} label={`+ Delivery ${i + 2}`} value={a + (s.note ? ` (${s.note})` : "")} /> : null; })}
-        <Row label="To property" value={[e.toPropertyType, e.toFloor].filter(Boolean).join(" · ")} />
-        {e.toAccess && <Row label="To access" value={e.toAccess} />}
-        {e.referredBy && <Row label="Referred by" value={e.referredBy} />}
-        {e.notes && <Row label="Notes" value={e.notes} />}
+        {(() => {
+          const place = (t, pc) => [t, String(pc || "").trim().split(/\s+/)[0].toUpperCase()].filter(Boolean).join(" ");
+          const from = place(e.fromTown, e.fromPostcode) || e.fromAddress1 || "From TBC";
+          const to = place(e.toTown, e.toPostcode) || e.toAddress1 || (e.toStore ? "" : "To TBC");
+          const size = [e.fromPropertyType, e.fromBedrooms && `${e.fromBedrooms} bed`, e.volumeCuFt ? `${e.volumeCuFt} cu ft` : "", e.volumeCuFt > 0 && rec ? rec.vehicle + (rec.loads > 1 ? ` × ${rec.loads}` : "") : ""].filter(Boolean).join(" · ");
+          return <>
+            <div style={{ fontSize: 16.5, fontWeight: 800, color: "#10211E", lineHeight: 1.35 }}>{from}{e.toStore ? <> → 📦 {storeName(e)}{to ? <> → {to}</> : null}</> : <> → {to}</>}</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: TEAL_D, marginTop: 4 }}>{size || "Size TBC — not surveyed yet"}</div>
+          </>;
+        })()}
       </Card>
 
       {/* Survey */}
