@@ -1335,7 +1335,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B303";
+const BUILD_NO = "B304";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -3069,7 +3069,7 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
         {(f.preferredDate || f.moveMonth) && <button onClick={() => setF(p => ({ ...p, preferredDate: "", moveMonth: "" }))} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: "4px 0 0" }}>Remove move date</button>}
       </Field>
       <Field label="Or month of move" hint="If no exact date is known yet">
-        <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={f.moveMonth || ""} onChange={ev => set("moveMonth", ev.target.value)}>
+        <select style={{ ...inputStyle, appearance: "none", cursor: "pointer" }} value={f.moveMonth || ""} onChange={ev => { const v = ev.target.value; setF(p => ({ ...p, moveMonth: v, ...(v ? { exchanged: false } : {}) })); }}>
           <option value="">Select a month…</option>
           {Array.from({ length: 18 }, (_, i) => {
             const dt = new Date(new Date().getFullYear(), new Date().getMonth() + i, 1);
@@ -3078,6 +3078,21 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
           })}
         </select>
       </Field>
+      {/* exchanged only makes sense with an actual date; flexible with a date or a month */}
+      {f.preferredDate && !f.moveMonth && <Field label="Exchanged?">
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
+          <input type="checkbox" checked={f.exchanged} onChange={ev => setF(p => ({ ...p, exchanged: ev.target.checked, dateFlexible: ev.target.checked ? false : p.dateFlexible }))} style={{ width: 18, height: 18 }} /> Contracts exchanged — move date confirmed
+        </label>
+        {f.exchanged && !f.preferredDate && <div style={{ fontSize: 12, color: "#DC2626", marginTop: 6 }}>Set the confirmed move date above.</div>}
+      </Field>}
+      {!f.exchanged && (f.preferredDate || f.moveMonth) && (
+        <Field label="Dates flexible?">
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
+            <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
+          </label>
+        </Field>
+      )}
+
       <Field label="Survey date" hint="Leave blank until booked — shows as 'To call' on the dashboard">
         <Input type="date" value={f.surveyDate} onChange={v => set("surveyDate", v)} />
         {(f.surveyDate || f.surveyTime) && <button onClick={() => setF(p => ({ ...p, surveyDate: "", surveyTime: "" }))} style={{ background: "transparent", border: "none", color: "#DC2626", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: "4px 0 0" }}>Remove survey date</button>}
@@ -3087,20 +3102,6 @@ function EnquiryForm({ data, onClose, editEnquiry, initialCustomerId, reopen, he
         <Select value={f.surveyor} onChange={v => set("surveyor", v)} placeholder="Select surveyor…"
           options={Array.from(new Set([...(data.staff || []).filter(s => s.role === "Surveyor").map(s => s.name), f.surveyor].filter(Boolean)))} />
       </Field>
-      <Field label="Exchanged?">
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
-          <input type="checkbox" checked={f.exchanged} onChange={ev => setF(p => ({ ...p, exchanged: ev.target.checked, dateFlexible: ev.target.checked ? false : p.dateFlexible }))} style={{ width: 18, height: 18 }} /> Contracts exchanged — move date confirmed
-        </label>
-        {f.exchanged && !f.preferredDate && <div style={{ fontSize: 12, color: "#DC2626", marginTop: 6 }}>Set the confirmed move date above.</div>}
-      </Field>
-      {!f.exchanged && (
-        <Field label="Dates flexible?">
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#374151", cursor: "pointer" }}>
-            <input type="checkbox" checked={f.dateFlexible} onChange={ev => set("dateFlexible", ev.target.checked)} style={{ width: 18, height: 18 }} /> Flexible on dates
-          </label>
-        </Field>
-      )}
-
       <SectionTitle>Moving from</SectionTitle>
       {customerId && (f.fromAddress1 || f.fromTown || f.fromPostcode) && (
         <div style={{ fontSize: 12, color: TEAL_D, background: "#EAF4F2", borderRadius: 9, padding: "8px 11px", marginBottom: 10 }}>
