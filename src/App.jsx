@@ -1339,7 +1339,7 @@ function upsertLocal(data, table, record) {
 }
 
 // Build label — date/time and commit are stamped automatically by vite.config.js on each deploy
-const BUILD_NO = "B313";
+const BUILD_NO = "B315";
 const BUILD_LABEL = (() => {
   const t = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : null;
   const sha = typeof __BUILD_SHA__ !== "undefined" ? __BUILD_SHA__ : "";
@@ -6536,7 +6536,7 @@ function emailInvoice(inv, c) {
 }
 // A move invoice (not out of store) shows the 60% deposit that secures the booking and the balance after it
 const invDepositInfo = inv => {
-  if (!inv || inv.kind !== "move" || inv.part === "out") return null;
+  if (!inv || inv.kind !== "move") return null;
   const t = invTotals(inv);
   if (!(t.total > 0)) return null;
   const dep = r2(t.total * 0.6);
@@ -6560,7 +6560,7 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
   const setLine = (i, k, v) => setF(p => ({ ...p, lines: p.lines.map((l, ix) => ix === i ? { ...l, [k]: v } : l) }));
   // Quote extras for a move: MoveProtect (% of the removal net) and Late Key Waiver
   const job = f.kind === "move" ? (data.jobs || []).find(x => x.id === f.jobId) : null;
-  const enq = job ? (data.enquiries || []).find(x => x.id === job.enquiryId) : null;
+  const enq = job ? (data.enquiries || []).find(x => x.id === jobEnquiryId(data.jobs, job)) : null;
   const qx = (enq && enq.quoteExtra) || {};
   const mpPct = Number(qx.mpPct) || 10;
   const baseNet = r2((f.lines || []).filter(l => !l.extra).reduce((s2, l) => s2 + (Number(l.amount) || 0), 0));
@@ -6571,7 +6571,7 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
   const setLk = (choice, amtInc) => setF(p => {
     const rest = (p.lines || []).filter(l => l.extra !== "lk");
     const a = r2(Number(amtInc) || 0);
-    if (choice === "amt" && a > 0) return { ...p, keyWaiver: "amt", lines: [...rest, { desc: "Late Key Waiver", amount: r2(a / (1 + VAT_RATE)), extra: "lk" }] };
+    if (choice === "amt") return { ...p, keyWaiver: "amt", lines: [...rest, a > 0 ? { desc: "Late Key Waiver", amount: r2(a / (1 + VAT_RATE)), extra: "lk" } : { desc: "Late Key Waiver (included free)", amount: 0, extra: "lk" }] };
     return { ...p, keyWaiver: choice, lines: rest };
   });
   const hasEx = k => (f.lines || []).some(l => l.extra === k);
@@ -6613,11 +6613,10 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
       {f.kind === "move" && !ro && <div style={{ background: "#F7FAF9", border: "1px solid #E9EEED", borderRadius: 10, padding: "8px 12px", marginTop: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#6A7B77", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Customer took</div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}><input type="checkbox" checked={hasEx("mp")} onChange={e => toggleEx("mp", e.target.checked)} style={{ width: 18, height: 18 }} /> MoveProtect · {mpPct}% · {gbpPlain(r2(baseNet * mpPct / 100))}</label>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer", flexWrap: "wrap" }}>
-          <input type="checkbox" checked={lkChoice === "amt" && !!lkLine} onChange={e => setLk(e.target.checked ? "amt" : "", lkAmt)} style={{ width: 18, height: 18 }} /> Late Key Waiver
-          {lkLine || !lkVal ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#41514E" }}>· £<input value={lkAmt} inputMode="decimal" placeholder="amount" onClick={e => e.preventDefault()} onChange={e => { setLkAmt(e.target.value); setLk("amt", e.target.value); }} style={{ border: "1px solid #E3E9E8", borderRadius: 8, padding: "3px 6px", width: 70, fontSize: 14, fontFamily: "inherit" }} /> inc VAT</span>
-            : <span style={{ color: "#41514E" }}>· {gbpPlain(lkVal)} inc VAT</span>}
-        </label>
+        {/* keys matter where they're moving to: a direct move or out of store (not the into-store invoice) */}
+        {f.part !== "in" && !["HAS", "NA"].includes(String(qx.lateKey || "")) && <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer" }}>
+          <input type="checkbox" checked={!!lkLine} onChange={e => setLk(e.target.checked ? "amt" : "", lkVal)} style={{ width: 18, height: 18 }} /> Late Key Waiver · {lkVal ? `${gbpPlain(lkVal)} inc VAT` : "FREE"}
+        </label>}
         {credits.map(cr => <label key={cr.sjId} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "4px 0", cursor: "pointer", color: "#15803D" }}><input type="checkbox" checked={cr.on} onChange={e => toggleCredit(cr, e.target.checked)} style={{ width: 18, height: 18 }} /> Storage overpaid · credit {gbpPlain(cr.amount)} net</label>)}
         <div style={{ fontSize: 11.5, color: "#94A4A0" }}>From the quote · lines are net, VAT added below</div>
       </div>}
@@ -6639,6 +6638,16 @@ function InvoiceModal({ data, custId, invId, draft, onClose }) {
           <span style={{ display: "flex", gap: 8, alignItems: "center" }}><b>{gbpPlain(p.amount)}</b>{!ro && <button onClick={() => setF(q => ({ ...q, payments: q.payments.filter(x => x.id !== p.id) }))} style={{ border: "none", background: "none", color: "#DC2626", cursor: "pointer", fontSize: 15 }}>×</button>}</span>
         </div>)}
       </div>}
+      {!ro && !pay && t.balance > 0.004 && (() => {
+        // one tap: deposit taken, or paid in full (records the payment; a new invoice is created at the same time)
+        const dpi = invDepositInfo(f);
+        const take = (amount, method) => persist({ ...f, lines: (f.lines || []).filter(l => l.desc || Number(l.amount)).map(l => ({ ...l, amount: r2(l.amount) })), payments: [...(f.payments || []), { id: uid(), date: todayISO(), amount: r2(amount), method }] });
+        return <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          {dpi && !dpi.depPaid && <Btn variant="amber" style={{ flex: 1 }} disabled={busy} onClick={() => take(dpi.depLeft, "Deposit")}>💷 Deposit taken · {gbpPlain(dpi.depLeft)}</Btn>}
+          <Btn style={{ flex: 1 }} disabled={busy} onClick={() => take(t.balance, "Paid in full")}>✓ Paid in full · {gbpPlain(t.balance)}</Btn>
+        </div>;
+      })()}
+      {!ro && !pay && isNew && t.balance > 0.004 && <div style={{ fontSize: 11.5, color: "#94A4A0", margin: "-2px 0 8px" }}>Either button also creates the invoice.</div>}
       {!ro && !isNew && t.balance > 0.004 && (pay ? (
         <div style={{ background: "#ECFDF5", border: "1px solid #BBF7D0", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
           <div style={{ display: "flex", gap: 8 }}>
