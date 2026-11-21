@@ -5877,7 +5877,6 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
                 {(!ro || days.length) && <Btn size="sm" variant="grey" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {ro ? "View" : days.length ? "Edit" : "Add"}</Btn>}
                 {linkedJob && <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
-                {linkedJob && <Btn size="sm" variant="grey" onClick={() => setShowCrew(true)}>👷 Crew view</Btn>}
                 {days.length > 0 && <Btn size="sm" variant="grey" onClick={() => openPlanPdf(e, data, store ? "in" : null)}>📄 PDF</Btn>}
               </div>
             </div>
