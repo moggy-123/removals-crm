@@ -4584,7 +4584,8 @@ async function showPdf(src, name = "document.pdf") {
   resetZoomSoon();
 }
 
-async function buildSurveyPdf(e, c, data, audience = "customer") {
+// only = "in" / "out": just that plan (Into store or Out of store), for the PDF button on each plan card
+async function buildSurveyPdf(e, c, data, audience = "customer", only = null) {
   const forStaff = audience === "staff";
   const forOffice = audience === "office";
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
@@ -4605,7 +4606,7 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
   np();
   page.drawRectangle({ x: 0, y: H - 66, width: W, height: 66, color: teal });
   at("R&J Removals & Storage", M, H - 34, 16, bold, white);
-  at(forOffice ? "Survey & Move Plan — OFFICE COPY" : forStaff ? "Move Plan — STAFF COPY" : "Survey & Move Plan", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
+  at(only === "in" ? "Into Store Plan — STAFF COPY" : only === "out" ? "Out of Store Plan — STAFF COPY" : forOffice ? "Survey & Move Plan — OFFICE COPY" : forStaff ? "Move Plan — STAFF COPY" : "Survey & Move Plan", M, H - 51, 11, font, rgb(0.88, 0.96, 0.94));
   const ref = c?.ref ? `Ref ${c.ref}` : "";
   if (ref) { const w = bold.widthOfTextAtSize(ref, 12); at(ref, W - M - w, H - 40, 12, bold, white); }
   y = H - 88;
@@ -4645,7 +4646,8 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
   const twoPlans = !!e.toStore || stages.some(isOutDay);
   const vName = id => { const v = (data.vehicles || []).find(x => x.id === id); return v ? (v.reg ? `${v.name} (${v.reg})` : v.name) : ""; };
   // a direct move has one plan; a storage move has two, each its own section
-  const planGroups = twoPlans ? [["Into store plan", stages.filter(x => !isOutDay(x))], ["Out of store plan", stages.filter(isOutDay)]] : [["Direct move plan", stages]];
+  const planGroups = (twoPlans ? [["Into store plan", stages.filter(x => !isOutDay(x))], ["Out of store plan", stages.filter(isOutDay)]] : [["Direct move plan", stages]])
+    .filter(([title]) => !only || (only === "in" ? title === "Into store plan" : title === "Out of store plan"));
   planGroups.forEach(([title, grp]) => {
   heading(title);
   if (!grp.length) { at("To be confirmed.", M, y, 9.5, font, navy); y -= 16; }
@@ -4713,6 +4715,14 @@ async function buildSurveyPdf(e, c, data, audience = "customer") {
   return { bytes: out, ref: c?.ref ? String(c.ref) : "" };
 }
 
+// PDF of one plan (staff copy: crew and vehicles shown), opened from the plan's own card on the enquiry
+async function openPlanPdf(e, data, only) {
+  try {
+    const c = (data.customers || []).find(x => x.id === e.customerId) || null;
+    const { bytes, ref } = await buildSurveyPdf(e, c, data, "staff", only);
+    showPdf(new Blob([bytes], { type: "application/pdf" }), `${only === "out" ? "OutOfStore-Plan" : only === "in" ? "IntoStore-Plan" : "Move-Plan"}-${ref || "RJ"}.pdf`);
+  } catch (ex) { alert("Could not build the PDF: " + ((ex && ex.message) || ex)); }
+}
 function SurveyPdfView({ data, id, setView }) {
   const e = (data.enquiries || []).find(x => x.id === id);
   const c = e ? (data.customers || []).find(x => x.id === e.customerId) : null;
@@ -5301,7 +5311,10 @@ function OutOfStoreCard({ data, e, parent, onEditPlan }) {
             <PlanDayLines data={data} days={outDays} />
             {!outDays.length && <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 3 }}>Add the days now, or later when the customer has a date.</div>}
           </div>
-          {(!isReadOnly() || outDays.length) && <Btn size="sm" variant="grey" onClick={onEditPlan}><Icon name="calendar" size={14} /> {isReadOnly() ? "View" : outDays.length ? "Edit" : "Add"}</Btn>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
+            {(!isReadOnly() || outDays.length) && <Btn size="sm" variant="grey" onClick={onEditPlan}><Icon name="calendar" size={14} /> {isReadOnly() ? "View" : outDays.length ? "Edit" : "Add"}</Btn>}
+            {outDays.length > 0 && <Btn size="sm" variant="grey" onClick={() => openPlanPdf(e, data, "out")}>📄 PDF</Btn>}
+          </div>
         </div>
         <div style={{ fontSize: 12, color: "#94A4A0", marginTop: 8 }}>Booked on its own once the into-store move is booked.</div>
       </Card>
@@ -5374,6 +5387,7 @@ function OutOfStoreCard({ data, e, parent, onEditPlan }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
             <Btn size="sm" variant="grey" onClick={() => setOpen("plan")}><Icon name="calendar" size={14} /> {ro ? "View" : "Edit"}</Btn>
             {oj.status !== NOT_BOOKED && <Btn size="sm" onClick={() => setOpen("manage")}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
+            {st.length > 0 && <Btn size="sm" variant="grey" onClick={() => openPlanPdf(e, data, "out")}>📄 PDF</Btn>}
           </div>
         </div>
         {canBook && <Btn variant="amber" style={{ width: "100%", marginTop: 10 }} onClick={() => setOpen("book")}><Icon name="check" size={16} /> Book out of store</Btn>}
@@ -5864,6 +5878,7 @@ function EnquiryDetail({ data, id, setView, fm = false }) {
                 {(!ro || days.length) && <Btn size="sm" variant="grey" onClick={() => setShowPlan(true)}><Icon name="calendar" size={14} /> {ro ? "View" : days.length ? "Edit" : "Add"}</Btn>}
                 {linkedJob && <Btn size="sm" onClick={() => setShowMove(true)}><Icon name="check" size={14} /> {ro ? "View" : "Manage"}</Btn>}
                 {linkedJob && <Btn size="sm" variant="grey" onClick={() => setShowCrew(true)}>👷 Crew view</Btn>}
+                {days.length > 0 && <Btn size="sm" variant="grey" onClick={() => openPlanPdf(e, data, store ? "in" : null)}>📄 PDF</Btn>}
               </div>
             </div>
             {canBookNew && <Btn variant="amber" style={{ width: "100%", marginTop: 10 }} onClick={() => setBookOpen("choose")}><Icon name="check" size={16} /> {store ? "Book into store" : "Book move"}</Btn>}
